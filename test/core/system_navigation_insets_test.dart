@@ -94,6 +94,7 @@ void main() {
         hostKeyVerifier: verifier,
         promptCoordinator: promptCoordinator,
         sftpRepository: NoNetworkSftpRepository(),
+        sftpBookmarksRepository: InMemorySftpBookmarks(),
         backupService: AppBackupService(
           hostsController: hostsController,
           themeController: themeController,
@@ -141,6 +142,7 @@ void main() {
         hostKeyVerifier: verifier,
         promptCoordinator: promptCoordinator,
         sftpRepository: NoNetworkSftpRepository(),
+        sftpBookmarksRepository: InMemorySftpBookmarks(),
         backupService: AppBackupService(
           hostsController: hostsController,
           themeController: themeController,
