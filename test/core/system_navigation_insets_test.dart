@@ -225,6 +225,7 @@ void main() {
         home: TerminalPage(
           workspace: workspace,
           themeController: themeController,
+          sftpRepository: NoNetworkSftpRepository(),
         ),
       ),
     );
