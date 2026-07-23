@@ -80,6 +80,7 @@ enum TerminalKeyboardAction {
   herdrMenu,
   snippets,
   compose,
+  touchMode,
 }
 
 enum TerminalKeyboardItemKind { builtIn, customText, customControl }
@@ -172,6 +173,7 @@ const defaultTerminalKeyboardActions = [
   TerminalKeyboardAction.tmuxMenu,
   TerminalKeyboardAction.herdrMenu,
   TerminalKeyboardAction.snippets,
+  TerminalKeyboardAction.touchMode,
   TerminalKeyboardAction.fullscreen,
 ];
 
@@ -265,6 +267,7 @@ const defaultTerminalKeyboardItems = [
   TerminalKeyboardItem.builtIn(TerminalKeyboardAction.tmuxMenu),
   TerminalKeyboardItem.builtIn(TerminalKeyboardAction.herdrMenu),
   TerminalKeyboardItem.builtIn(TerminalKeyboardAction.snippets),
+  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.touchMode),
   TerminalKeyboardItem.builtIn(TerminalKeyboardAction.fullscreen),
 ];
 
@@ -387,5 +390,6 @@ extension TerminalKeyboardActionDetails on TerminalKeyboardAction {
     TerminalKeyboardAction.herdrMenu => 'Herdr',
     TerminalKeyboardAction.snippets => 'Snip',
     TerminalKeyboardAction.compose => 'Compose',
+    TerminalKeyboardAction.touchMode => 'Touch',
   };
 }

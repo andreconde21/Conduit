@@ -1079,6 +1079,7 @@ IconData _keyboardActionIcon(TerminalKeyboardAction action) {
     TerminalKeyboardAction.herdrMenu => Icons.hub_rounded,
     TerminalKeyboardAction.snippets => Icons.snippet_folder_rounded,
     TerminalKeyboardAction.compose => Icons.edit_note_rounded,
+    TerminalKeyboardAction.touchMode => Icons.touch_app_rounded,
   };
 }
 
