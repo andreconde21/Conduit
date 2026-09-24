@@ -20,13 +20,24 @@ import '../support/test_doubles.dart';
 
 void main() {
   group('system navigation insets', () {
-    test('keeps Android gesture navigation edge-to-edge', () {
+    test('protects Android gesture navigation handle', () {
       expect(
         shouldApplyBottomSafeAreaFor(
           platform: TargetPlatform.android,
           systemGestureInsets: const EdgeInsets.only(bottom: 24),
         ),
-        isFalse,
+        isTrue,
+      );
+    });
+
+    test('protects Samsung three-button navigation with edge insets', () {
+      // One UI reports left/right gesture insets even in three-button mode.
+      expect(
+        shouldApplyBottomSafeAreaFor(
+          platform: TargetPlatform.android,
+          systemGestureInsets: const EdgeInsets.only(left: 30, right: 30),
+        ),
+        isTrue,
       );
     });
 

@@ -21,28 +21,29 @@ bool usesAndroidGestureNavigationFor({
 }
 
 bool shouldApplyBottomSafeArea(BuildContext context) {
-  return !usesAndroidGestureNavigation(context);
+  return shouldApplyBottomSafeAreaFor(
+    platform: defaultTargetPlatform,
+    systemGestureInsets: MediaQuery.systemGestureInsetsOf(context),
+  );
 }
 
+// Always keep content clear of the system navigation bar. Guessing the
+// navigation mode from gesture insets is unreliable: Samsung One UI (and other
+// OEM skins) report non-zero edge gesture insets while three-button navigation
+// is active, which used to slide the key row underneath the buttons. With
+// gesture navigation the inset is just the handle, so the cost is a few pixels.
 bool shouldApplyBottomSafeAreaFor({
   required TargetPlatform platform,
   required EdgeInsets systemGestureInsets,
 }) {
-  return !usesAndroidGestureNavigationFor(
-    platform: platform,
-    systemGestureInsets: systemGestureInsets,
-  );
+  return true;
 }
 
 bool shouldPaintAndroidThreeButtonNavigationBackgroundFor({
   required TargetPlatform platform,
   required EdgeInsets systemGestureInsets,
 }) {
-  return platform == TargetPlatform.android &&
-      !usesAndroidGestureNavigationFor(
-        platform: platform,
-        systemGestureInsets: systemGestureInsets,
-      );
+  return platform == TargetPlatform.android;
 }
 
 class AndroidThreeButtonNavigationBackground extends StatelessWidget {
