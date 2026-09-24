@@ -295,6 +295,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
       themeController: widget.themeController,
       sftpRepository: widget.sftpRepository,
       agentAttention: widget.agentAttention,
+      connectFlow: widget.connectFlow,
     );
   }
 
@@ -326,7 +327,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
       listenable: widget.themeController,
       builder: (context, _) {
         return MaterialApp(
-          title: 'Conduit',
+          title: 'Conductore',
           debugShowCheckedModeBanner: false,
           theme: AppTheme.build(
             brightness: Brightness.light,

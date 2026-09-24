@@ -316,7 +316,7 @@ class _AddHardwareKeySheetState extends State<_AddHardwareKeySheet> {
               decoration: const InputDecoration(
                 labelText: 'Label',
                 helperText:
-                    'Shown when Conduit asks for this key, e.g. "5C work" '
+                    'Shown when Conductore asks for this key, e.g. "5C work" '
                     'or "NFC backup".',
                 helperMaxLines: 2,
                 prefixIcon: Icon(Icons.label_outline_rounded),

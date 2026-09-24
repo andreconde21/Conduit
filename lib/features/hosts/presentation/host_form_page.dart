@@ -74,7 +74,7 @@ class _HostFormPageState extends State<HostFormPage> {
   bool _externalAuthOfferKey = true;
   bool _forwardAgent = false;
   bool _startTmuxOnConnect = false;
-  TmuxPrefixKey _tmuxPrefixKey = defaultTmuxPrefixKey;
+  MultiplexerPrefixKey _tmuxPrefixKey = defaultTmuxPrefixKey;
   List<String> _tags = const [];
   List<HardwareKeyEntry> _hardwareKeys = const [];
   List<TerminalSnippet> _snippets = const [];
@@ -638,7 +638,7 @@ class _HostFormPageState extends State<HostFormPage> {
   Future<({String comment, String passphrase})?> _promptGenerateOptions() {
     final username = _usernameController.text.trim();
     final commentController = TextEditingController(
-      text: username.isEmpty ? 'conduit' : '$username@conduit',
+      text: username.isEmpty ? 'conductore' : '$username@conductore',
     );
     final passphraseController = TextEditingController();
     return showDialog<({String comment, String passphrase})>(

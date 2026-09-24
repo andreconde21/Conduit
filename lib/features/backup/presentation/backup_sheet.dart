@@ -181,7 +181,7 @@ class _BackupSheetState extends State<_BackupSheet> {
   String _backupFileName({required bool includeSecrets}) {
     final date = DateTime.now().toUtc().toIso8601String().split('T').first;
     final mode = includeSecrets ? 'encrypted' : 'public';
-    return 'conduit-$mode-$date.${AppBackupService.fileExtension}';
+    return 'conductore-$mode-$date.${AppBackupService.fileExtension}';
   }
 
   void _showMessage(String message) {

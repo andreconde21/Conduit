@@ -210,7 +210,7 @@ class BackgroundConnectionService : Service() {
             "Active sessions",
             NotificationManager.IMPORTANCE_LOW,
         ).apply {
-            description = "Keeps active sessions running while Conduit is in the background."
+            description = "Keeps active sessions running while Conductore is in the background."
             setShowBadge(false)
         }
         manager.createNotificationChannel(channel)
@@ -236,7 +236,7 @@ class BackgroundConnectionService : Service() {
 
         return builder
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("Conduit")
+            .setContentTitle("Conductore")
             .setContentText("$sessionCount active $sessionLabel")
             .setContentIntent(pendingIntent)
             .setOngoing(true)

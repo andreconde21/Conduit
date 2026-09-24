@@ -178,7 +178,7 @@ void main() {
 
     testWidgets('tmux target follows the host prefix key', (tester) async {
       final harness = _Harness(
-        host: buildHost('a').copyWith(tmuxPrefixKey: TmuxPrefixKey.controlA),
+        host: buildHost('a').copyWith(tmuxPrefixKey: MultiplexerPrefixKey.controlA),
       );
       addTearDown(harness.session.dispose);
       await tester.pumpWidget(harness.build());
@@ -188,9 +188,13 @@ void main() {
       expect(harness.session.log, ['ctrl:keyA', 'text:n']);
     });
 
-    testWidgets('Herdr target always uses ctrl+b', (tester) async {
+    testWidgets('Herdr target follows the host prefix key too', (
+      tester,
+    ) async {
       final harness = _Harness(
-        host: buildHost('a').copyWith(tmuxPrefixKey: TmuxPrefixKey.controlA),
+        host: buildHost(
+          'a',
+        ).copyWith(tmuxPrefixKey: MultiplexerPrefixKey.controlSpace),
         preferences: const TerminalGesturePreferences(
           windowSwitchTarget: TerminalWindowSwitchTarget.herdr,
         ),
@@ -200,7 +204,7 @@ void main() {
 
       await _swipe(tester, _center, const Offset(-120, 0));
 
-      expect(harness.session.log, ['ctrl:keyB', 'text:n']);
+      expect(harness.session.log, ['ctrl:space', 'text:n']);
     });
 
     testWidgets('a short swipe does nothing', (tester) async {

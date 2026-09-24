@@ -5,6 +5,7 @@ import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
+import 'package:conduit/features/terminal/presentation/herdr_shortcuts.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit_vt/conduit_vt.dart';
 import 'package:flutter/gestures.dart';
@@ -45,7 +46,9 @@ class TerminalKeyboardBar extends StatelessWidget {
   final VoidCallback? onToggleCompose;
   final VoidCallback onEnterTmuxScrollMode;
   final VoidCallback onExitTmuxScrollMode;
-  final TmuxPrefixKey tmuxPrefixKey;
+  /// The host's multiplexer prefix, sent by the Tmux key and before every
+  /// Tmux+ and Herdr binding.
+  final MultiplexerPrefixKey tmuxPrefixKey;
   final bool tmuxScrollMode;
 
   /// The app-wide "Send mouse taps" preference, mirrored from Appearance.
@@ -106,6 +109,10 @@ class TerminalKeyboardBar extends StatelessWidget {
       },
     );
   }
+
+  /// The key-row key for [item], so the floating pill can host the Tmux,
+  /// Touch and custom keys with their menus and behaviour unchanged.
+  Widget buildKey(TerminalKeyboardItem item) => _buildItem(item);
 
   Widget _buildItem(TerminalKeyboardItem item) {
     final action = item.action;
@@ -238,14 +245,14 @@ class TerminalKeyboardBar extends StatelessWidget {
             ),
         ],
       ),
-      TerminalKeyboardAction.herdrMenu => _MenuKey<_HerdrAction>(
+      TerminalKeyboardAction.herdrMenu => _MenuKey<HerdrShortcut>(
         label: 'Herdr',
         tooltip: 'Herdr actions',
         palette: palette,
         brightness: brightness,
         onSelected: _triggerHerdrAction,
         items: [
-          for (final action in _HerdrAction.values)
+          for (final action in HerdrShortcut.values)
             PopupMenuItem(
               value: action,
               child: Row(
@@ -419,9 +426,8 @@ class TerminalKeyboardBar extends StatelessWidget {
     _focusTerminal();
   }
 
-  void _triggerHerdrAction(_HerdrAction action) {
-    // Herdr's default prefix is ctrl+b regardless of the host's tmux prefix.
-    controller.sendControl(TerminalKey.keyB);
+  void _triggerHerdrAction(HerdrShortcut action) {
+    controller.sendPrefix(tmuxPrefixKey);
     controller.sendText(action.text);
     if (action.entersScrollMode) {
       onEnterTmuxScrollMode();
@@ -474,10 +480,7 @@ class TerminalKeyboardBar extends StatelessWidget {
   }
 
   void _sendTmuxPrefix() {
-    controller.sendControl(switch (tmuxPrefixKey) {
-      TmuxPrefixKey.controlB => TerminalKey.keyB,
-      TmuxPrefixKey.controlA => TerminalKey.keyA,
-    });
+    controller.sendPrefix(tmuxPrefixKey);
     _focusTerminal();
   }
 
@@ -616,46 +619,6 @@ enum _TmuxAction {
   final IconData icon;
   final String? text;
   final TerminalKey? key;
-  final bool entersScrollMode;
-}
-
-/// Herdr's documented default bindings (prefix ctrl+b), from
-/// https://herdr.dev/docs/keyboard/ — uppercase text means shift+key.
-enum _HerdrAction {
-  newTab('New tab', Icons.add_box_rounded, 'c'),
-  previousTab('Previous tab', Icons.skip_previous_rounded, 'p'),
-  nextTab('Next tab', Icons.skip_next_rounded, 'n'),
-  renameTab('Rename tab', Icons.drive_file_rename_outline_rounded, 'T'),
-  closeTab('Close tab', Icons.disabled_by_default_rounded, 'X'),
-  splitRight('Split right', Icons.vertical_split_rounded, 'v'),
-  splitDown('Split down', Icons.splitscreen_rounded, '-'),
-  paneLeft('Pane left', Icons.keyboard_arrow_left_rounded, 'h'),
-  paneDown('Pane down', Icons.keyboard_arrow_down_rounded, 'j'),
-  paneUp('Pane up', Icons.keyboard_arrow_up_rounded, 'k'),
-  paneRight('Pane right', Icons.keyboard_arrow_right_rounded, 'l'),
-  zoomPane('Zoom pane', Icons.zoom_out_map_rounded, 'z'),
-  resizeMode('Resize mode', Icons.open_in_full_rounded, 'r'),
-  closePane('Close pane', Icons.close_fullscreen_rounded, 'x'),
-  copyMode('Scrollback', Icons.swap_vert_rounded, '[', entersScrollMode: true),
-  newWorkspace('New workspace', Icons.create_new_folder_rounded, 'N'),
-  workspacePicker('Workspaces', Icons.view_list_rounded, 'w'),
-  renameWorkspace('Rename workspace', Icons.edit_note_rounded, 'W'),
-  closeWorkspace('Close workspace', Icons.folder_delete_rounded, 'D'),
-  gotoPicker('Goto picker', Icons.explore_rounded, 'g'),
-  toggleSidebar('Toggle sidebar', Icons.view_sidebar_rounded, 'b'),
-  help('Help', Icons.help_outline_rounded, '?'),
-  detach('Detach', Icons.logout_rounded, 'q');
-
-  const _HerdrAction(
-    this.label,
-    this.icon,
-    this.text, {
-    this.entersScrollMode = false,
-  });
-
-  final String label;
-  final IconData icon;
-  final String text;
   final bool entersScrollMode;
 }
 

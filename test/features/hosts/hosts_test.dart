@@ -157,7 +157,7 @@ void main() {
         moshPorts: '60000:61000',
         externalAuthOfferKey: false,
         startTmuxOnConnect: true,
-        tmuxPrefixKey: TmuxPrefixKey.controlA,
+        tmuxPrefixKey: MultiplexerPrefixKey.controlA,
         tmuxSessionName: 'work',
         tmuxStartDirectory: '~/projects',
         snippets: const [
@@ -250,7 +250,7 @@ void main() {
       });
 
       expect(decoded.startTmuxOnConnect, isFalse);
-      expect(decoded.tmuxPrefixKey, TmuxPrefixKey.controlB);
+      expect(decoded.tmuxPrefixKey, MultiplexerPrefixKey.controlB);
       expect(decoded.tmuxSessionName, defaultTmuxSessionName);
       expect(decoded.tmuxStartDirectory, isEmpty);
       expect(decoded.externalAuthOfferKey, isTrue);
