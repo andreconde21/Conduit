@@ -1,0 +1,15 @@
+{
+  "name": "conductore-host",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Host companion daemon and Claude Code hook client for Conductore Mobile",
+  "license": "MIT",
+  "bin": {
+    "conductore-hostd": "bin/conductore-hostd",
+    "conductore-hook": "bin/conductore-hook"
+  },
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}
