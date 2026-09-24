@@ -622,7 +622,7 @@ class _HostsPageState extends State<HostsPage> {
             'then check again.';
       }
       final output = [
-        result.stdout.trim(),
+        ConductoreHostAttentionProvider.formatDoctor(result.stdout),
         result.stderr.trim(),
       ].where((part) => part.isNotEmpty).join('\n');
       final status = result.exitCode == null || result.exitCode == 0

@@ -303,6 +303,18 @@ class _AgentTile extends StatelessWidget {
                 ),
               ),
             ),
+            if (agent.lastMessage case final message?)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                child: Text(
+                  message,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                  maxLines: 4,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
             for (final request in pending)
               _PendingRequestCard(
                 request: request,

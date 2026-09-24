@@ -1,8 +1,10 @@
 /// Posts local "agent needs attention" notifications.
 ///
-/// Content passed here must be lock-screen safe: agent labels, host names,
-/// tool names and the one-line summary of a pending permission request —
-/// never prompt contents, terminal output, or full tool inputs.
+/// Titles must be lock-screen safe (agent labels, host names, tool
+/// names). Bodies may carry the agent's last message and the one-line
+/// summary of a pending permission request, so the platform shows only the
+/// title on a secure lock screen; never pass terminal output or full tool
+/// inputs.
 abstract class AgentAttentionNotifier {
   /// Shows (or replaces, for the same [id]) one notification.
   Future<void> show({

@@ -106,6 +106,7 @@ class AgentInfo {
     this.stateChangedAt,
     this.stateSequence,
     this.pendingRequests = const [],
+    this.lastMessage,
   });
 
   /// Stable identity across polls (provider-specific; e.g. pane id or a
@@ -134,6 +135,31 @@ class AgentInfo {
   /// providers that cannot relay them.
   final List<PendingPermissionRequest> pendingRequests;
 
+  /// The agent's latest message, when the provider reports one (the last
+  /// assistant text, a notification, or a question it asked). Capped by
+  /// the provider; shown in the dashboard and notification bodies.
+  final String? lastMessage;
+
+  /// A copy with [pendingRequests] and optionally [state] replaced.
+  AgentInfo copyWith({
+    AgentAttentionState? state,
+    List<PendingPermissionRequest>? pendingRequests,
+  }) {
+    return AgentInfo(
+      id: id,
+      name: name,
+      state: state ?? this.state,
+      kind: kind,
+      workspace: workspace,
+      tab: tab,
+      pane: pane,
+      stateChangedAt: stateChangedAt,
+      stateSequence: stateSequence,
+      pendingRequests: pendingRequests ?? this.pendingRequests,
+      lastMessage: lastMessage,
+    );
+  }
+
   @override
   bool operator ==(Object other) {
     return other is AgentInfo &&
@@ -146,6 +172,7 @@ class AgentInfo {
         other.pane == pane &&
         other.stateChangedAt == stateChangedAt &&
         other.stateSequence == stateSequence &&
+        other.lastMessage == lastMessage &&
         _sameRequests(other.pendingRequests, pendingRequests);
   }
 
@@ -175,6 +202,7 @@ class AgentInfo {
     pane,
     stateChangedAt,
     stateSequence,
+    lastMessage,
     Object.hashAll(pendingRequests),
   );
 }
@@ -188,4 +216,35 @@ class AgentAttentionSnapshot {
   /// Monotonic snapshot sequence, when the provider numbers its snapshots
   /// (used to resume a change stream and to drop stale results).
   final int? sequence;
+}
+
+/// One change reported by a provider's change stream.
+class AgentChange {
+  const AgentChange({
+    required this.sequence,
+    required this.agentId,
+    required this.agent,
+  });
+
+  /// The provider's sequence number for this change.
+  final int sequence;
+
+  final String agentId;
+
+  /// The agent's complete new record, or null when it was removed.
+  final AgentInfo? agent;
+}
+
+/// What one long-poll returned: either a full [snapshot] (the provider
+/// could not serve the changes since the requested sequence) followed by
+/// any [changes], or just [changes] to apply on top of the known state.
+class AgentChangeBatch {
+  const AgentChangeBatch({this.snapshot, this.changes = const []});
+
+  final AgentAttentionSnapshot? snapshot;
+
+  /// In sequence order.
+  final List<AgentChange> changes;
+
+  bool get isEmpty => snapshot == null && changes.isEmpty;
 }

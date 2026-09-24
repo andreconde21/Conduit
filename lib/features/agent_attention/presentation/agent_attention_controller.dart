@@ -1,6 +1,7 @@
 // ignore_for_file: prefer_initializing_formals
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
@@ -65,7 +66,11 @@ class AgentHostStatus {
 /// blocked again between two polls still notifies. Pending permission
 /// requests are notified once per request id (including on the first
 /// snapshot: an unanswered prompt is actionable whenever it is seen) and
-/// the notification is cancelled when the request disappears.
+/// the notification is cancelled when the request disappears. The set of
+/// notified requests outlives a reconnect, so reconnecting neither
+/// re-alerts nor leaves an answered request's notification behind. A
+/// request that timed out on the host (the agent still waits, now in the
+/// terminal) turns into a plain "needs input" notification.
 class AgentAttentionController extends ChangeNotifier {
   AgentAttentionController({
     required TerminalWorkspaceController workspace,
@@ -103,6 +108,10 @@ class AgentAttentionController extends ChangeNotifier {
 
   final Map<String, _HostMonitor> _monitors = {};
   final Set<String> _deciding = {};
+
+  /// Per host: request ids that currently have a permission notification.
+  /// Kept across reconnects (monitors come and go with the session).
+  final Map<String, Set<String>> _notifiedRequests = {};
   bool _appActive = true;
   bool _foreground = true;
   bool _disposed = false;
@@ -252,7 +261,17 @@ class AgentAttentionController extends ChangeNotifier {
       throw const AppFailure('This machine is not being monitored.');
     }
     final provider = monitor.provider ?? await _resolveProvider(monitor);
-    await _sendDecision(monitor.runner, provider, request, verdict);
+    try {
+      await _sendDecision(monitor.runner, provider, request, verdict);
+    } on _RequestGone {
+      // Answered elsewhere or timed out: the prompt is in the terminal now.
+      if (!_disposed) {
+        _removeRequest(monitor, request.id, stillWaiting: true);
+        notifyListeners();
+        unawaited(_poll(monitor));
+      }
+      rethrow;
+    }
     if (_disposed) {
       return;
     }
@@ -303,7 +322,13 @@ class AgentAttentionController extends ChangeNotifier {
     try {
       if (monitor != null) {
         final provider = monitor.provider ?? await _resolveProvider(monitor);
-        await _sendDecision(monitor.runner, provider, request, verdict);
+        try {
+          await _sendDecision(monitor.runner, provider, request, verdict);
+        } on _RequestGone {
+          _removeRequest(monitor, action.requestId, stillWaiting: true);
+          unawaited(_poll(monitor));
+          rethrow;
+        }
         _removeRequest(monitor, action.requestId);
         unawaited(_poll(monitor));
       } else {
@@ -321,6 +346,7 @@ class AgentAttentionController extends ChangeNotifier {
         }
       }
     } catch (error) {
+      _notifiedRequests[host.id]?.remove(action.requestId);
       await failed(error.toString());
       return;
     } finally {
@@ -328,6 +354,7 @@ class AgentAttentionController extends ChangeNotifier {
         notifyListeners();
       }
     }
+    _notifiedRequests[host.id]?.remove(action.requestId);
     await notifier?.cancel(id: notificationId);
   }
 
@@ -355,41 +382,51 @@ class AgentAttentionController extends ChangeNotifier {
     try {
       final result = await runner.run(command, timeout: _decisionTimeout);
       if (result.exitCode != null && result.exitCode != 0) {
-        throw AppFailure(
-          'The decision was not accepted.',
-          _firstLine(
-            result.stdout.trim().isNotEmpty ? result.stdout : result.stderr,
-          ),
+        final reason = _errorText(
+          result.stdout.trim().isNotEmpty ? result.stdout : result.stderr,
         );
+        if (reason.startsWith('unknown request') ||
+            reason.startsWith('request expired')) {
+          throw _RequestGone(reason);
+        }
+        throw AppFailure('The decision was not accepted.', reason);
       }
     } finally {
       _deciding.remove(request.id);
     }
   }
 
-  static String _firstLine(String text) {
-    final line = text.trim().split('\n').first;
+  /// The `error` of a `{"error": "..."}` reply, else the first line.
+  static String _errorText(String text) {
+    final trimmed = text.trim();
+    try {
+      final decoded = jsonDecode(trimmed);
+      if (decoded is Map && decoded['error'] is String) {
+        return decoded['error'] as String;
+      }
+    } catch (_) {
+      // Not JSON.
+    }
+    final line = trimmed.split('\n').first;
     return line.length > 200 ? line.substring(0, 200) : line;
   }
 
   /// Drops [requestId] from the host's dashboard state and cancels its
   /// notification (the host confirmed the decision; the next poll agrees).
-  void _removeRequest(_HostMonitor monitor, String requestId) {
+  /// With [stillWaiting] the request is gone but the agent still waits for
+  /// an answer in the terminal, so it stays "needs input".
+  void _removeRequest(
+    _HostMonitor monitor,
+    String requestId, {
+    bool stillWaiting = false,
+  }) {
     final agents = [
       for (final agent in monitor.status.agents)
         if (agent.pendingRequests.any((request) => request.id == requestId))
-          AgentInfo(
-            id: agent.id,
-            name: agent.name,
-            state: agent.pendingRequests.length > 1
+          agent.copyWith(
+            state: agent.pendingRequests.length > 1 || stillWaiting
                 ? agent.state
                 : AgentAttentionState.working,
-            kind: agent.kind,
-            workspace: agent.workspace,
-            tab: agent.tab,
-            pane: agent.pane,
-            stateChangedAt: agent.stateChangedAt,
-            stateSequence: agent.stateSequence,
             pendingRequests: [
               for (final request in agent.pendingRequests)
                 if (request.id != requestId) request,
@@ -402,7 +439,7 @@ class AgentAttentionController extends ChangeNotifier {
       agents: agents,
       updatedAt: monitor.status.updatedAt,
     );
-    if (monitor.notifiedRequests.remove(requestId)) {
+    if (_notifiedFor(monitor.host.id).remove(requestId)) {
       unawaited(
         _notifier?.cancel(
               id: permissionNotificationId(monitor.host.id, requestId),
@@ -411,6 +448,9 @@ class AgentAttentionController extends ChangeNotifier {
       );
     }
   }
+
+  Set<String> _notifiedFor(String hostId) =>
+      _notifiedRequests.putIfAbsent(hostId, () => <String>{});
 
   void _syncMonitors() {
     if (_disposed) {
@@ -546,13 +586,26 @@ class AgentAttentionController extends ChangeNotifier {
       return;
     }
     monitor.fetching = true;
+    final watchGeneration = monitor.watchGeneration;
     try {
       final provider = await _resolveProvider(monitor);
       final snapshot = await provider.fetchAgents(monitor.runner);
       if (_disposed || !_monitors.containsKey(monitor.host.id)) {
         return;
       }
-      await _applySnapshot(monitor, snapshot);
+      final sequence = snapshot.sequence;
+      final lastSequence = monitor.lastSequence;
+      final overtaken =
+          monitor.watchGeneration != watchGeneration &&
+          sequence != null &&
+          lastSequence != null &&
+          sequence < lastSequence;
+      // A status is authoritative (the host's counter may even have gone
+      // back after a reset), unless a long-poll delivered newer changes
+      // while it was in flight.
+      if (!overtaken) {
+        await _applySnapshot(monitor, snapshot);
+      }
       monitor.consecutiveFailures = 0;
       monitor.skipTicks = 0;
       if (_shouldWatch(monitor)) {
@@ -622,15 +675,14 @@ class AgentAttentionController extends ChangeNotifier {
           return;
         }
         try {
-          final snapshot = await provider.watchAgents(
+          final batch = await provider.watchAgents(
             monitor.runner,
             since: monitor.lastSequence,
           );
           if (_disposed || !_monitors.containsKey(monitor.host.id)) {
             return;
           }
-          if (snapshot != null) {
-            await _applySnapshot(monitor, snapshot);
+          if (batch != null && await _applyBatch(monitor, batch)) {
             monitor.consecutiveFailures = 0;
             monitor.skipTicks = 0;
             notifyListeners();
@@ -670,26 +722,78 @@ class AgentAttentionController extends ChangeNotifier {
     }
   }
 
+  /// Applies a long-poll result on top of the host's current agents:
+  /// a snapshot replaces them, then every change newer than the last
+  /// applied sequence replaces (or removes) its agent. Returns whether
+  /// anything was applied.
+  Future<bool> _applyBatch(_HostMonitor monitor, AgentChangeBatch batch) async {
+    var sequence = monitor.lastSequence;
+    final byId = <String, AgentInfo>{};
+    var changed = false;
+    final snapshot = batch.snapshot;
+    if (snapshot != null) {
+      // The host could not serve our cursor: this is the whole truth.
+      for (final agent in snapshot.agents) {
+        byId[agent.id] = agent;
+      }
+      sequence = snapshot.sequence;
+      changed = true;
+    } else {
+      for (final agent in monitor.status.agents) {
+        byId[agent.id] = agent;
+      }
+    }
+    for (final change in batch.changes) {
+      if (sequence != null && change.sequence <= sequence) {
+        // Already covered by a status poll that overtook this long-poll.
+        continue;
+      }
+      final agent = change.agent;
+      if (agent == null) {
+        byId.remove(change.agentId);
+      } else {
+        byId[change.agentId] = agent;
+      }
+      sequence = change.sequence;
+      changed = true;
+    }
+    if (!changed) {
+      return false;
+    }
+    monitor.watchGeneration += 1;
+    final agents = byId.values.toList()
+      ..sort((a, b) {
+        // Newest first, like `status`.
+        final at = a.stateChangedAt;
+        final bt = b.stateChangedAt;
+        if (at == null || bt == null) {
+          return at == null ? (bt == null ? 0 : 1) : -1;
+        }
+        return bt.compareTo(at);
+      });
+    await _applySnapshot(
+      monitor,
+      AgentAttentionSnapshot(agents: agents, sequence: sequence),
+    );
+    return true;
+  }
+
   Future<void> _applySnapshot(
     _HostMonitor monitor,
     AgentAttentionSnapshot snapshot,
   ) async {
-    final sequence = snapshot.sequence;
-    final lastSequence = monitor.lastSequence;
-    if (sequence != null && lastSequence != null && sequence < lastSequence) {
-      // A long-poll that returned after a newer periodic poll.
-      return;
-    }
-    if (sequence != null) {
-      monitor.lastSequence = sequence;
-    }
+    monitor.lastSequence = snapshot.sequence ?? monitor.lastSequence;
     final previousStates = monitor.lastStates;
     final notify = monitor.sawInitialSnapshot;
     // Commit the new states before notifying so a throwing notifier can
     // never cause the same transition to notify twice on the next poll.
     monitor.lastStates = {
       for (final agent in snapshot.agents)
-        agent.id: (state: agent.state, sequence: agent.stateSequence),
+        agent.id: (
+          state: agent.state,
+          sequence: agent.stateSequence,
+          hadPending: agent.pendingRequests.isNotEmpty,
+        ),
     };
     monitor.sawInitialSnapshot = true;
     monitor.status = AgentHostStatus(
@@ -731,8 +835,7 @@ class AgentAttentionController extends ChangeNotifier {
       await notifier.show(
         id: '${host.id}:${agent.id}',
         title: needsInput ? 'Agent needs input' : 'Agent finished',
-        // Lock-screen safe: only the agent's display label and machine name.
-        body: '${agent.name} on ${host.name}',
+        body: _withMessage('${agent.name} on ${host.name}', agent),
       );
     }
   }
@@ -749,34 +852,49 @@ class AgentAttentionController extends ChangeNotifier {
       return;
     }
     final host = monitor.host;
+    final notified = _notifiedFor(host.id);
     final seen = <String>{};
     for (final agent in snapshot.agents) {
       for (final request in agent.pendingRequests) {
         seen.add(request.id);
-        if (!host.agentNotifyInput ||
-            monitor.notifiedRequests.contains(request.id)) {
+        if (!host.agentNotifyInput || notified.contains(request.id)) {
           continue;
         }
         // Commit before showing so a throwing notifier cannot re-notify.
-        monitor.notifiedRequests.add(request.id);
+        notified.add(request.id);
         // The generic "needs input" notification for this agent (if any)
         // is superseded by the actionable one.
         await notifier.cancel(id: '${host.id}:${agent.id}');
         await notifier.showPermissionRequest(
           id: permissionNotificationId(host.id, request.id),
           title: 'Claude needs permission: ${request.toolName}',
-          body: '${request.summary} (on ${host.name})',
+          body: _withMessage('${request.summary} (on ${host.name})', agent),
           hostId: host.id,
           requestId: request.id,
         );
       }
     }
-    for (final requestId in monitor.notifiedRequests.toList()) {
+    for (final requestId in notified.toList()) {
       if (!seen.contains(requestId)) {
-        monitor.notifiedRequests.remove(requestId);
+        notified.remove(requestId);
         await notifier.cancel(id: permissionNotificationId(host.id, requestId));
       }
     }
+  }
+
+  /// Longest agent message put into a notification body.
+  static const _notificationMessageLength = 300;
+
+  /// Appends the agent's last message (if any) on its own line.
+  static String _withMessage(String body, AgentInfo agent) {
+    final message = agent.lastMessage?.trim();
+    if (message == null || message.isEmpty) {
+      return body;
+    }
+    final capped = message.length > _notificationMessageLength
+        ? '${message.substring(0, _notificationMessageLength)}…'
+        : message;
+    return '$body\n$capped';
   }
 
   /// A state change, or the same state reached again (the provider bumped
@@ -784,6 +902,11 @@ class AgentAttentionController extends ChangeNotifier {
   /// interval).
   static bool _isTransition(_AgentMark previous, AgentInfo agent) {
     if (previous.state != agent.state) {
+      return true;
+    }
+    if (previous.hadPending && agent.pendingRequests.isEmpty) {
+      // The permission request went away but the agent still waits: it
+      // timed out on the host and the prompt is now in the terminal.
       return true;
     }
     final sequence = agent.stateSequence;
@@ -829,11 +952,27 @@ class _HostMonitor {
   int consecutiveFailures = 0;
   int skipTicks = 0;
   int? lastSequence;
-  Map<String, _AgentMark> lastStates = const {};
 
-  /// Request ids that currently have a permission notification showing.
-  final Set<String> notifiedRequests = {};
+  /// Bumped whenever a long-poll result is applied, so a status poll that
+  /// was in flight meanwhile can tell it may be older.
+  int watchGeneration = 0;
+  Map<String, _AgentMark> lastStates = const {};
   AgentHostStatus status = const AgentHostStatus(loading: true);
 }
 
-typedef _AgentMark = ({AgentAttentionState state, int? sequence});
+typedef _AgentMark = ({
+  AgentAttentionState state,
+  int? sequence,
+  bool hadPending,
+});
+
+/// The host no longer knows the request (answered elsewhere, timed out,
+/// or its hook exited): the prompt, if any, is waiting in the terminal.
+class _RequestGone extends AppFailure {
+  const _RequestGone(String reason)
+    : super(
+        'This request was already answered or timed out. If the agent '
+        'still waits, answer it in the terminal.',
+        reason,
+      );
+}

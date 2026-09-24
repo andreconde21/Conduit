@@ -10,24 +10,34 @@ import 'package:conduit/features/agent_attention/domain/agent_command_runner.dar
 /// (`conductore-hostd`), which watches Claude Code sessions through their
 /// hooks and can answer permission prompts on the phone's behalf.
 ///
-/// Contract (protocol version 1): every command prints JSON on stdout and
-/// exits 0; on failure it exits 1 with `{"error": "..."}`; exit 127 means
-/// the CLI is not installed.
+/// Contract (protocol version 1, `host/README.md` in the companion repo):
+/// every command prints one JSON document on stdout and exits 0; on failure
+/// it exits 1 with `{"error": "..."}`; exit 127 means the CLI is missing.
+/// Commands run as `sh -c 'PATH="$HOME/.local/bin:...:$PATH" exec
+/// conductore-hostd ...'` because SSH exec shells rarely have
+/// `~/.local/bin` on PATH.
 ///
-/// - `status` → `{"version": 1, "seq": N, "agents": [...]}`
-/// - `events --since N --timeout S` → long-poll; one full snapshot per
-///   line (`{"seq": N, "agents": [...]}`), exiting after the first batch or
-///   the timeout.
-/// - `decide <requestId> allow|deny|always`, `focus <sessionId>`,
-///   `version`, `doctor`.
+/// - `status` → `{"version": 1, "seq": N, "source": "daemon|snapshot|none",
+///   "agents": [...]}`, agents sorted newest `updatedAt` first.
+/// - `events --since N --timeout 55` → long-poll printing one JSON object
+///   per line and exiting: `{"seq", "type": "change", "sessionId",
+///   "reason", "agent": {...}}`, `{"seq", "type": "remove", "sessionId",
+///   "agent": null}`, `{"type": "timeout", "seq"}` (nothing happened), or
+///   `{"type": "snapshot", "version", "seq", "agents": [...]}` (the cursor
+///   was not covered; replace everything).
+/// - `decide <requestId> allow|deny|always` → `{"ok": true, ...}` or exit 1
+///   with `unknown request <id>` / `request expired; answer it in the
+///   terminal`.
+/// - `focus <sessionId>`, `version`, `doctor`.
 ///
-/// Agent entries look like `{"sessionId": "...", "name": "...", "cwd":
-/// "/path", "tmux": {"session": "main", "window": 2, "paneId": "%5"} |
-/// null, "state": "working|waiting_input|needs_permission|ended",
-/// "lastEvent": "PreToolUse", "lastToolName": "Bash" | null, "updatedAt":
-/// 1700000000000, "pending": [{"id": "req-...", "toolName": "Bash",
-/// "summary": "rm -rf build", "toolInput": {...}, "createdAt":
-/// 1700000000000}]}` (timestamps are epoch milliseconds).
+/// Agent: `{"sessionId", "name", "cwd", "tmux": {"session", "window",
+/// "paneId", "windowName"} | null, "herdr": {"workspaceId", "tabId",
+/// "paneId", "name"} | null, "state": "working|waiting_input|
+/// needs_permission|ended", "lastEvent", "lastToolName", "lastMessage",
+/// "startedAt", "updatedAt", "endedAt", "pending": [{"id", "toolName",
+/// "summary", "toolInput", "createdAt"}]}` (timestamps in epoch ms). An
+/// agent in `needs_permission` with an empty `pending` list has a prompt
+/// waiting in the terminal that the phone can no longer answer.
 class ConductoreHostAttentionProvider extends AgentAttentionProvider {
   const ConductoreHostAttentionProvider();
 
@@ -88,7 +98,7 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider {
   }
 
   @override
-  Future<AgentAttentionSnapshot?> watchAgents(
+  Future<AgentChangeBatch?> watchAgents(
     AgentCommandRunner runner, {
     required int? since,
   }) async {
@@ -99,7 +109,8 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider {
       timeout: _watchCommandTimeout,
     );
     _checkResult(result);
-    return parseEvents(result.stdout);
+    final batch = parseEvents(result.stdout);
+    return batch.isEmpty ? null : batch;
   }
 
   @override
@@ -183,27 +194,85 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider {
     return snapshot;
   }
 
-  /// Parses `events` output: one snapshot per line, the last one wins. An
-  /// empty batch (timeout with no change) yields null.
-  static AgentAttentionSnapshot? parseEvents(String raw) {
-    AgentAttentionSnapshot? latest;
+  /// Parses `events` output: `change` / `remove` lines in order, possibly
+  /// after a `snapshot` line; a `timeout` line carries nothing to apply.
+  /// Lines of an unknown type are skipped so a newer daemon can add them.
+  static AgentChangeBatch parseEvents(String raw) {
+    AgentAttentionSnapshot? snapshot;
+    var changes = <AgentChange>[];
     for (final line in const LineSplitter().convert(raw)) {
       final trimmed = line.trim();
       if (trimmed.isEmpty) {
         continue;
       }
-      final snapshot = _parseSnapshotLine(trimmed);
-      if (snapshot == null) {
+      final Object? decoded;
+      try {
+        decoded = jsonDecode(trimmed);
+      } catch (_) {
+        throw const AppFailure(
+          'The Conductore companion returned output that is not JSON.',
+        );
+      }
+      if (decoded is! Map) {
         continue;
       }
-      if (latest == null ||
-          latest.sequence == null ||
-          snapshot.sequence == null ||
-          snapshot.sequence! >= latest.sequence!) {
-        latest = snapshot;
+      if (decoded['error'] is String) {
+        throw failureFrom(trimmed, '');
+      }
+      switch (decoded['type']) {
+        case 'snapshot':
+          final parsed = _parseSnapshotLine(trimmed);
+          if (parsed != null) {
+            // Everything before a snapshot is superseded by it.
+            snapshot = parsed;
+            changes = [];
+          }
+        case 'change':
+          final agent = _parseAgent(decoded['agent']);
+          final sequence = _int(decoded['seq']);
+          if (agent != null && sequence != null) {
+            changes.add(
+              AgentChange(sequence: sequence, agentId: agent.id, agent: agent),
+            );
+          }
+        case 'remove':
+          final id = _string(decoded['sessionId']);
+          final sequence = _int(decoded['seq']);
+          if (id != null && sequence != null) {
+            changes.add(
+              AgentChange(sequence: sequence, agentId: id, agent: null),
+            );
+          }
+        default:
+          // `timeout`, or a type this build does not know.
+          break;
       }
     }
-    return latest;
+    return AgentChangeBatch(snapshot: snapshot, changes: changes);
+  }
+
+  /// Renders `doctor` JSON as one line per check for the host form.
+  static String formatDoctor(String raw) {
+    try {
+      final decoded = jsonDecode(raw.trim());
+      if (decoded is Map && decoded['checks'] is List) {
+        final lines = <String>[
+          if (_string(decoded['user']) case final user?) 'user: $user',
+          for (final check in decoded['checks'] as List)
+            if (check is Map)
+              '${check['ok'] == true ? '[ok]' : '[!!]'} '
+                  '${check['name'] ?? '?'}'
+                  '${_string(check['detail']) == null ? '' : ': ${check['detail']}'}',
+        ];
+        return lines.join('\n');
+      }
+      if (decoded is Map && decoded['error'] is String) {
+        return 'error: ${decoded['error']}';
+      }
+    } catch (_) {
+      // Not JSON: show it as is.
+    }
+    return raw.trim();
   }
 
   static AgentAttentionSnapshot? _parseSnapshotLine(String line) {
@@ -249,6 +318,7 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider {
     final cwd = _string(item['cwd']);
     final name = _string(item['name']) ?? _basename(cwd) ?? id;
     final tmux = item['tmux'];
+    final herdr = item['herdr'];
     String? tab;
     String? pane;
     if (tmux is Map) {
@@ -258,6 +328,9 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider {
         tab = window == null ? session : '$session:$window';
       }
       pane = _string(tmux['paneId']);
+    } else if (herdr is Map) {
+      tab = _string(herdr['tabId']);
+      pane = _string(herdr['paneId']);
     }
     final pendingRaw = item['pending'];
     final pending = <PendingPermissionRequest>[
@@ -274,6 +347,7 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider {
       pane: pane,
       stateChangedAt: _timestamp(item['updatedAt']),
       pendingRequests: pending,
+      lastMessage: _string(item['lastMessage']),
     );
   }
 

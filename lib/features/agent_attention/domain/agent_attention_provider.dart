@@ -43,10 +43,11 @@ abstract class AgentAttentionProvider {
   /// returning immediately.
   bool get supportsWatch => false;
 
-  /// Waits for the next change after snapshot [since] (a long-poll on the
-  /// host) and returns the new snapshot, or null when nothing changed
-  /// before the provider's own timeout.
-  Future<AgentAttentionSnapshot?> watchAgents(
+  /// Waits for the changes after sequence [since] (a long-poll on the
+  /// host) and returns them, or null when nothing changed before the
+  /// provider's own timeout. The caller applies the batch to the state it
+  /// holds, skipping changes it has already seen.
+  Future<AgentChangeBatch?> watchAgents(
     AgentCommandRunner runner, {
     required int? since,
   }) async => null;
