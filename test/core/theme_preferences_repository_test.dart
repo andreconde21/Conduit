@@ -2,6 +2,7 @@ import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_preferences_repository.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
+import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -298,6 +299,34 @@ void main() {
 
       final preferences = await repository.load();
       expect(preferences.menuButtonsEnabled, isFalse);
+    });
+
+    test('persists terminal gesture switches and tolerates bad data', () async {
+      final storage = InMemorySecureStorage();
+      final repository = ThemePreferencesRepository(storage);
+
+      final defaults = await repository.load();
+      expect(defaults.terminalGestures, TerminalGesturePreferences.defaults);
+
+      const gestures = TerminalGesturePreferences(
+        swipeSwitchesWindow: false,
+        windowSwitchTarget: TerminalWindowSwitchTarget.herdr,
+        pinchZoom: false,
+      );
+      await repository.save(
+        const ThemePreferences(
+          themeMode: ThemeMode.dark,
+          palette: AppPalette.synthwave,
+          terminalGestures: gestures,
+        ),
+      );
+      expect((await repository.load()).terminalGestures, gestures);
+
+      await storage.write(key: 'conduit.terminal_gestures.v1', value: '{');
+      expect(
+        (await repository.load()).terminalGestures,
+        TerminalGesturePreferences.defaults,
+      );
     });
 
     test('persists and loads global snippets', () async {

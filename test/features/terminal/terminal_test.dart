@@ -1178,7 +1178,6 @@ void main() {
               brightness: Brightness.dark,
               fontFamily: 'monospace',
               fontSize: 14,
-              onFontSizeChanged: (_) {},
               predictiveEchoEnabled: false,
               terminalMouseInput: false,
               focusNode: focusNode,

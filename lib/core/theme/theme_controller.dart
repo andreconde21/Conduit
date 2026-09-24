@@ -2,6 +2,7 @@ import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_preferences_repository.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
+import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
 import 'package:flutter/material.dart';
 
 class ThemeController extends ChangeNotifier {
@@ -23,6 +24,8 @@ class ThemeController extends ChangeNotifier {
   TerminalToolbarStyle _terminalToolbarStyle =
       TerminalToolbarStyle.floatingPill;
   bool _menuButtonsEnabled = true;
+  TerminalGesturePreferences _terminalGestures =
+      TerminalGesturePreferences.defaults;
 
   ThemeMode get themeMode => _themeMode;
   AppPalette get palette => _palette;
@@ -39,6 +42,7 @@ class ThemeController extends ChangeNotifier {
   bool get composeSubmitEnter => _composeSubmitEnter;
   TerminalToolbarStyle get terminalToolbarStyle => _terminalToolbarStyle;
   bool get menuButtonsEnabled => _menuButtonsEnabled;
+  TerminalGesturePreferences get terminalGestures => _terminalGestures;
 
   Future<void> load() async {
     final preferences = await _repository.load();
@@ -55,6 +59,7 @@ class ThemeController extends ChangeNotifier {
     _composeSubmitEnter = preferences.composeSubmitEnter;
     _terminalToolbarStyle = preferences.terminalToolbarStyle;
     _menuButtonsEnabled = preferences.menuButtonsEnabled;
+    _terminalGestures = preferences.terminalGestures;
     notifyListeners();
   }
 
@@ -213,6 +218,15 @@ class ThemeController extends ChangeNotifier {
     await _save();
   }
 
+  Future<void> setTerminalGestures(TerminalGesturePreferences gestures) async {
+    if (_terminalGestures == gestures) {
+      return;
+    }
+    _terminalGestures = gestures;
+    notifyListeners();
+    await _save();
+  }
+
   Future<void> _save() {
     return _repository.save(
       ThemePreferences(
@@ -229,6 +243,7 @@ class ThemeController extends ChangeNotifier {
         composeSubmitEnter: _composeSubmitEnter,
         terminalToolbarStyle: _terminalToolbarStyle,
         menuButtonsEnabled: _menuButtonsEnabled,
+        terminalGestures: _terminalGestures,
       ),
     );
   }
