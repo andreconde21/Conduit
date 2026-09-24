@@ -2,12 +2,14 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:cbor/cbor.dart';
+import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/theme_preferences_repository.dart';
 import 'package:conduit/features/app_lock/domain/app_authenticator.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/domain/saved_hosts_repository.dart';
 import 'package:conduit/features/sftp/domain/file_export.dart';
+import 'package:conduit/features/sftp/domain/sftp_bookmarks_repository.dart';
 import 'package:conduit/features/sftp/domain/sftp_entry.dart';
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
 import 'package:conduit/features/sftp/domain/sftp_session.dart';
@@ -426,6 +428,22 @@ class NoopVerifier implements HostKeyVerifier {
   }) async => false;
 }
 
+class InMemorySftpBookmarks implements SftpBookmarksRepository {
+  final Map<String, List<String>> stored = {};
+
+  @override
+  Future<List<String>> load(String hostId) async => stored[hostId] ?? const [];
+
+  @override
+  Future<void> save(String hostId, List<String> paths) async {
+    if (paths.isEmpty) {
+      stored.remove(hostId);
+    } else {
+      stored[hostId] = List.of(paths);
+    }
+  }
+}
+
 class NoNetworkSftpRepository implements SftpRepository {
   @override
   Future<SftpSession> connect(SavedHost host) {
@@ -452,9 +470,14 @@ class FakeSftpSession implements SftpSession {
 
   final String home;
   final Map<String, List<SftpEntry>> tree;
+  final Map<String, List<int>> files = {};
   final List<String> madeDirectories = [];
   final Map<String, List<int>> writtenFiles = {};
   final Map<String, int> listCalls = {};
+  final List<String> resolveCalls = [];
+  final List<String> readCalls = [];
+  final List<int?> readMaxBytes = [];
+  int closeCalls = 0;
 
   @override
   Future<List<SftpEntry>> list(String path) async {
@@ -467,14 +490,25 @@ class FakeSftpSession implements SftpSession {
   }
 
   @override
-  Future<String> resolve(String path) async => path == '.' ? home : path;
+  Future<String> resolve(String path) async {
+    resolveCalls.add(path);
+    if (path == '.') return home;
+    if (path.startsWith('/')) return path;
+    return '$home/$path';
+  }
 
   @override
   Future<Uint8List> read(
     String path, {
     void Function(int bytesRead, int? total)? onProgress,
+    int? maxBytes,
   }) async {
-    final bytes = Uint8List.fromList([1, 2, 3]);
+    readCalls.add(path);
+    readMaxBytes.add(maxBytes);
+    final bytes = Uint8List.fromList(files[path] ?? const [1, 2, 3]);
+    if (maxBytes != null && bytes.length > maxBytes) {
+      throw AppFailure('File is larger than $maxBytes bytes.');
+    }
     onProgress?.call(bytes.length, bytes.length);
     return bytes;
   }
@@ -507,7 +541,9 @@ class FakeSftpSession implements SftpSession {
   Future<void> delete(SftpEntry entry) async {}
 
   @override
-  Future<void> close() async {}
+  Future<void> close() async {
+    closeCalls++;
+  }
 }
 
 class RecordingFileExport implements FileExport {

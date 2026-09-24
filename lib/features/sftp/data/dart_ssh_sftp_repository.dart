@@ -67,6 +67,7 @@ class DartSshSftpSession implements SftpSession {
   Future<Uint8List> read(
     String path, {
     void Function(int bytesRead, int? total)? onProgress,
+    int? maxBytes,
   }) async {
     final file = await sftp.open(path);
     try {
@@ -76,16 +77,39 @@ class DartSshSftpSession implements SftpSession {
       } catch (_) {
         total = null;
       }
+      if (maxBytes != null && total != null && total > maxBytes) {
+        throw _tooLarge(total, maxBytes);
+      }
       final builder = BytesBuilder(copy: false);
       await for (final chunk in file.read(
         onProgress: (read) => onProgress?.call(read, total),
       )) {
         builder.add(chunk);
+        // stat can be unavailable or stale (a growing log), so also stop
+        // buffering once the stream itself crosses the limit.
+        if (maxBytes != null && builder.length > maxBytes) {
+          throw _tooLarge(builder.length, maxBytes);
+        }
       }
       return builder.takeBytes();
     } finally {
       await file.close();
     }
+  }
+
+  AppFailure _tooLarge(int size, int maxBytes) {
+    final limitMb = (maxBytes / (1024 * 1024)).toStringAsFixed(0);
+    return AppFailure(
+      'File is larger than $limitMb MB (${_formatSize(size)}). '
+      'Download it instead.',
+    );
+  }
+
+  String _formatSize(int bytes) {
+    if (bytes < 1024 * 1024) {
+      return '${(bytes / 1024).toStringAsFixed(0)} KB';
+    }
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
 
   @override

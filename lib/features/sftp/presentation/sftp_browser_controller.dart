@@ -5,6 +5,7 @@ import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sftp/data/tar_archive_builder.dart';
 import 'package:conduit/features/sftp/domain/file_export.dart';
+import 'package:conduit/features/sftp/domain/remote_file_kind.dart';
 import 'package:conduit/features/sftp/domain/sftp_entry.dart';
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
 import 'package:conduit/features/sftp/domain/sftp_session.dart';
@@ -368,6 +369,31 @@ class SftpBrowserController extends ChangeNotifier {
     } catch (error) {
       throw AppFailure('Could not upload ${file.name}.', error);
     }
+  }
+
+  /// Reads a file for the in-app viewer; progress is reported to the caller
+  /// instead of the browser's transfer bar.
+  Future<Uint8List> readFile(
+    String path, {
+    void Function(int bytesRead, int? total)? onProgress,
+  }) {
+    final session = _session;
+    if (session == null) {
+      throw const AppFailure('Not connected.');
+    }
+    return session.read(
+      path,
+      onProgress: onProgress,
+      maxBytes: remoteFileViewerMaxBytes,
+    );
+  }
+
+  Future<void> writeFile(String path, Uint8List bytes) async {
+    final session = _session;
+    if (session == null) {
+      throw const AppFailure('Not connected.');
+    }
+    await session.write(path, Stream.value(bytes), bytes.length);
   }
 
   Future<void> _mutate(Future<void> Function() action) async {

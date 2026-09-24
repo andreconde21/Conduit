@@ -7,9 +7,12 @@ abstract class SftpSession {
 
   Future<String> resolve(String path);
 
+  /// Reads the whole file. When [maxBytes] is set the read fails with an
+  /// `AppFailure` instead of buffering a file larger than that.
   Future<Uint8List> read(
     String path, {
     void Function(int bytesRead, int? total)? onProgress,
+    int? maxBytes,
   });
 
   Future<void> write(

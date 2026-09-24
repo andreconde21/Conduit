@@ -3,8 +3,12 @@ import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sftp/domain/file_export.dart';
+import 'package:conduit/features/sftp/domain/remote_file_kind.dart';
+import 'package:conduit/features/sftp/domain/sftp_bookmarks_repository.dart';
 import 'package:conduit/features/sftp/domain/sftp_entry.dart';
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
+import 'package:conduit/features/sftp/presentation/file_viewer/sftp_file_viewer_page.dart';
+import 'package:conduit/features/sftp/presentation/sftp_bookmarks_controller.dart';
 import 'package:conduit/features/sftp/presentation/sftp_browser_controller.dart';
 import 'package:conduit/features/sftp/presentation/widgets/actions_fab.dart';
 import 'package:conduit/features/sftp/presentation/widgets/center_message.dart';
@@ -24,6 +28,7 @@ class SftpBrowserPage extends StatefulWidget {
     required this.repository,
     required this.fileExport,
     required this.themeController,
+    required this.bookmarksRepository,
     super.key,
   });
 
@@ -31,6 +36,7 @@ class SftpBrowserPage extends StatefulWidget {
   final SftpRepository repository;
   final FileExport fileExport;
   final ThemeController themeController;
+  final SftpBookmarksRepository bookmarksRepository;
 
   @override
   State<SftpBrowserPage> createState() => _SftpBrowserPageState();
@@ -38,6 +44,7 @@ class SftpBrowserPage extends StatefulWidget {
 
 class _SftpBrowserPageState extends State<SftpBrowserPage> {
   late final SftpBrowserController _controller;
+  late final SftpBookmarksController _bookmarks;
   final _searchController = TextEditingController();
 
   @override
@@ -52,7 +59,12 @@ class _SftpBrowserPageState extends State<SftpBrowserPage> {
       repository: widget.repository,
       fileExport: widget.fileExport,
     );
+    _bookmarks = SftpBookmarksController(
+      hostId: widget.host.id,
+      repository: widget.bookmarksRepository,
+    );
     _controller.connect();
+    _bookmarks.load();
   }
 
   @override
@@ -63,6 +75,7 @@ class _SftpBrowserPageState extends State<SftpBrowserPage> {
     );
     _searchController.dispose();
     _controller.dispose();
+    _bookmarks.dispose();
     super.dispose();
   }
 
@@ -86,7 +99,7 @@ class _SftpBrowserPageState extends State<SftpBrowserPage> {
   Widget build(BuildContext context) {
     final palette = widget.themeController.palette;
     return ListenableBuilder(
-      listenable: _controller,
+      listenable: Listenable.merge([_controller, _bookmarks]),
       builder: (context, _) {
         return Scaffold(
           body: ConduitBackdrop(
@@ -114,6 +127,13 @@ class _SftpBrowserPageState extends State<SftpBrowserPage> {
                     onRefresh: _controller.status == SftpBrowserStatus.ready
                         ? _controller.refresh
                         : null,
+                    bookmarks: _bookmarks.bookmarks,
+                    isBookmarked: _bookmarks.contains(_controller.path),
+                    onToggleBookmark:
+                        _controller.status == SftpBrowserStatus.ready
+                        ? () => _bookmarks.toggle(_controller.path)
+                        : null,
+                    onOpenBookmark: _navigateToPath,
                   ),
                   Expanded(child: _buildBody(context)),
                   if (_controller.transfer != null)
@@ -205,11 +225,36 @@ class _SftpBrowserPageState extends State<SftpBrowserPage> {
       }
       return;
     }
-    await _showEntrySheet(entry);
+    await _openViewer(entry);
+  }
+
+  Future<void> _openViewer(SftpEntry entry) async {
+    final size = entry.size;
+    if (size != null && size > remoteFileViewerMaxBytes) {
+      await _showEntrySheet(entry);
+      return;
+    }
+    final saved = await Navigator.of(context).push(
+      MaterialPageRoute<bool>(
+        builder: (_) => SftpFileViewerPage(
+          path: entry.path,
+          themeController: widget.themeController,
+          read: (onProgress) =>
+              _controller.readFile(entry.path, onProgress: onProgress),
+          write: (bytes) => _controller.writeFile(entry.path, bytes),
+        ),
+      ),
+    );
+    if (saved == true && mounted) {
+      // Size and modification time changed on the server.
+      await _controller.refresh();
+    }
   }
 
   Future<void> _onEntryAction(EntryAction action, SftpEntry entry) async {
     switch (action) {
+      case EntryAction.open:
+        await _openViewer(entry);
       case EntryAction.download:
         await _download(entry);
       case EntryAction.rename:
@@ -231,6 +276,12 @@ class _SftpBrowserPageState extends State<SftpBrowserPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (!entry.isDirectory)
+              ListTile(
+                leading: const Icon(Icons.open_in_new_rounded),
+                title: const Text('Open'),
+                onTap: () => Navigator.of(context).pop(EntryAction.open),
+              ),
             ListTile(
               leading: const Icon(Icons.download_rounded),
               title: Text(entry.isDirectory ? 'Download as tar' : 'Download'),
