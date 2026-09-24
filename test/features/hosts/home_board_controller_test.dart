@@ -7,6 +7,9 @@ import 'package:flutter_test/flutter_test.dart';
 import '../../support/test_doubles.dart';
 import 'home_board_fakes.dart';
 
+SavedHost connected(String id) =>
+    buildHost(id).copyWith(lastConnectedAt: DateTime.utc(2026, 9, 2));
+
 void main() {
   late HerdrFakeRunner runner;
   late int created;
@@ -27,7 +30,7 @@ void main() {
   tearDown(() => board.dispose());
 
   test('stays idle until visible, then lists workspaces with panes', () async {
-    board.selectHost(buildHost('a'));
+    board.selectHost(connected('a'));
     expect(created, 0);
     expect(board.state.phase, HomeBoardPhase.loading);
 
@@ -56,7 +59,7 @@ void main() {
   });
 
   test('hiding closes the channel and stops listing', () async {
-    board.selectHost(buildHost('a'));
+    board.selectHost(connected('a'));
     board.setVisible(true);
     await pumpEventQueue();
     expect(runner.commands, isNotEmpty);
@@ -95,7 +98,7 @@ void main() {
       ..workspaceExitCode = 1;
     board
       ..setVisible(true)
-      ..selectHost(buildHost('a'));
+      ..selectHost(connected('a'));
     await pumpEventQueue();
     expect(board.state.phase, HomeBoardPhase.notRunning);
 
@@ -110,7 +113,7 @@ void main() {
   test('a failed poll keeps the last board and reconnects next time', () async {
     board
       ..setVisible(true)
-      ..selectHost(buildHost('a'));
+      ..selectHost(connected('a'));
     await pumpEventQueue();
     expect(board.state.workspaces, hasLength(2));
 
@@ -130,8 +133,8 @@ void main() {
   test('switching machine starts over and ignores the old fetch', () async {
     board
       ..setVisible(true)
-      ..selectHost(buildHost('a'));
-    board.selectHost(buildHost('b'));
+      ..selectHost(connected('a'));
+    board.selectHost(connected('b'));
     await pumpEventQueue();
     expect(board.host?.id, 'b');
     expect(board.state.phase, HomeBoardPhase.ready);
@@ -141,7 +144,7 @@ void main() {
   test('focusPane sends herdr agent focus with the pane id', () async {
     board
       ..setVisible(true)
-      ..selectHost(buildHost('a'));
+      ..selectHost(connected('a'));
     await pumpEventQueue();
     final pane = board.state.workspaces.first.panes.last;
     await board.focusPane(pane.agent);
@@ -149,5 +152,43 @@ void main() {
 
     await board.focusWorkspace('w2');
     expect(runner.commands.last, contains('workspace focus w2'));
+  });
+
+  test('a never-connected machine waits, then starts once connected', () async {
+    board
+      ..setVisible(true)
+      ..selectHost(buildHost('n'));
+    await pumpEventQueue();
+    expect(board.state.phase, HomeBoardPhase.awaitingRequest);
+    expect(board.requestReason, HomeBoardRequestReason.neverConnected);
+    expect(created, 0);
+
+    // The first connection records a timestamp: the board starts.
+    board.selectHost(connected('n'));
+    await pumpEventQueue();
+    expect(created, 1);
+    expect(board.state.phase, HomeBoardPhase.ready);
+  });
+
+  testWidgets('polling stops after repeated failures until refreshed', (
+    tester,
+  ) async {
+    final timed = HomeBoardController(runnerFactory: (_) => runner);
+    addTearDown(timed.dispose);
+    runner.error = const AppFailure('Host key rejected.');
+    timed
+      ..setVisible(true)
+      ..selectHost(connected('a'));
+    await tester.pump(const Duration(minutes: 10));
+    final attempts = runner.commands.length;
+    expect(attempts, 3);
+
+    await tester.pump(const Duration(minutes: 10));
+    expect(runner.commands.length, attempts);
+
+    runner.error = null;
+    await tester.runAsync(timed.refresh);
+    expect(timed.state.phase, HomeBoardPhase.ready);
+    timed.setVisible(false);
   });
 }

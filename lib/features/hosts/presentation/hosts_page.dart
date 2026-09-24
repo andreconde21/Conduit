@@ -381,6 +381,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
             builder: (context, _) => HerdrBoard(
               state: board.state,
               attachedWorkspaceIds: _attachedWorkspaceIds(sessions),
+              requestReason: board.requestReason,
               onOpenPane: (workspace, pane) => _openPane(host, workspace, pane),
               onOpenWorkspace: (workspace) => _openPane(host, workspace, null),
               onRefresh: () => unawaited(board.refresh()),

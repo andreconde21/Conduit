@@ -14,6 +14,7 @@ class HerdrBoard extends StatelessWidget {
     required this.onStartHerdr,
     required this.onOpenShell,
     this.attachedWorkspaceIds = const {},
+    this.requestReason,
     super.key,
   });
 
@@ -34,6 +35,9 @@ class HerdrBoard extends StatelessWidget {
 
   /// Workspaces this app already has a session attached to.
   final Set<String> attachedWorkspaceIds;
+
+  /// Why listing waits for [onRequestLoad].
+  final HomeBoardRequestReason? requestReason;
 
   @override
   Widget build(BuildContext context) {
@@ -59,15 +63,26 @@ class HerdrBoard extends StatelessWidget {
         return const [];
       case HomeBoardPhase.awaitingRequest:
         return [
-          _NoticeCard(
-            icon: Icons.usb_rounded,
-            title: 'Hardware-key login',
-            message:
-                'Listing this machine’s Herdr panes opens a connection and '
-                'asks for a key touch.',
-            actionLabel: 'Show panes',
-            onAction: onRequestLoad,
-          ),
+          if (requestReason == HomeBoardRequestReason.neverConnected)
+            _NoticeCard(
+              icon: Icons.verified_user_outlined,
+              title: 'Not connected yet',
+              message:
+                  'Listing Herdr panes connects to this machine and may ask '
+                  'you to trust its host key.',
+              actionLabel: 'Show panes',
+              onAction: onRequestLoad,
+            )
+          else
+            _NoticeCard(
+              icon: Icons.usb_rounded,
+              title: 'Hardware-key login',
+              message:
+                  'Listing this machine’s Herdr panes opens a connection and '
+                  'asks for a key touch.',
+              actionLabel: 'Show panes',
+              onAction: onRequestLoad,
+            ),
         ];
       case HomeBoardPhase.loading:
         return const [_LoadingCard()];

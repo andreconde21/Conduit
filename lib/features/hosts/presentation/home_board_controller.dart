@@ -18,8 +18,10 @@ enum HomeBoardPhase {
   /// No machine selected, or a machine the board does not list (local).
   idle,
 
-  /// Hardware-key login: listing asks for a key touch, so it waits for an
-  /// explicit request.
+  /// Listing waits for an explicit request: the login uses a hardware key
+  /// (each connection asks for a touch) or the machine was never connected
+  /// (its host key would have to be trusted first). See
+  /// [HomeBoardController.requestReason].
   awaitingRequest,
 
   /// First fetch in flight; nothing to show yet.
@@ -36,6 +38,15 @@ enum HomeBoardPhase {
 
   /// The last fetch failed; [HomeBoardState.workspaces] may hold stale data.
   failed,
+}
+
+/// Why the board waits for an explicit request before listing.
+enum HomeBoardRequestReason {
+  /// Each new connection asks for a hardware-key touch.
+  hardwareKey,
+
+  /// The machine was never connected, so its host key is not trusted yet.
+  neverConnected,
 }
 
 /// One Herdr pane that runs an agent, with its tab resolved to a label.
@@ -174,6 +185,10 @@ class HomeBoardController extends ChangeNotifier {
   static const _timeout = Duration(seconds: 10);
   static const _maxBackoffTicks = 4;
 
+  /// Consecutive failures after which polling stops until [refresh]: a
+  /// rejected host key or a machine that is down should not keep asking.
+  static const _maxFailures = 3;
+
   SavedHost? _host;
   AgentCommandRunner? _runner;
   Timer? _timer;
@@ -193,8 +208,20 @@ class HomeBoardController extends ChangeNotifier {
   bool get visible => _visible;
 
   /// Whether the board waits for [requestLoad] before listing.
-  bool get _needsRequest =>
-      _host?.authMethod == SshAuthMethod.hardwareKey && !_requested;
+  bool get _needsRequest => requestReason != null;
+
+  /// Why listing waits for [requestLoad], or null when it polls on its own.
+  HomeBoardRequestReason? get requestReason {
+    final host = _host;
+    if (host == null || _requested) return null;
+    if (host.authMethod == SshAuthMethod.hardwareKey) {
+      return HomeBoardRequestReason.hardwareKey;
+    }
+    if (host.lastConnectedAt == null) {
+      return HomeBoardRequestReason.neverConnected;
+    }
+    return null;
+  }
 
   bool get _listable => _host != null && !_host!.isLocal;
 
@@ -203,7 +230,14 @@ class HomeBoardController extends ChangeNotifier {
   void selectHost(SavedHost? host) {
     if (_disposed) return;
     if (host?.id == _host?.id) {
+      final wasWaiting = _needsRequest;
       _host = host;
+      // A first connection trusts the host key; the board can start.
+      if (wasWaiting && !_needsRequest) {
+        _state = HomeBoardState(phase: _initialPhase());
+        notifyListeners();
+        _start();
+      }
       return;
     }
     _generation += 1;
@@ -287,6 +321,10 @@ class HomeBoardController extends ChangeNotifier {
       await runner.run(command, timeout: _timeout);
     } catch (_) {
       // Focus is a nicety: the pane may be gone since the last poll.
+    }
+    if (!_visible && !_disposed) {
+      // Sent from behind the terminal page: do not keep the channel open.
+      await _closeRunner();
     }
   }
 
@@ -372,6 +410,9 @@ class HomeBoardController extends ChangeNotifier {
       if (_disposed || generation != _generation) return;
       _failures += 1;
       _skipTicks = _failures.clamp(0, _maxBackoffTicks);
+      if (_failures >= _maxFailures) {
+        _stopTimer();
+      }
       _state = HomeBoardState(
         phase: HomeBoardPhase.failed,
         workspaces: _state.workspaces,

@@ -97,10 +97,9 @@ void main() {
   }
 
   SavedHost host(String id, {DateTime? lastConnectedAt}) {
-    final base = buildHost(id);
-    return lastConnectedAt == null
-        ? base
-        : base.copyWith(lastConnectedAt: lastConnectedAt);
+    return buildHost(
+      id,
+    ).copyWith(lastConnectedAt: lastConnectedAt ?? DateTime.utc(2026));
   }
 
   testWidgets('no machines shows the add-machine flow and no board', (
@@ -294,5 +293,19 @@ void main() {
     ]) {
       expect(find.text(label), findsOneWidget, reason: label);
     }
+  });
+
+  testWidgets('a never-connected machine lists panes only on request', (
+    tester,
+  ) async {
+    await pumpHome(tester, hosts: [buildHost('n')]);
+    expect(find.text('Not connected yet'), findsOneWidget);
+    expect(runnerHosts, isEmpty);
+
+    await tester.tap(find.text('Show panes'));
+    await tester.pump();
+    await tester.pump();
+    expect(runnerHosts, ['n']);
+    expect(find.text('Infrastructure'), findsOneWidget);
   });
 }
