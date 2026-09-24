@@ -17,14 +17,26 @@ import android.os.IBinder
 import android.provider.Settings
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterFragmentActivity() {
     private lateinit var fidoUsbCtapTransport: FidoUsbCtapTransport
+    private var speechRecognition: SpeechRecognitionBridge? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         fidoUsbCtapTransport = FidoUsbCtapTransport(this)
+        val speech = SpeechRecognitionBridge(this)
+        speechRecognition = speech
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            SpeechRecognitionBridge.METHOD_CHANNEL,
+        ).setMethodCallHandler { call, result -> speech.handle(call, result) }
+        EventChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            SpeechRecognitionBridge.EVENT_CHANNEL,
+        ).setStreamHandler(speech)
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             BACKGROUND_KEEPALIVE_CHANNEL,
@@ -89,6 +101,23 @@ class MainActivity : FlutterFragmentActivity() {
                 else -> result.notImplemented()
             }
         }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        if (speechRecognition?.onRequestPermissionsResult(requestCode, grantResults) == true) {
+            return
+        }
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+    }
+
+    override fun onDestroy() {
+        speechRecognition?.dispose()
+        speechRecognition = null
+        super.onDestroy()
     }
 
     private fun hasSharedStorageAccess(): Boolean {

@@ -145,6 +145,7 @@ class AppBackupService {
       'terminalMouseInput': _themeController.terminalMouseInput,
       'terminalEnterSequence': _themeController.terminalEnterSequence.name,
       'composeSubmitEnter': _themeController.composeSubmitEnter,
+      'speechLanguage': _themeController.speechLanguage,
     };
   }
 
@@ -205,6 +206,10 @@ class AppBackupService {
     final composeSubmitEnter = json['composeSubmitEnter'];
     if (composeSubmitEnter is bool) {
       await _themeController.setComposeSubmitEnter(composeSubmitEnter);
+    }
+    final speechLanguage = json['speechLanguage'];
+    if (speechLanguage is String) {
+      await _themeController.setSpeechLanguage(speechLanguage);
     }
   }
 

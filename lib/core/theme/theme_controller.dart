@@ -20,6 +20,7 @@ class ThemeController extends ChangeNotifier {
   TerminalEnterSequence _terminalEnterSequence = TerminalEnterSequence.cr;
   bool _touchModeHintSeen = false;
   bool _composeSubmitEnter = false;
+  String _speechLanguage = '';
 
   ThemeMode get themeMode => _themeMode;
   AppPalette get palette => _palette;
@@ -35,6 +36,9 @@ class ThemeController extends ChangeNotifier {
   bool get touchModeHintSeen => _touchModeHintSeen;
   bool get composeSubmitEnter => _composeSubmitEnter;
 
+  /// BCP-47 tag dictation listens in; empty means the device locale.
+  String get speechLanguage => _speechLanguage;
+
   Future<void> load() async {
     final preferences = await _repository.load();
     _themeMode = preferences.themeMode;
@@ -48,6 +52,7 @@ class ThemeController extends ChangeNotifier {
     _terminalEnterSequence = preferences.terminalEnterSequence;
     _touchModeHintSeen = preferences.touchModeHintSeen;
     _composeSubmitEnter = preferences.composeSubmitEnter;
+    _speechLanguage = preferences.speechLanguage;
     notifyListeners();
   }
 
@@ -188,6 +193,16 @@ class ThemeController extends ChangeNotifier {
     await _save();
   }
 
+  Future<void> setSpeechLanguage(String tag) async {
+    final normalized = tag.trim();
+    if (_speechLanguage == normalized) {
+      return;
+    }
+    _speechLanguage = normalized;
+    notifyListeners();
+    await _save();
+  }
+
   Future<void> _save() {
     return _repository.save(
       ThemePreferences(
@@ -202,6 +217,7 @@ class ThemeController extends ChangeNotifier {
         terminalEnterSequence: _terminalEnterSequence,
         touchModeHintSeen: _touchModeHintSeen,
         composeSubmitEnter: _composeSubmitEnter,
+        speechLanguage: _speechLanguage,
       ),
     );
   }

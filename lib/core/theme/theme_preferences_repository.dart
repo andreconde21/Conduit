@@ -19,6 +19,7 @@ class ThemePreferences {
     this.terminalEnterSequence = TerminalEnterSequence.cr,
     this.touchModeHintSeen = false,
     this.composeSubmitEnter = false,
+    this.speechLanguage = '',
   });
 
   final ThemeMode themeMode;
@@ -37,6 +38,9 @@ class ThemePreferences {
   /// Whether the prompt composer presses Enter after inserting a prompt.
   /// Off by default so composed text lands in the TUI for review.
   final bool composeSubmitEnter;
+
+  /// BCP-47 tag dictation listens in; empty means the device locale.
+  final String speechLanguage;
 }
 
 class ThemePreferencesRepository {
@@ -57,6 +61,7 @@ class ThemePreferencesRepository {
   static const _terminalEnterSequenceKey = 'conduit.terminal_enter_sequence.v1';
   static const _touchModeHintSeenKey = 'conduit.touch_mode_hint_seen.v1';
   static const _composeSubmitEnterKey = 'conduit.compose_submit_enter.v1';
+  static const _speechLanguageKey = 'conduit.speech_language.v1';
 
   final FlutterSecureStorage _storage;
 
@@ -88,6 +93,7 @@ class ThemePreferencesRepository {
     final rawComposeSubmitEnter = await _storage.read(
       key: _composeSubmitEnterKey,
     );
+    final rawSpeechLanguage = await _storage.read(key: _speechLanguageKey);
     final terminalFontSize = double.tryParse(rawTerminalFontSize ?? '');
     final terminalKeyboardRows = _appendUnseenBuiltIns(
       _parseTerminalKeyboardRows(
@@ -123,6 +129,7 @@ class ThemePreferencesRepository {
       ),
       touchModeHintSeen: rawTouchModeHintSeen == 'true',
       composeSubmitEnter: rawComposeSubmitEnter == 'true',
+      speechLanguage: rawSpeechLanguage?.trim() ?? '',
     );
   }
 
@@ -180,6 +187,10 @@ class ThemePreferencesRepository {
     await _storage.write(
       key: _composeSubmitEnterKey,
       value: preferences.composeSubmitEnter.toString(),
+    );
+    await _storage.write(
+      key: _speechLanguageKey,
+      value: preferences.speechLanguage,
     );
   }
 
