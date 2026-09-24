@@ -8,6 +8,8 @@ import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
 import 'package:conduit/features/prompt_menus/presentation/prompt_menu_strip.dart';
+import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
+import 'package:conduit/features/sessions/presentation/session_grid_page.dart';
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/discard_changes_dialog.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/sftp_file_viewer.dart';
@@ -36,6 +38,7 @@ class TerminalPage extends StatefulWidget {
     required this.themeController,
     required this.sftpRepository,
     this.agentAttention,
+    this.connectFlow,
     super.key,
   });
 
@@ -45,6 +48,9 @@ class TerminalPage extends StatefulWidget {
 
   /// Optional Agent Attention monitoring; null hides the dashboard.
   final AgentAttentionController? agentAttention;
+
+  /// Optional connect flow for the session grid's "+" tile.
+  final SessionConnectFlow? connectFlow;
 
   @override
   State<TerminalPage> createState() => _TerminalPageState();
@@ -231,10 +237,16 @@ class _TerminalPageState extends State<TerminalPage> {
     }
   }
 
-  /// Gesture hook: swipe down from the header. Until a session grid exists
-  /// this returns to the hosts page, which lists the open sessions.
-  void _openSessionGrid() {
-    Navigator.of(context).pop();
+  Future<void> _openSessionGrid() async {
+    await showSessionGrid(
+      context,
+      workspace: widget.workspace,
+      themeController: widget.themeController,
+      agentAttention: widget.agentAttention,
+      connectFlow: widget.connectFlow,
+    );
+    if (!mounted) return;
+    _showTerminal();
   }
 
   /// Gesture hook: swipe in from the right edge opens the agent attention
@@ -313,6 +325,7 @@ class _TerminalPageState extends State<TerminalPage> {
                               onOpenAgentAttention: showAgents
                                   ? () => _openAgentAttention(attention)
                                   : null,
+                              onOpenSessionGrid: _openSessionGrid,
                             );
                           },
                         ),

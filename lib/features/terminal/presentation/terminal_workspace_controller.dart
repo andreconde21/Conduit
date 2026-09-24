@@ -45,7 +45,10 @@ class TerminalWorkspaceController extends ChangeNotifier {
     }
   }
 
-  TerminalSessionController open(SavedHost host) {
+  /// Opens (or activates) the session for [host]. [startupCommand] is typed
+  /// into the shell once connected; it only applies to a newly created
+  /// session.
+  TerminalSessionController open(SavedHost host, {String? startupCommand}) {
     final existingIndex = _sessions.indexWhere(
       (session) => session.host.id == host.id,
     );
@@ -59,6 +62,7 @@ class TerminalWorkspaceController extends ChangeNotifier {
       host: host,
       repository: _repository,
       connectivity: _connectivity,
+      startupCommand: startupCommand,
       predictiveEchoEnabled: host.predictiveEchoEnabled,
       enterSequence: _enterSequence,
     );

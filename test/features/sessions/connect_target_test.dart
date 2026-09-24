@@ -1,0 +1,167 @@
+import 'package:conduit/features/sessions/domain/connect_preferences.dart';
+import 'package:conduit/features/sessions/domain/connect_target.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import '../../support/test_doubles.dart';
+
+void main() {
+  group('ConnectTarget', () {
+    test('shell target leaves the host untouched', () {
+      final host = buildHost('h');
+      const target = ConnectTarget.shell();
+
+      expect(target.apply(host), same(host));
+      expect(target.startupCommand, isNull);
+      expect(target.key, 'shell');
+    });
+
+    test('tmux target derives the host id and reuses tmux-on-connect', () {
+      final host = buildHost('h').copyWith(tmuxStartDirectory: '~/work');
+      const target = ConnectTarget.tmux('build');
+
+      final applied = target.apply(host);
+      expect(applied.id, 'h#tmux:build');
+      expect(applied.name, 'Host h: build');
+      expect(applied.startTmuxOnConnect, isTrue);
+      expect(applied.tmuxSessionName, 'build');
+      expect(applied.tmuxStartDirectory, '~/work');
+      expect(applied.password, host.password);
+      expect(target.startupCommand, isNull);
+      expect(baseHostId(applied.id), 'h');
+    });
+
+    test('herdr target focuses the workspace then attaches', () {
+      const target = ConnectTarget.herdr(
+        workspaceId: 'wX',
+        label: 'Conductore-Mobile',
+      );
+      final applied = target.apply(
+        buildHost('h').copyWith(startTmuxOnConnect: true),
+      );
+
+      expect(applied.id, 'h#herdr:wX');
+      expect(applied.name, 'Host h: Conductore-Mobile');
+      expect(applied.startTmuxOnConnect, isFalse);
+      expect(
+        target.startupCommand,
+        'herdr workspace focus wX >/dev/null 2>&1; herdr',
+      );
+    });
+
+    test('herdr tab target focuses the tab', () {
+      const target = ConnectTarget.herdr(workspaceId: 'w4', tabId: 'w4:t4');
+      expect(target.key, 'herdr:w4:w4:t4');
+      expect(
+        target.startupCommand,
+        'herdr tab focus w4:t4 >/dev/null 2>&1; herdr',
+      );
+    });
+
+    test('bare herdr target just launches herdr', () {
+      const target = ConnectTarget.herdr(workspaceId: '');
+      expect(target.key, 'herdr');
+      expect(target.title, 'Herdr');
+      expect(target.startupCommand, 'herdr');
+    });
+
+    test('quotes unusual ids in the attach command', () {
+      const target = ConnectTarget.herdr(workspaceId: "it's");
+      expect(
+        target.startupCommand,
+        "herdr workspace focus 'it'\\''s' >/dev/null 2>&1; herdr",
+      );
+    });
+
+    test('round-trips through JSON', () {
+      const targets = [
+        ConnectTarget.shell(),
+        ConnectTarget.tmux('main'),
+        ConnectTarget.herdr(workspaceId: 'w1', label: 'L', tabId: 'w1:t2'),
+        ConnectTarget.herdr(workspaceId: ''),
+      ];
+      for (final target in targets) {
+        expect(ConnectTarget.fromJson(target.toJson()), target);
+      }
+      expect(ConnectTarget.fromJson({'kind': 'tmux', 'name': ''}), isNull);
+      expect(ConnectTarget.fromJson({'kind': 'nope'}), isNull);
+      expect(ConnectTarget.fromJson('junk'), isNull);
+    });
+
+    test('rebuilds the target from a session host id', () {
+      expect(ConnectTarget.fromSessionHostId('h'), isNull);
+      expect(
+        ConnectTarget.fromSessionHostId('h#tmux:dev'),
+        const ConnectTarget.tmux('dev'),
+      );
+      expect(
+        ConnectTarget.fromSessionHostId('h#herdr:wX'),
+        const ConnectTarget.herdr(workspaceId: 'wX'),
+      );
+      expect(
+        ConnectTarget.fromSessionHostId('h#herdr:wX:wX:t1'),
+        const ConnectTarget.herdr(workspaceId: 'wX', tabId: 'wX:t1'),
+      );
+      expect(
+        ConnectTarget.fromSessionHostId('h#herdr'),
+        const ConnectTarget.herdr(workspaceId: ''),
+      );
+      expect(
+        ConnectTarget.fromSessionHostId('h#shell'),
+        const ConnectTarget.shell(),
+      );
+      expect(ConnectTarget.fromSessionHostId('h#zellij:x'), isNull);
+    });
+  });
+
+  group('ConnectPreferences', () {
+    test('records choices most recent first without duplicates', () {
+      var preferences = const ConnectPreferences();
+      preferences = preferences.withChoice(
+        const ConnectTarget.tmux('a'),
+        remember: false,
+      );
+      preferences = preferences.withChoice(
+        const ConnectTarget.herdr(workspaceId: 'w1', label: 'One'),
+        remember: true,
+      );
+      preferences = preferences.withChoice(
+        const ConnectTarget.tmux('a'),
+        remember: true,
+      );
+
+      expect(preferences.rememberChoice, isTrue);
+      expect(preferences.lastTarget, const ConnectTarget.tmux('a'));
+      expect(preferences.recents.map((target) => target.key), [
+        'tmux:a',
+        'herdr:w1',
+      ]);
+    });
+
+    test('does not keep a plain shell as a recent', () {
+      final preferences = const ConnectPreferences().withChoice(
+        const ConnectTarget.shell(),
+        remember: true,
+      );
+      expect(preferences.lastTarget, const ConnectTarget.shell());
+      expect(preferences.recents, isEmpty);
+    });
+
+    test('caps recents and survives JSON', () {
+      var preferences = const ConnectPreferences();
+      for (var index = 0; index < 12; index++) {
+        preferences = preferences.withChoice(
+          ConnectTarget.tmux('s$index'),
+          remember: false,
+        );
+      }
+      expect(preferences.recents, hasLength(ConnectPreferences.maxRecents));
+      expect(preferences.recents.first, const ConnectTarget.tmux('s11'));
+
+      final restored = ConnectPreferences.fromJson(preferences.toJson());
+      expect(restored.rememberChoice, isFalse);
+      expect(restored.lastTarget, const ConnectTarget.tmux('s11'));
+      expect(restored.recents, preferences.recents);
+      expect(ConnectPreferences.fromJson(null).recents, isEmpty);
+    });
+  });
+}
