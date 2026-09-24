@@ -11,6 +11,7 @@ import 'package:conduit/features/sftp/domain/sftp_repository.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/discard_changes_dialog.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/sftp_file_viewer.dart';
 import 'package:conduit/features/terminal/domain/security_key_interaction.dart';
+import 'package:conduit/features/terminal/presentation/gestures/terminal_gesture_layer.dart';
 import 'package:conduit/features/terminal/presentation/security_key_picker_dialog.dart';
 import 'package:conduit/features/terminal/presentation/security_key_pin_dialog.dart';
 import 'package:conduit/features/terminal/presentation/terminal_file_tabs_controller.dart';
@@ -228,6 +229,22 @@ class _TerminalPageState extends State<TerminalPage> {
     }
   }
 
+  /// Gesture hook: swipe down from the header. Until a session grid exists
+  /// this returns to the hosts page, which lists the open sessions.
+  void _openSessionGrid() {
+    Navigator.of(context).pop();
+  }
+
+  /// Gesture hook: swipe in from the right edge opens the agent attention
+  /// sheet when monitoring is available, otherwise the gesture is off.
+  VoidCallback? _agentPanelOpener() {
+    final attention = widget.agentAttention;
+    if (attention == null) {
+      return null;
+    }
+    return () => _openAgentAttention(attention);
+  }
+
   void _setSystemUiFullscreen(bool fullscreen) {
     SystemChrome.setEnabledSystemUIMode(
       fullscreen ? SystemUiMode.immersiveSticky : SystemUiMode.edgeToEdge,
@@ -326,15 +343,12 @@ class _TerminalPageState extends State<TerminalPage> {
                                 children: [
                                   for (final session
                                       in widget.workspace.sessions)
-                                    TerminalSurface(
+                                    TerminalGestureLayer(
                                       key: ValueKey(session.host.id),
-                                      session: session,
-                                      palette: palette,
-                                      brightness: brightness,
-                                      fontFamily: widget
+                                      preferences: widget
                                           .themeController
-                                          .terminalFont
-                                          .fontFamily,
+                                          .terminalGestures,
+                                      session: session,
                                       fontSize: widget
                                           .themeController
                                           .terminalFontSize,
@@ -344,25 +358,52 @@ class _TerminalPageState extends State<TerminalPage> {
                                               .setTerminalFontSize(fontSize),
                                         );
                                       },
-                                      predictiveEchoEnabled:
-                                          session.host.predictiveEchoEnabled,
-                                      terminalMouseInput: widget
-                                          .themeController
-                                          .terminalMouseInput,
-                                      focusNode:
-                                          session == activeSession &&
-                                              activeFileTab == null
-                                          ? _focusNode
-                                          : null,
-                                      tmuxScrollMode:
+                                      scrollMode:
                                           session == activeSession &&
                                           _tmuxScrollMode,
-                                      onExitTmuxScrollMode: () {
+                                      onEnterScrollMode: () {
+                                        setState(() => _tmuxScrollMode = true);
+                                        _focusNode.requestFocus();
+                                      },
+                                      onExitScrollMode: () {
                                         setState(() => _tmuxScrollMode = false);
                                         _focusNode.requestFocus();
                                       },
-                                      onPathTap: (path) =>
-                                          _handlePathTap(session, path),
+                                      onOpenSessionGrid: _openSessionGrid,
+                                      onOpenAgentPanel: _agentPanelOpener(),
+                                      child: TerminalSurface(
+                                        session: session,
+                                        palette: palette,
+                                        brightness: brightness,
+                                        fontFamily: widget
+                                            .themeController
+                                            .terminalFont
+                                            .fontFamily,
+                                        fontSize: widget
+                                            .themeController
+                                            .terminalFontSize,
+                                        predictiveEchoEnabled:
+                                            session.host.predictiveEchoEnabled,
+                                        terminalMouseInput: widget
+                                            .themeController
+                                            .terminalMouseInput,
+                                        focusNode:
+                                            session == activeSession &&
+                                                activeFileTab == null
+                                            ? _focusNode
+                                            : null,
+                                        tmuxScrollMode:
+                                            session == activeSession &&
+                                            _tmuxScrollMode,
+                                        onExitTmuxScrollMode: () {
+                                          setState(
+                                            () => _tmuxScrollMode = false,
+                                          );
+                                          _focusNode.requestFocus();
+                                        },
+                                        onPathTap: (path) =>
+                                            _handlePathTap(session, path),
+                                      ),
                                     ),
                                   for (final tab in fileTabs)
                                     SftpFileViewer(

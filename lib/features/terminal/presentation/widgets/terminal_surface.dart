@@ -11,7 +11,6 @@ class TerminalSurface extends StatefulWidget {
     required this.brightness,
     required this.fontFamily,
     required this.fontSize,
-    required this.onFontSizeChanged,
     required this.predictiveEchoEnabled,
     required this.terminalMouseInput,
     required this.focusNode,
@@ -26,7 +25,6 @@ class TerminalSurface extends StatefulWidget {
   final Brightness brightness;
   final String fontFamily;
   final double fontSize;
-  final ValueChanged<double> onFontSizeChanged;
   final bool predictiveEchoEnabled;
   final bool terminalMouseInput;
   final FocusNode? focusNode;
@@ -42,9 +40,6 @@ class TerminalSurface extends StatefulWidget {
 }
 
 class _TerminalSurfaceState extends State<TerminalSurface> {
-  final _pinchPointers = <int, Offset>{};
-  double? _pinchStartDistance;
-  double? _pinchStartFontSize;
   double _tmuxScrollDelta = 0;
   late final TerminalController _terminalController;
 
@@ -90,47 +85,6 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
   Future<void> _connectIfNeeded() async {
     if (!mounted || !widget.session.shouldConnect) return;
     await widget.session.connect();
-  }
-
-  void _handlePointerDown(PointerDownEvent event) {
-    if (widget.tmuxScrollMode) {
-      return;
-    }
-    _pinchPointers[event.pointer] = event.localPosition;
-    if (_pinchPointers.length == 2) {
-      _pinchStartDistance = _pinchDistance;
-      _pinchStartFontSize = widget.fontSize;
-    }
-  }
-
-  void _handlePointerMove(PointerMoveEvent event) {
-    if (widget.tmuxScrollMode) {
-      return;
-    }
-    if (!_pinchPointers.containsKey(event.pointer)) {
-      return;
-    }
-    _pinchPointers[event.pointer] = event.localPosition;
-    final startDistance = _pinchStartDistance;
-    final startFontSize = _pinchStartFontSize;
-    if (_pinchPointers.length != 2 ||
-        startDistance == null ||
-        startDistance == 0 ||
-        startFontSize == null) {
-      return;
-    }
-    widget.onFontSizeChanged(startFontSize * (_pinchDistance / startDistance));
-  }
-
-  void _handlePointerEnd(PointerEvent event) {
-    if (widget.tmuxScrollMode) {
-      return;
-    }
-    _pinchPointers.remove(event.pointer);
-    if (_pinchPointers.length < 2) {
-      _pinchStartDistance = null;
-      _pinchStartFontSize = null;
-    }
   }
 
   void _handleTmuxScrollDrag(DragUpdateDetails details) {
@@ -201,63 +155,48 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
     }
   }
 
-  double get _pinchDistance {
-    final points = _pinchPointers.values.take(2).toList();
-    if (points.length < 2) {
-      return 0;
-    }
-    return (points[0] - points[1]).distance;
-  }
-
   @override
   Widget build(BuildContext context) {
     return ClipRect(
-      child: Listener(
-        behavior: HitTestBehavior.translucent,
-        onPointerDown: _handlePointerDown,
-        onPointerMove: _handlePointerMove,
-        onPointerUp: _handlePointerEnd,
-        onPointerCancel: _handlePointerEnd,
-        child: Stack(
-          children: [
-            ListenableBuilder(
-              listenable: widget.session.terminalPaintListenable,
-              builder: (context, _) {
-                final overlays = widget.session.overlays;
-                return TerminalView(
-                  widget.session.terminal,
-                  controller: _terminalController,
-                  onTapUp: _handleTapUp,
-                  focusNode: widget.focusNode,
-                  autofocus: widget.focusNode != null,
-                  deleteDetection: true,
-                  keyboardType: TextInputType.visiblePassword,
-                  theme: widget.palette.terminalThemeFor(widget.brightness),
-                  overlays: overlays,
-                  textStyle: TerminalStyle(
-                    fontFamily: widget.fontFamily,
-                    fontSize: widget.fontSize,
-                  ),
-                  padding: const EdgeInsets.fromLTRB(0, 6, 0, 4),
-                  cursorType: overlays.isEmpty
-                      ? TerminalCursorType.block
-                      : TerminalCursorType.verticalBar,
-                  alwaysShowCursor: true,
-                  simulateScroll: !widget.tmuxScrollMode,
-                );
-              },
-            ),
-            if (widget.tmuxScrollMode)
-              Positioned.fill(
-                child: GestureDetector(
-                  behavior: HitTestBehavior.translucent,
-                  onVerticalDragUpdate: _handleTmuxScrollDrag,
-                  onVerticalDragEnd: _handleTmuxScrollEnd,
-                  child: const SizedBox.expand(),
+      child: Stack(
+        children: [
+          ListenableBuilder(
+            listenable: widget.session.terminalPaintListenable,
+            builder: (context, _) {
+              final overlays = widget.session.overlays;
+              return TerminalView(
+                widget.session.terminal,
+                controller: _terminalController,
+                onTapUp: _handleTapUp,
+                focusNode: widget.focusNode,
+                autofocus: widget.focusNode != null,
+                deleteDetection: true,
+                keyboardType: TextInputType.visiblePassword,
+                theme: widget.palette.terminalThemeFor(widget.brightness),
+                overlays: overlays,
+                textStyle: TerminalStyle(
+                  fontFamily: widget.fontFamily,
+                  fontSize: widget.fontSize,
                 ),
+                padding: const EdgeInsets.fromLTRB(0, 6, 0, 4),
+                cursorType: overlays.isEmpty
+                    ? TerminalCursorType.block
+                    : TerminalCursorType.verticalBar,
+                alwaysShowCursor: true,
+                simulateScroll: !widget.tmuxScrollMode,
+              );
+            },
+          ),
+          if (widget.tmuxScrollMode)
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onVerticalDragUpdate: _handleTmuxScrollDrag,
+                onVerticalDragEnd: _handleTmuxScrollEnd,
+                child: const SizedBox.expand(),
               ),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
