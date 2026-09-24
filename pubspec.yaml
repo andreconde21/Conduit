@@ -41,6 +41,7 @@ dependencies:
   re_highlight: ^0.0.3
   pdfrx: ^2.4.7
   webview_flutter: ^4.14.1
+  url_launcher: ^6.3.2
 
 dev_dependencies:
   flutter_test:
@@ -49,6 +50,7 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   wakelock_plus_platform_interface: ^1.5.1
   flutter_launcher_icons: ^0.14.4
+  webview_flutter_platform_interface: ^2.15.1
 
 flutter_launcher_icons:
   android: "ic_launcher"
