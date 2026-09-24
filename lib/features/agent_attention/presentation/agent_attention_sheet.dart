@@ -1,7 +1,10 @@
+import 'package:conduit/core/presentation/system_navigation_insets.dart';
+import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 /// Called when the user taps an agent: navigate to the host's terminal tab
 /// (and optionally send the provider's focus command first).
@@ -18,15 +21,18 @@ Future<void> showAgentAttentionSheet({
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
-    builder: (context) => DraggableScrollableSheet(
-      expand: false,
-      initialChildSize: 0.6,
-      minChildSize: 0.3,
-      maxChildSize: 0.92,
-      builder: (context, scrollController) => AgentAttentionSheet(
-        controller: controller,
-        scrollController: scrollController,
-        onOpenAgent: onOpenAgent,
+    builder: (context) => AnnotatedRegion<SystemUiOverlayStyle>(
+      value: AppTheme.systemUiOverlayStyle(Theme.of(context).brightness),
+      child: DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.6,
+        minChildSize: 0.3,
+        maxChildSize: 0.92,
+        builder: (context, scrollController) => AgentAttentionSheet(
+          controller: controller,
+          scrollController: scrollController,
+          onOpenAgent: onOpenAgent,
+        ),
       ),
     ),
   );
@@ -47,13 +53,19 @@ class AgentAttentionSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // The sheet itself extends under the system navigation bar; keep the
+    // last row above three-button navigation (Samsung One UI reports
+    // gesture insets there too, see shouldApplyBottomSafeArea).
+    final bottomInset = shouldApplyBottomSafeArea(context)
+        ? MediaQuery.viewPaddingOf(context).bottom
+        : 0.0;
     return ListenableBuilder(
       listenable: controller,
       builder: (context, _) {
         final hosts = controller.monitoredHosts;
         return ListView(
           controller: scrollController,
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+          padding: EdgeInsets.fromLTRB(20, 12, 20, 24 + bottomInset),
           children: [
             Row(
               children: [
