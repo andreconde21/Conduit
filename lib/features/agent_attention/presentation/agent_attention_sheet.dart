@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
@@ -67,16 +69,7 @@ class AgentAttentionSheet extends StatelessWidget {
           controller: scrollController,
           padding: EdgeInsets.fromLTRB(20, 12, 20, 24 + bottomInset),
           children: [
-            Row(
-              children: [
-                Text('Agents', style: theme.textTheme.titleMedium),
-                const Spacer(),
-                Text(
-                  controller.provider.label,
-                  style: theme.textTheme.bodySmall,
-                ),
-              ],
-            ),
+            Text('Agents', style: theme.textTheme.titleMedium),
             const SizedBox(height: 8),
             if (hosts.isEmpty)
               const _EmptyState(
@@ -90,31 +83,65 @@ class AgentAttentionSheet extends StatelessWidget {
               for (final host in hosts)
                 _HostSection(
                   host: host,
+                  providerLabel: controller.providerFor(host.id).label,
                   status:
                       controller.statusFor(host.id) ??
                       const AgentHostStatus(loading: true),
                   onRefresh: () => controller.refresh(host.id),
                   onOpenAgent: (agent) => onOpenAgent(host, agent),
+                  isDeciding: controller.isDeciding,
+                  onDecide: (request, verdict) =>
+                      _decide(context, host, request, verdict),
                 ),
           ],
         );
       },
     );
   }
+
+  Future<void> _decide(
+    BuildContext context,
+    SavedHost host,
+    PendingPermissionRequest request,
+    PermissionVerdict verdict,
+  ) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    try {
+      await controller.decide(host.id, request, verdict);
+    } catch (error) {
+      messenger?.showSnackBar(
+        SnackBar(
+          content: Text(
+            'Could not ${verdict.label.toLowerCase()} ${request.toolName}: '
+            '$error',
+          ),
+        ),
+      );
+    }
+  }
 }
+
+typedef _DecideCallback =
+    void Function(PendingPermissionRequest request, PermissionVerdict verdict);
 
 class _HostSection extends StatelessWidget {
   const _HostSection({
     required this.host,
+    required this.providerLabel,
     required this.status,
     required this.onRefresh,
     required this.onOpenAgent,
+    required this.isDeciding,
+    required this.onDecide,
   });
 
   final SavedHost host;
+  final String providerLabel;
   final AgentHostStatus status;
   final VoidCallback onRefresh;
   final ValueChanged<AgentInfo> onOpenAgent;
+  final bool Function(String requestId) isDeciding;
+  final _DecideCallback onDecide;
 
   @override
   Widget build(BuildContext context) {
@@ -134,6 +161,7 @@ class _HostSection extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
+              Text(providerLabel, style: theme.textTheme.bodySmall),
               IconButton(
                 tooltip: 'Refresh',
                 iconSize: 18,
@@ -167,17 +195,29 @@ class _HostSection extends StatelessWidget {
           )
         else
           for (final agent in status.agents)
-            _AgentTile(agent: agent, onTap: () => onOpenAgent(agent)),
+            _AgentTile(
+              agent: agent,
+              onTap: () => onOpenAgent(agent),
+              isDeciding: isDeciding,
+              onDecide: onDecide,
+            ),
       ],
     );
   }
 }
 
 class _AgentTile extends StatelessWidget {
-  const _AgentTile({required this.agent, required this.onTap});
+  const _AgentTile({
+    required this.agent,
+    required this.onTap,
+    required this.isDeciding,
+    required this.onDecide,
+  });
 
   final AgentInfo agent;
   final VoidCallback onTap;
+  final bool Function(String requestId) isDeciding;
+  final _DecideCallback onDecide;
 
   @override
   Widget build(BuildContext context) {
@@ -212,11 +252,13 @@ class _AgentTile extends StatelessWidget {
       if (agent.tab != null) 'tab ${agent.tab}',
     ].join(' · ');
     final changed = agent.stateChangedAt;
-    return Semantics(
-      label:
-          'Agent ${agent.name}, ${agent.state.label}'
-          '${location.isEmpty ? '' : ', $location'}',
-      button: true,
+    final pending = agent.pendingRequests;
+    // A permission prompt is reported as "needs input"; say what kind.
+    final stateLabel = pending.isNotEmpty && agent.state.needsAttention
+        ? 'Needs permission'
+        : agent.state.label;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
       child: Material(
         color: theme.colorScheme.surface,
         shape: RoundedRectangleBorder(
@@ -224,26 +266,62 @@ class _AgentTile extends StatelessWidget {
           side: BorderSide(color: theme.colorScheme.outlineVariant),
         ),
         clipBehavior: Clip.antiAlias,
-        child: ListTile(
-          onTap: onTap,
-          leading: Icon(icon, color: color),
-          title: Text(agent.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-          subtitle: location.isEmpty ? null : Text(location, maxLines: 1),
-          trailing: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                agent.state.label,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: color,
-                  fontWeight: FontWeight.w700,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Semantics(
+              label:
+                  'Agent ${agent.name}, $stateLabel'
+                  '${location.isEmpty ? '' : ', $location'}',
+              button: true,
+              child: ListTile(
+                onTap: onTap,
+                leading: Icon(icon, color: color),
+                title: Text(
+                  agent.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: location.isEmpty ? null : Text(location, maxLines: 1),
+                trailing: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      stateLabel,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: color,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (changed != null)
+                      Text(
+                        _relativeTime(changed),
+                        style: theme.textTheme.bodySmall,
+                      ),
+                  ],
                 ),
               ),
-              if (changed != null)
-                Text(_relativeTime(changed), style: theme.textTheme.bodySmall),
-            ],
-          ),
+            ),
+            if (agent.lastMessage case final message?)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                child: Text(
+                  message,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                  maxLines: 4,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            for (final request in pending)
+              _PendingRequestCard(
+                request: request,
+                busy: isDeciding(request.id),
+                onDecide: (verdict) => onDecide(request, verdict),
+              ),
+          ],
         ),
       ),
     );
@@ -261,6 +339,137 @@ class _AgentTile extends StatelessWidget {
       return '${delta.inHours}h ago';
     }
     return '${delta.inDays}d ago';
+  }
+}
+
+/// One pending permission request: what the agent wants to run, the full
+/// tool input on demand, and the three answers.
+class _PendingRequestCard extends StatefulWidget {
+  const _PendingRequestCard({
+    required this.request,
+    required this.busy,
+    required this.onDecide,
+  });
+
+  final PendingPermissionRequest request;
+  final bool busy;
+  final ValueChanged<PermissionVerdict> onDecide;
+
+  @override
+  State<_PendingRequestCard> createState() => _PendingRequestCardState();
+}
+
+class _PendingRequestCardState extends State<_PendingRequestCard> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final request = widget.request;
+    final hasInput = request.toolInput.trim().isNotEmpty;
+    return Container(
+      color: theme.colorScheme.errorContainer.withValues(alpha: 0.25),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.shield_outlined,
+                size: 18,
+                color: theme.colorScheme.error,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  request.toolName,
+                  style: theme.textTheme.titleSmall,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (hasInput)
+                TextButton.icon(
+                  onPressed: () => setState(() => _expanded = !_expanded),
+                  icon: Icon(
+                    _expanded
+                        ? Icons.expand_less_rounded
+                        : Icons.expand_more_rounded,
+                    size: 18,
+                  ),
+                  label: Text(_expanded ? 'Hide input' : 'Tool input'),
+                ),
+            ],
+          ),
+          SelectableText(
+            request.summary,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontFamily: 'monospace',
+            ),
+            maxLines: _expanded ? null : 3,
+          ),
+          if (_expanded && hasInput) ...[
+            const SizedBox(height: 8),
+            Container(
+              constraints: const BoxConstraints(maxHeight: 220),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              padding: const EdgeInsets.all(10),
+              child: SingleChildScrollView(
+                child: SelectableText(
+                  request.toolInput,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              for (final verdict in const [
+                PermissionVerdict.deny,
+                PermissionVerdict.always,
+                PermissionVerdict.allow,
+              ]) ...[
+                if (verdict != PermissionVerdict.deny) const SizedBox(width: 8),
+                Expanded(
+                  child: switch (verdict) {
+                    PermissionVerdict.allow => FilledButton(
+                      onPressed: widget.busy
+                          ? null
+                          : () => widget.onDecide(verdict),
+                      child: Text(verdict.label),
+                    ),
+                    PermissionVerdict.always => FilledButton.tonal(
+                      onPressed: widget.busy
+                          ? null
+                          : () => widget.onDecide(verdict),
+                      child: Text(verdict.label),
+                    ),
+                    PermissionVerdict.deny => OutlinedButton(
+                      onPressed: widget.busy
+                          ? null
+                          : () => widget.onDecide(verdict),
+                      child: Text(verdict.label),
+                    ),
+                  },
+                ),
+              ],
+            ],
+          ),
+          if (widget.busy)
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: LinearProgressIndicator(),
+            ),
+        ],
+      ),
+    );
   }
 }
 

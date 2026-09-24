@@ -4,6 +4,27 @@ enum SshAuthMethod { password, privateKey, hardwareKey, external }
 
 enum TmuxPrefixKey { controlB, controlA }
 
+/// Which agent manager Agent Attention talks to on a host.
+enum AgentMonitorKind {
+  /// Conductore companion when `conductore-hostd` is installed, else Herdr.
+  auto,
+  herdr,
+  companion;
+
+  String get label => switch (this) {
+    AgentMonitorKind.auto => 'Auto',
+    AgentMonitorKind.herdr => 'Herdr',
+    AgentMonitorKind.companion => 'Conductore companion',
+  };
+
+  static AgentMonitorKind parse(Object? raw) {
+    return AgentMonitorKind.values
+            .where((kind) => kind.name == raw)
+            .firstOrNull ??
+        AgentMonitorKind.auto;
+  }
+}
+
 const defaultTmuxPrefixKey = TmuxPrefixKey.controlB;
 const defaultTmuxSessionName = 'conduit';
 
@@ -151,6 +172,7 @@ class SavedHost {
     this.agentAttentionEnabled = false,
     this.agentNotifyInput = true,
     this.agentNotifyFinished = true,
+    this.agentMonitor = AgentMonitorKind.auto,
     this.shareInboxDirectory = '',
     this.lastConnectedAt,
     this.isLocal = false,
@@ -201,6 +223,9 @@ class SavedHost {
 
   /// Notify when a monitored agent finishes background work.
   final bool agentNotifyFinished;
+
+  /// Which agent manager to read (see [AgentMonitorKind]).
+  final AgentMonitorKind agentMonitor;
 
   /// Remote directory shared files are uploaded to (share-to-agent). Empty
   /// means `~/conductore-inbox`; `~` and relative paths resolve under home.
@@ -282,6 +307,7 @@ class SavedHost {
     bool? agentAttentionEnabled,
     bool? agentNotifyInput,
     bool? agentNotifyFinished,
+    AgentMonitorKind? agentMonitor,
     String? shareInboxDirectory,
     DateTime? lastConnectedAt,
     bool clearLastConnectedAt = false,
@@ -318,6 +344,7 @@ class SavedHost {
           agentAttentionEnabled ?? this.agentAttentionEnabled,
       agentNotifyInput: agentNotifyInput ?? this.agentNotifyInput,
       agentNotifyFinished: agentNotifyFinished ?? this.agentNotifyFinished,
+      agentMonitor: agentMonitor ?? this.agentMonitor,
       shareInboxDirectory: shareInboxDirectory ?? this.shareInboxDirectory,
       lastConnectedAt: clearLastConnectedAt
           ? null
@@ -362,6 +389,7 @@ class SavedHost {
       'agentAttentionEnabled': agentAttentionEnabled,
       'agentNotifyInput': agentNotifyInput,
       'agentNotifyFinished': agentNotifyFinished,
+      'agentMonitor': agentMonitor.name,
       'shareInboxDirectory': shareInboxDirectory,
       'lastConnectedAt': lastConnectedAt?.toIso8601String(),
       'isLocal': isLocal,
@@ -420,6 +448,7 @@ class SavedHost {
       agentAttentionEnabled: json['agentAttentionEnabled'] as bool? ?? false,
       agentNotifyInput: json['agentNotifyInput'] as bool? ?? true,
       agentNotifyFinished: json['agentNotifyFinished'] as bool? ?? true,
+      agentMonitor: AgentMonitorKind.parse(json['agentMonitor']),
       shareInboxDirectory:
           (json['shareInboxDirectory'] as String?)?.trim() ?? '',
       lastConnectedAt: lastConnectedAtRaw == null

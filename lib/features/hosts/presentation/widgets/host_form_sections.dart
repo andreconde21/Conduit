@@ -307,6 +307,7 @@ class HostAdvancedSection extends StatelessWidget {
     required this.agentAttentionEnabled,
     required this.agentNotifyInput,
     required this.agentNotifyFinished,
+    required this.agentMonitor,
     required this.snippets,
     required this.connectSnippetId,
     required this.timeoutValidator,
@@ -320,8 +321,10 @@ class HostAdvancedSection extends StatelessWidget {
     required this.onAgentAttentionEnabledChanged,
     required this.onAgentNotifyInputChanged,
     required this.onAgentNotifyFinishedChanged,
+    required this.onAgentMonitorChanged,
     required this.onSnippetsChanged,
     required this.onConnectSnippetChanged,
+    this.onCheckCompanion,
     super.key,
   });
 
@@ -341,6 +344,7 @@ class HostAdvancedSection extends StatelessWidget {
   final bool agentAttentionEnabled;
   final bool agentNotifyInput;
   final bool agentNotifyFinished;
+  final AgentMonitorKind agentMonitor;
   final List<TerminalSnippet> snippets;
   final String connectSnippetId;
   final FormFieldValidator<String> timeoutValidator;
@@ -354,8 +358,13 @@ class HostAdvancedSection extends StatelessWidget {
   final ValueChanged<bool> onAgentAttentionEnabledChanged;
   final ValueChanged<bool> onAgentNotifyInputChanged;
   final ValueChanged<bool> onAgentNotifyFinishedChanged;
+  final ValueChanged<AgentMonitorKind> onAgentMonitorChanged;
   final ValueChanged<List<TerminalSnippet>> onSnippetsChanged;
   final ValueChanged<String> onConnectSnippetChanged;
+
+  /// Runs the Conductore companion's `doctor` on this machine and shows
+  /// the result; null hides the button (e.g. no SSH stack in tests).
+  final VoidCallback? onCheckCompanion;
 
   @override
   Widget build(BuildContext context) {
@@ -515,7 +524,7 @@ class HostAdvancedSection extends StatelessWidget {
             contentPadding: EdgeInsets.zero,
             title: const Text('Monitor coding agents'),
             subtitle: const Text(
-              'Poll Herdr on this machine while connected and show agent '
+              'Watch agents on this machine while connected and show their '
               'states in the terminal dashboard.',
             ),
             value: agentAttentionEnabled,
@@ -541,6 +550,39 @@ class HostAdvancedSection extends StatelessWidget {
               onChanged: onAgentNotifyFinishedChanged,
             ),
           ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<AgentMonitorKind>(
+            initialValue: agentMonitor,
+            decoration: const InputDecoration(
+              labelText: 'Agent monitor',
+              helperText:
+                  'Auto uses the Conductore companion when conductore-hostd '
+                  'is installed (permission prompts answerable from the '
+                  'phone), otherwise Herdr.',
+              helperMaxLines: 3,
+              prefixIcon: Icon(Icons.monitor_heart_outlined),
+            ),
+            items: [
+              for (final kind in AgentMonitorKind.values)
+                DropdownMenuItem(value: kind, child: Text(kind.label)),
+            ],
+            onChanged: (value) {
+              if (value != null) {
+                onAgentMonitorChanged(value);
+              }
+            },
+          ),
+          if (onCheckCompanion != null) ...[
+            const SizedBox(height: 8),
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: OutlinedButton.icon(
+                onPressed: onCheckCompanion,
+                icon: const Icon(Icons.health_and_safety_outlined, size: 18),
+                label: const Text('Set up companion'),
+              ),
+            ),
+          ],
         ],
         const SizedBox(height: 16),
         TextFormField(

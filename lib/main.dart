@@ -4,10 +4,12 @@ import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/core/theme/theme_preferences_repository.dart';
+import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
 import 'package:conduit/features/agent_attention/data/herdr_attention_provider.dart';
 import 'package:conduit/features/agent_attention/data/platform_agent_notifier.dart';
 import 'package:conduit/features/agent_attention/data/ssh_agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
+import 'package:conduit/features/agent_attention/presentation/agent_permission_action_listener.dart';
 import 'package:conduit/features/app_lock/data/local_app_authenticator.dart';
 import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart';
 import 'package:conduit/features/app_lock/presentation/lock_page.dart';
@@ -86,6 +88,7 @@ void main() {
     workspace: workspaceController,
     runnerFactory: (host) => SshAgentCommandRunner(hostKeyVerifier, host),
     provider: const HerdrAttentionProvider(),
+    companionProvider: const ConductoreHostAttentionProvider(),
     notifier: const PlatformAgentAttentionNotifier(),
   );
   final connectFlow = SessionConnectFlow(
@@ -230,6 +233,11 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
         (defaultTargetPlatform == TargetPlatform.android &&
             state != AppLifecycleState.detached);
     widget.agentAttention.setAppActive(active);
+    // The companion long-poll only runs while the app is on screen; in the
+    // background the periodic poll (and its notifications) is enough.
+    widget.agentAttention.setAppForeground(
+      state == AppLifecycleState.resumed || state == AppLifecycleState.inactive,
+    );
   }
 
   void _syncBackgroundKeepalive() {
@@ -380,7 +388,17 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
                   channel: PlatformAgentStatusWidgetChannel.instance,
                   agentAttention: widget.agentAttention,
                   workspace: widget.workspaceController,
-                  child: home,
+                  child: AgentPermissionActionListener(
+                    source: PlatformAgentPermissionActions.instance,
+                    agentAttention: widget.agentAttention,
+                    findHost: (hostId) async {
+                      await widget.hostsController.firstLoad;
+                      return widget.hostsController.hosts
+                          .where((host) => host.id == hostId)
+                          .firstOrNull;
+                    },
+                    child: home,
+                  ),
                 ),
               );
             },

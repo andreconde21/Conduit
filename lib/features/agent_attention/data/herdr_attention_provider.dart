@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:conduit/core/app_failure.dart';
+import 'package:conduit/features/agent_attention/data/remote_tool_command.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention_provider.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
@@ -15,35 +16,16 @@ import 'package:conduit/features/agent_attention/domain/agent_command_runner.dar
 /// "terminal_title_stripped": "...", "state_change_seq": 42}` inside a
 /// `{"id": ..., "result": {"agents": [...]}}` envelope; `name` is only
 /// present for agents that were given a live name.
-class HerdrAttentionProvider implements AgentAttentionProvider {
+class HerdrAttentionProvider extends AgentAttentionProvider {
   const HerdrAttentionProvider();
 
   static const _commandTimeout = Duration(seconds: 10);
 
-  /// Directories Herdr's installers use that a non-interactive SSH shell
-  /// does not put on PATH (`~/.bashrc`-only activation for mise, Homebrew,
-  /// Cargo, Nix, and the official `install.sh` default of `~/.local/bin`).
-  static const _extraPathDirs = [
-    r'$HOME/.local/bin',
-    r'$HOME/.local/share/mise/shims',
-    r'$HOME/.cargo/bin',
-    r'$HOME/.nix-profile/bin',
-    '/opt/homebrew/bin',
-    '/home/linuxbrew/.linuxbrew/bin',
-    '/usr/local/bin',
-  ];
-
-  /// Wraps `herdr [args]` so it runs under POSIX `sh` with the usual
-  /// user-local install directories prepended to PATH. SSH exec channels
-  /// get a non-login, non-interactive shell whose PATH rarely includes
-  /// them, which would otherwise read as "Herdr is not installed"; going
-  /// through `sh -c` also keeps the `PATH=... cmd` syntax working when the
-  /// login shell is fish or csh.
-  static String remoteCommand(String herdrArgs) {
-    final inner =
-        'PATH="${_extraPathDirs.join(':')}:\$PATH" exec herdr $herdrArgs';
-    return "sh -c '${inner.replaceAll("'", "'\\''")}'";
-  }
+  /// Wraps `herdr [args]` in the shared PATH wrapper (see
+  /// [remoteToolCommand]) so user-local installs are found from a
+  /// non-interactive SSH shell.
+  static String remoteCommand(String herdrArgs) =>
+      remoteToolCommand('herdr', herdrArgs);
 
   @override
   String get id => 'herdr';
@@ -94,7 +76,7 @@ class HerdrAttentionProvider implements AgentAttentionProvider {
     if (target == null) {
       return null;
     }
-    return remoteCommand('agent focus ${_shellQuote(target)}');
+    return remoteCommand('agent focus ${shellQuoteArgument(target)}');
   }
 
   static final _liveAgentName = RegExp(r'^[a-z][a-z0-9_-]{0,31}$');
@@ -293,12 +275,5 @@ class HerdrAttentionProvider implements AgentAttentionProvider {
       'Herdr reported an error.',
       raw.length > 200 ? raw.substring(0, 200) : raw,
     );
-  }
-
-  static String _shellQuote(String value) {
-    if (RegExp(r'^[A-Za-z0-9._:\-]+$').hasMatch(value)) {
-      return value;
-    }
-    return "'${value.replaceAll("'", "'\\''")}'";
   }
 }

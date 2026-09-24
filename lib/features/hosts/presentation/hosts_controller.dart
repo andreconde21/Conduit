@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/domain/saved_hosts_repository.dart';
@@ -14,6 +16,11 @@ class HostsController extends ChangeNotifier {
   List<String> _manualOrder = const [];
   bool _isLoading = true;
   String? _errorMessage;
+  final Completer<void> _firstLoad = Completer<void>();
+
+  /// Completes once the first [load] has finished (successfully or not),
+  /// for work that must see the saved hosts right after app start.
+  Future<void> get firstLoad => _firstLoad.future;
 
   List<SavedHost> get hosts => _hosts;
   List<SavedHost> get sortedHosts =>
@@ -40,6 +47,9 @@ class HostsController extends ChangeNotifier {
       _errorMessage = error.toString();
     } finally {
       _isLoading = false;
+      if (!_firstLoad.isCompleted) {
+        _firstLoad.complete();
+      }
       notifyListeners();
     }
   }

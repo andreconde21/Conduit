@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/home_widget/domain/agent_status_snapshot.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -45,6 +46,22 @@ void main() {
     ]);
     expect(snapshot.agents.first.host, 'prod');
     expect(snapshot.agents, hasLength(AgentStatusSnapshot.maxAgents));
+  });
+
+  test('a companion permission prompt counts as attention', () {
+    final parsed = ConductoreHostAttentionProvider.parseSnapshot(
+      '{"version":1,"seq":1,"agents":[{"sessionId":"s","name":"api",'
+      '"state":"needs_permission","pending":[{"id":"r","toolName":"Bash",'
+      '"summary":"ls"}]},{"sessionId":"t","name":"web","state":"working"}]}',
+    );
+    final snapshot = AgentStatusSnapshot.build(
+      hosts: [(hostName: 'dev', agents: parsed.agents)],
+      monitoring: true,
+      now: now,
+    );
+    expect(snapshot.attentionCount, 1);
+    expect(snapshot.agents.first.name, 'api');
+    expect(snapshot.agents.first.state, AgentAttentionState.needsInput);
   });
 
   test('counts every agent needing attention even beyond the row limit', () {
