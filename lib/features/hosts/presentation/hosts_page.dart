@@ -345,7 +345,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
                 icon: Icons.dns_outlined,
                 title: 'No saved machines yet',
                 message:
-                    'Add an SSH or Mosh server and Conduit will keep its '
+                    'Add an SSH or Mosh server and Conductore will keep its '
                     'credentials in your device’s secure storage.',
                 actionLabel: 'Add machine',
                 onAction: _openForm,
@@ -894,7 +894,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete machine?'),
-        content: Text('Conduit will forget “${host.name}”.'),
+        content: Text('Conductore will forget “${host.name}”.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
