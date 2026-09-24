@@ -17,14 +17,39 @@ import android.os.IBinder
 import android.provider.Settings
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterFragmentActivity() {
     private lateinit var fidoUsbCtapTransport: FidoUsbCtapTransport
+    private var speechRecognition: SpeechRecognitionBridge? = null
+    private var shareTarget: ShareTargetBridge? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        flutterEngine.plugins.add(AgentStatusWidgetChannel()) // home widget + QS tile bridge
+        flutterEngine.plugins.add(AgentNotificationBridge()) // agent + permission notifications
         fidoUsbCtapTransport = FidoUsbCtapTransport(this)
+        val speech = SpeechRecognitionBridge(this)
+        speechRecognition = speech
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            SpeechRecognitionBridge.METHOD_CHANNEL,
+        ).setMethodCallHandler { call, result -> speech.handle(call, result) }
+        EventChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            SpeechRecognitionBridge.EVENT_CHANNEL,
+        ).setStreamHandler(speech)
+        val share = ShareTargetBridge(this)
+        shareTarget = share
+        val shareChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            ShareTargetBridge.CHANNEL,
+        )
+        shareChannel.setMethodCallHandler { call, result -> share.handle(call, result) }
+        share.attach(shareChannel)
+        // A cold start from the share sheet: the launching intent is the share.
+        share.consume(intent)
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             BACKGROUND_KEEPALIVE_CHANNEL,
@@ -41,21 +66,6 @@ class MainActivity : FlutterFragmentActivity() {
                 }
                 "requestNotificationPermission" -> {
                     requestNotificationPermissionIfNeeded()
-                    result.success(null)
-                }
-                else -> result.notImplemented()
-            }
-        }
-        MethodChannel(
-            flutterEngine.dartExecutor.binaryMessenger,
-            AGENT_NOTIFICATIONS_CHANNEL,
-        ).setMethodCallHandler { call, result ->
-            when (call.method) {
-                "show" -> {
-                    val id = call.argument<String>("id") ?: ""
-                    val title = call.argument<String>("title") ?: ""
-                    val body = call.argument<String>("body") ?: ""
-                    showAgentNotification(id, title, body)
                     result.success(null)
                 }
                 else -> result.notImplemented()
@@ -91,6 +101,31 @@ class MainActivity : FlutterFragmentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        shareTarget?.consume(intent)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        if (speechRecognition?.onRequestPermissionsResult(requestCode, grantResults) == true) {
+            return
+        }
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+    }
+
+    override fun onDestroy() {
+        speechRecognition?.dispose()
+        speechRecognition = null
+        shareTarget?.dispose()
+        shareTarget = null
+        super.onDestroy()
+    }
+
     private fun hasSharedStorageAccess(): Boolean {
         if (!BuildConfig.FULL_STORAGE_ACCESS) return false
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -123,49 +158,6 @@ class MainActivity : FlutterFragmentActivity() {
         return Environment.getExternalStorageDirectory().absolutePath
     }
 
-    private fun showAgentNotification(id: String, title: String, body: String) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            return
-        }
-        val manager = getSystemService(NotificationManager::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                AGENT_NOTIFICATION_CHANNEL_ID,
-                "Agent attention",
-                NotificationManager.IMPORTANCE_DEFAULT,
-            ).apply {
-                description = "Alerts when a monitored coding agent needs input or finishes."
-            }
-            manager.createNotificationChannel(channel)
-        }
-        val launchIntent = Intent(this, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            launchIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, AGENT_NOTIFICATION_CHANNEL_ID)
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(this)
-        }
-        val notification = builder
-            .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle(title)
-            .setContentText(body)
-            .setContentIntent(pendingIntent)
-            .setAutoCancel(true)
-            .build()
-        // A stable per-agent id: a new state for the same agent replaces the
-        // old notification instead of stacking.
-        manager.notify(AGENT_NOTIFICATION_TAG, id.hashCode(), notification)
-    }
-
     private fun requestNotificationPermissionIfNeeded() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
         val granted = checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
@@ -179,11 +171,8 @@ class MainActivity : FlutterFragmentActivity() {
 
     companion object {
         const val BACKGROUND_KEEPALIVE_CHANNEL = "conduit/background_keepalive"
-        const val AGENT_NOTIFICATIONS_CHANNEL = "conduit/agent_notifications"
         const val FIDO_USB_CHANNEL = "conduit/fido_usb"
         const val LOCAL_SHELL_CHANNEL = "conduit/local_shell"
-        private const val AGENT_NOTIFICATION_CHANNEL_ID = "agent_attention"
-        private const val AGENT_NOTIFICATION_TAG = "conduit_agent"
         private const val NOTIFICATION_PERMISSION_REQUEST_CODE = 2001
         private const val SHARED_STORAGE_PERMISSION_REQUEST_CODE = 2002
     }
@@ -221,7 +210,7 @@ class BackgroundConnectionService : Service() {
             "Active sessions",
             NotificationManager.IMPORTANCE_LOW,
         ).apply {
-            description = "Keeps active sessions running while Conduit is in the background."
+            description = "Keeps active sessions running while Conductore is in the background."
             setShowBadge(false)
         }
         manager.createNotificationChannel(channel)
@@ -247,7 +236,7 @@ class BackgroundConnectionService : Service() {
 
         return builder
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("Conduit")
+            .setContentTitle("Conductore")
             .setContentText("$sessionCount active $sessionLabel")
             .setContentIntent(pendingIntent)
             .setOngoing(true)

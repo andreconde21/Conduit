@@ -1,7 +1,9 @@
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
+import 'package:conduit/core/theme/terminal_pill_items.dart';
 import 'package:conduit/core/theme/theme_preferences_repository.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
+import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -232,6 +234,95 @@ void main() {
       },
     );
 
+    test('defaults the toolbar style to the floating pill and persists a '
+        'change', () async {
+      final storage = InMemorySecureStorage();
+      final repository = ThemePreferencesRepository(storage);
+
+      final defaults = await repository.load();
+      expect(defaults.terminalToolbarStyle, TerminalToolbarStyle.floatingPill);
+
+      await repository.save(
+        const ThemePreferences(
+          themeMode: ThemeMode.dark,
+          palette: AppPalette.synthwave,
+          terminalToolbarStyle: TerminalToolbarStyle.keyRows,
+        ),
+      );
+
+      final preferences = await repository.load();
+      expect(preferences.terminalToolbarStyle, TerminalToolbarStyle.keyRows);
+    });
+
+    test('defaults the pill buttons to the Moshi set plus Herdr and persists '
+        'a reordered list', () async {
+      final storage = InMemorySecureStorage();
+      final repository = ThemePreferencesRepository(storage);
+
+      final defaults = await repository.load();
+      expect(defaults.terminalPillItems, defaultTerminalPillItems);
+      expect(defaults.terminalPillItems.map((item) => item.button), [
+        TerminalPillButton.ctrl,
+        TerminalPillButton.esc,
+        TerminalPillButton.tab,
+        TerminalPillButton.herdr,
+        TerminalPillButton.reconnect,
+        TerminalPillButton.paste,
+        TerminalPillButton.chat,
+        TerminalPillButton.keyboard,
+      ]);
+
+      const custom = [
+        TerminalPillItem.button(TerminalPillButton.herdr),
+        TerminalPillItem.button(TerminalPillButton.arrows),
+        TerminalPillItem.custom('my-key'),
+      ];
+      await repository.save(
+        const ThemePreferences(
+          themeMode: ThemeMode.dark,
+          palette: AppPalette.synthwave,
+          terminalPillItems: custom,
+        ),
+      );
+      expect((await repository.load()).terminalPillItems, custom);
+    });
+
+    test('drops unknown and duplicate pill buttons and falls back to the '
+        'default on corrupt data', () async {
+      final storage = InMemorySecureStorage();
+      await storage.write(
+        key: 'conduit.terminal_pill_items.v1',
+        value: '["esc","hologram","esc","custom:","custom:k1"]',
+      );
+      final repository = ThemePreferencesRepository(storage);
+      expect((await repository.load()).terminalPillItems, const [
+        TerminalPillItem.button(TerminalPillButton.esc),
+        TerminalPillItem.custom('k1'),
+      ]);
+
+      await storage.write(key: 'conduit.terminal_pill_items.v1', value: '{');
+      expect(
+        (await repository.load()).terminalPillItems,
+        defaultTerminalPillItems,
+      );
+    });
+
+    test('treats an unknown toolbar style as the floating pill', () async {
+      final storage = InMemorySecureStorage();
+      await storage.write(
+        key: 'conduit.terminal_toolbar_style.v1',
+        value: 'hologram',
+      );
+      final repository = ThemePreferencesRepository(storage);
+
+      final preferences = await repository.load();
+
+      expect(
+        preferences.terminalToolbarStyle,
+        TerminalToolbarStyle.floatingPill,
+      );
+    });
+
     test('treats a corrupt touch mode hint value as unseen', () async {
       final storage = InMemorySecureStorage();
       await storage.write(
@@ -243,6 +334,53 @@ void main() {
       final preferences = await repository.load();
 
       expect(preferences.touchModeHintSeen, isFalse);
+    });
+
+    test('defaults menu buttons to on and persists turning them off', () async {
+      final storage = InMemorySecureStorage();
+      final repository = ThemePreferencesRepository(storage);
+
+      final defaults = await repository.load();
+      expect(defaults.menuButtonsEnabled, isTrue);
+
+      await repository.save(
+        const ThemePreferences(
+          themeMode: ThemeMode.dark,
+          palette: AppPalette.synthwave,
+          menuButtonsEnabled: false,
+        ),
+      );
+
+      final preferences = await repository.load();
+      expect(preferences.menuButtonsEnabled, isFalse);
+    });
+
+    test('persists terminal gesture switches and tolerates bad data', () async {
+      final storage = InMemorySecureStorage();
+      final repository = ThemePreferencesRepository(storage);
+
+      final defaults = await repository.load();
+      expect(defaults.terminalGestures, TerminalGesturePreferences.defaults);
+
+      const gestures = TerminalGesturePreferences(
+        swipeSwitchesWindow: false,
+        windowSwitchTarget: TerminalWindowSwitchTarget.herdr,
+        pinchZoom: false,
+      );
+      await repository.save(
+        const ThemePreferences(
+          themeMode: ThemeMode.dark,
+          palette: AppPalette.synthwave,
+          terminalGestures: gestures,
+        ),
+      );
+      expect((await repository.load()).terminalGestures, gestures);
+
+      await storage.write(key: 'conduit.terminal_gestures.v1', value: '{');
+      expect(
+        (await repository.load()).terminalGestures,
+        TerminalGesturePreferences.defaults,
+      );
     });
 
     test('persists and loads global snippets', () async {

@@ -103,7 +103,7 @@ void main() {
         host: buildHost('mosh-tmux').copyWith(
           useMosh: true,
           startTmuxOnConnect: true,
-          tmuxPrefixKey: TmuxPrefixKey.controlA,
+          tmuxPrefixKey: MultiplexerPrefixKey.controlA,
         ),
         repository: ImmediateTerminalRepository(session),
       );
@@ -345,7 +345,7 @@ void main() {
               onToggleFullscreen: () {},
               onEnterTmuxScrollMode: () {},
               onExitTmuxScrollMode: () {},
-              tmuxPrefixKey: TmuxPrefixKey.controlB,
+              tmuxPrefixKey: MultiplexerPrefixKey.controlB,
               tmuxScrollMode: false,
             ),
           ),
@@ -425,7 +425,7 @@ void main() {
               onToggleFullscreen: () {},
               onEnterTmuxScrollMode: () {},
               onExitTmuxScrollMode: () {},
-              tmuxPrefixKey: TmuxPrefixKey.controlB,
+              tmuxPrefixKey: MultiplexerPrefixKey.controlB,
               tmuxScrollMode: false,
             ),
           ),
@@ -485,7 +485,7 @@ void main() {
               onToggleCompose: () {},
               onEnterTmuxScrollMode: () {},
               onExitTmuxScrollMode: () {},
-              tmuxPrefixKey: TmuxPrefixKey.controlB,
+              tmuxPrefixKey: MultiplexerPrefixKey.controlB,
               tmuxScrollMode: false,
             ),
           ),
@@ -545,7 +545,7 @@ void main() {
               onToggleFullscreen: () {},
               onEnterTmuxScrollMode: () {},
               onExitTmuxScrollMode: () {},
-              tmuxPrefixKey: TmuxPrefixKey.controlB,
+              tmuxPrefixKey: MultiplexerPrefixKey.controlB,
               tmuxScrollMode: false,
             ),
           ),
@@ -607,7 +607,7 @@ void main() {
               onToggleFullscreen: () {},
               onEnterTmuxScrollMode: () {},
               onExitTmuxScrollMode: () {},
-              tmuxPrefixKey: TmuxPrefixKey.controlB,
+              tmuxPrefixKey: MultiplexerPrefixKey.controlB,
               tmuxScrollMode: false,
             ),
           ),
@@ -663,7 +663,7 @@ void main() {
             onToggleFullscreen: () {},
             onEnterTmuxScrollMode: () => enteredScrollMode = true,
             onExitTmuxScrollMode: () => exitedScrollMode = true,
-            tmuxPrefixKey: TmuxPrefixKey.controlB,
+            tmuxPrefixKey: MultiplexerPrefixKey.controlB,
             tmuxScrollMode: tmuxScrollMode,
           ),
         ),
@@ -713,9 +713,8 @@ void main() {
               onToggleFullscreen: () {},
               onEnterTmuxScrollMode: () => enteredScrollMode = true,
               onExitTmuxScrollMode: () {},
-              // Herdr's prefix is fixed at ctrl+b even when the host's tmux
-              // prefix is something else.
-              tmuxPrefixKey: TmuxPrefixKey.controlA,
+              // Herdr shares the host's multiplexer prefix, whatever it is.
+              tmuxPrefixKey: MultiplexerPrefixKey.controlA,
               tmuxScrollMode: false,
             ),
           ),
@@ -727,7 +726,7 @@ void main() {
       await tester.tap(find.text('Split right'));
       await tester.pumpAndSettle();
 
-      expect(controller.sentControlKeys, [TerminalKey.keyB]);
+      expect(controller.sentControlKeys, [TerminalKey.keyA]);
       expect(controller.sentText, ['v']);
       expect(controller.sentKeys, isEmpty);
       expect(enteredScrollMode, isFalse);
@@ -740,7 +739,7 @@ void main() {
       await tester.tap(find.text('Scrollback'));
       await tester.pumpAndSettle();
 
-      expect(controller.sentControlKeys, [TerminalKey.keyB, TerminalKey.keyB]);
+      expect(controller.sentControlKeys, [TerminalKey.keyA, TerminalKey.keyA]);
       expect(controller.sentText, ['v', '[']);
       expect(enteredScrollMode, isTrue);
     });
@@ -773,7 +772,7 @@ void main() {
             onToggleFullscreen: () {},
             onEnterTmuxScrollMode: () {},
             onExitTmuxScrollMode: () {},
-            tmuxPrefixKey: TmuxPrefixKey.controlB,
+            tmuxPrefixKey: MultiplexerPrefixKey.controlB,
             tmuxScrollMode: false,
             terminalMouseInput: terminalMouseInput,
           ),
@@ -833,7 +832,7 @@ void main() {
               onToggleFullscreen: () {},
               onEnterTmuxScrollMode: () {},
               onExitTmuxScrollMode: () {},
-              tmuxPrefixKey: TmuxPrefixKey.controlB,
+              tmuxPrefixKey: MultiplexerPrefixKey.controlB,
               tmuxScrollMode: true,
             ),
           ),
@@ -872,7 +871,7 @@ void main() {
               onToggleFullscreen: () {},
               onEnterTmuxScrollMode: () {},
               onExitTmuxScrollMode: () {},
-              tmuxPrefixKey: TmuxPrefixKey.controlB,
+              tmuxPrefixKey: MultiplexerPrefixKey.controlB,
               tmuxScrollMode: false,
             ),
           ),
@@ -920,7 +919,7 @@ void main() {
             onToggleFullscreen: () {},
             onEnterTmuxScrollMode: () {},
             onExitTmuxScrollMode: () {},
-            tmuxPrefixKey: TmuxPrefixKey.controlB,
+            tmuxPrefixKey: MultiplexerPrefixKey.controlB,
             tmuxScrollMode: false,
             terminalMouseInput: terminalMouseInput,
             onTerminalMouseInputChanged: changes.add,
@@ -974,7 +973,7 @@ void main() {
             onToggleFullscreen: () {},
             onEnterTmuxScrollMode: () => enteredScrollMode = true,
             onExitTmuxScrollMode: () => exitedScrollMode = true,
-            tmuxPrefixKey: TmuxPrefixKey.controlB,
+            tmuxPrefixKey: MultiplexerPrefixKey.controlB,
             tmuxScrollMode: tmuxScrollMode,
           ),
         ),
@@ -1030,7 +1029,7 @@ void main() {
               onToggleFullscreen: () {},
               onEnterTmuxScrollMode: () {},
               onExitTmuxScrollMode: () {},
-              tmuxPrefixKey: TmuxPrefixKey.controlB,
+              tmuxPrefixKey: MultiplexerPrefixKey.controlB,
               tmuxScrollMode: false,
               onRemoteMouseTrackingActivated: () => activations += 1,
             ),
@@ -1085,7 +1084,7 @@ void main() {
               onToggleFullscreen: () {},
               onEnterTmuxScrollMode: () {},
               onExitTmuxScrollMode: () {},
-              tmuxPrefixKey: TmuxPrefixKey.controlB,
+              tmuxPrefixKey: MultiplexerPrefixKey.controlB,
               tmuxScrollMode: false,
               onRemoteMouseTrackingActivated: () => activations += 1,
             ),
@@ -1137,7 +1136,7 @@ void main() {
                   onToggleFullscreen: () {},
                   onEnterTmuxScrollMode: () {},
                   onExitTmuxScrollMode: () {},
-                  tmuxPrefixKey: TmuxPrefixKey.controlB,
+                  tmuxPrefixKey: MultiplexerPrefixKey.controlB,
                   tmuxScrollMode: false,
                   onRemoteMouseTrackingActivated: () {
                     // The page reacts by notifying a ThemeController and
@@ -1178,7 +1177,6 @@ void main() {
               brightness: Brightness.dark,
               fontFamily: 'monospace',
               fontSize: 14,
-              onFontSizeChanged: (_) {},
               predictiveEchoEnabled: false,
               terminalMouseInput: false,
               focusNode: focusNode,

@@ -24,6 +24,9 @@ class DiffViewTab extends TerminalFileTab {
   }
 
   @override
+  String get tooltip => '$title · ${host.name}';
+
+  @override
   IconData get icon => Icons.difference_outlined;
 
   @override

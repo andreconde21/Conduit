@@ -37,7 +37,7 @@ Future<HostKeyDecision?> showHostKeyPromptDialog({
                 Padding(
                   padding: const EdgeInsets.only(bottom: 12),
                   child: Text(
-                    'Conduit has not connected to ${request.host}:${request.port} '
+                    'Conductore has not connected to ${request.host}:${request.port} '
                     'before. Verify the fingerprint matches the one reported by '
                     'the server (e.g. `ssh-keygen -E md5 -lf <key>`).',
                   ),

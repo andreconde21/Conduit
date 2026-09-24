@@ -19,11 +19,18 @@ import 'package:conduit/features/live_preview/presentation/live_preview_controll
 import 'package:conduit/features/live_preview/presentation/live_preview_port_dialog.dart';
 import 'package:conduit/features/live_preview/presentation/live_preview_tab.dart';
 import 'package:conduit/features/live_preview/presentation/live_preview_view.dart';
+import 'package:conduit/features/prompt_menus/presentation/prompt_menu_strip.dart';
+import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
+import 'package:conduit/features/sessions/presentation/session_grid_page.dart';
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/discard_changes_dialog.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/sftp_file_viewer.dart';
+import 'package:conduit/features/share_target/domain/share_inbox.dart';
+import 'package:conduit/features/share_target/presentation/share_target_controller.dart';
+import 'package:conduit/features/share_target/presentation/share_target_scope.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:conduit/features/terminal/domain/security_key_interaction.dart';
+import 'package:conduit/features/terminal/presentation/gestures/terminal_gesture_layer.dart';
 import 'package:conduit/features/terminal/presentation/security_key_picker_dialog.dart';
 import 'package:conduit/features/terminal/presentation/security_key_pin_dialog.dart';
 import 'package:conduit/features/terminal/presentation/terminal_file_tabs_controller.dart';
@@ -31,12 +38,17 @@ import 'package:conduit/features/terminal/presentation/terminal_keyboard_bar.dar
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:conduit/features/terminal/presentation/widgets/empty_terminal_state.dart';
+import 'package:conduit/features/terminal/presentation/widgets/floating_toolbar.dart';
 import 'package:conduit/features/terminal/presentation/widgets/prompt_composer_sheet.dart';
-import 'package:conduit/features/terminal/presentation/widgets/session_tabs.dart';
 import 'package:conduit/features/terminal/presentation/widgets/session_tools_menu.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_header.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_surface.dart';
+import 'package:conduit/features/voice/data/platform_speech_recognizer.dart';
+import 'package:conduit/features/voice/domain/speech_recognizer.dart';
+import 'package:conduit/features/voice/presentation/dictation_button.dart';
+import 'package:conduit/features/voice/presentation/dictation_controller.dart';
 import 'package:conduit_vt/conduit_vt.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -52,6 +64,8 @@ class TerminalPage extends StatefulWidget {
     this.livePreviewPortStore = const SecureLivePreviewPortStore(
       FlutterSecureStorage(),
     ),
+    this.connectFlow,
+    this.speechRecognizer,
     super.key,
   });
 
@@ -68,6 +82,12 @@ class TerminalPage extends StatefulWidget {
 
   /// Remembers the last previewed port per host.
   final LivePreviewPortStore livePreviewPortStore;
+  /// Optional connect flow for the session grid's "+" tile.
+  final SessionConnectFlow? connectFlow;
+
+  /// Voice input for Chat mode. Null means the platform default (Android's
+  /// on-device recognizer; no mic elsewhere).
+  final SpeechRecognizer? speechRecognizer;
 
   @override
   State<TerminalPage> createState() => _TerminalPageState();
@@ -92,11 +112,25 @@ class _TerminalPageState extends State<TerminalPage> {
   // Bumped whenever a draft is edited outside the inline bar (the composer
   // sheet), forcing the bar to rebuild with the updated text.
   int _composeRevision = 0;
+  DictationController? _dictation;
+  ShareTargetController? _shareTarget;
 
   @override
   void initState() {
     super.initState();
     _fileTabs = TerminalFileTabsController(widget.sftpRepository);
+    final recognizer =
+        widget.speechRecognizer ??
+        (defaultTargetPlatform == TargetPlatform.android
+            ? PlatformSpeechRecognizer()
+            : null);
+    if (recognizer != null) {
+      _dictation = DictationController(
+        recognizer,
+        language: () => widget.themeController.speechLanguage,
+      );
+      unawaited(_dictation!.checkAvailability());
+    }
     unawaited(WakelockPlus.enable());
     SecurityKeyInteraction.instance.registerPinPrompt(_promptSecurityKeyPin);
     SecurityKeyInteraction.instance.registerSelectionPrompt(
@@ -110,9 +144,56 @@ class _TerminalPageState extends State<TerminalPage> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final shareTarget = ShareTargetScope.maybeOf(context);
+    if (shareTarget == _shareTarget) {
+      return;
+    }
+    _shareTarget?.removeListener(_consumeSharedDraft);
+    _shareTarget?.detachTerminalPage();
+    _shareTarget = shareTarget;
+    shareTarget?.attachTerminalPage();
+    shareTarget?.addListener(_consumeSharedDraft);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _consumeSharedDraft());
+  }
+
+  /// Moves a delivered share (uploaded file paths and/or shared text) into
+  /// the active session's Chat draft and opens the composer so the user can
+  /// add instructions before sending.
+  void _consumeSharedDraft() {
+    final shareTarget = _shareTarget;
+    final session = widget.workspace.activeSession;
+    if (!mounted || shareTarget == null || session == null) {
+      return;
+    }
+    final hostId = session.host.id;
+    if (!shareTarget.hasDraft(hostId)) {
+      return;
+    }
+    final draft = shareTarget.takeDraft(hostId)!;
+    setState(() {
+      _composeDrafts[hostId] = mergeShareDraft(
+        _composeDrafts[hostId] ?? '',
+        draft,
+      );
+      _composeMode = true;
+      _composeRevision += 1;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.workspace.activeSession == session) {
+        unawaited(_openPromptComposer(session));
+      }
+    });
+  }
+
+  @override
   void dispose() {
     unawaited(WakelockPlus.disable());
     _setSystemUiFullscreen(false);
+    _shareTarget?.removeListener(_consumeSharedDraft);
+    _shareTarget?.detachTerminalPage();
+    _dictation?.dispose();
     SecurityKeyInteraction.instance.unregisterPinPrompt(_promptSecurityKeyPin);
     SecurityKeyInteraction.instance.unregisterSelectionPrompt(
       _promptSecurityKeySelection,
@@ -221,6 +302,7 @@ class _TerminalPageState extends State<TerminalPage> {
           unawaited(widget.themeController.setComposeSubmitEnter(enabled)),
       isConnected: () => session.isConnected,
       bracketedPasteSupported: () => session.bracketedPasteSupported,
+      dictation: _dictation,
     );
     if (!mounted) {
       return;
@@ -252,6 +334,34 @@ class _TerminalPageState extends State<TerminalPage> {
     if (mounted) {
       _focusNode.requestFocus();
     }
+  }
+
+  Future<void> _openSessionGrid() async {
+    await showSessionGrid(
+      context,
+      workspace: widget.workspace,
+      themeController: widget.themeController,
+      agentAttention: widget.agentAttention,
+      connectFlow: widget.connectFlow,
+    );
+    if (!mounted) return;
+    _showTerminal();
+  }
+
+  Future<void> _openNewSession(SessionConnectFlow connectFlow) async {
+    await connectFlow.pickHostAndConnect(context);
+    if (!mounted) return;
+    _showTerminal();
+  }
+
+  /// Gesture hook: swipe in from the right edge opens the agent attention
+  /// sheet when monitoring is available, otherwise the gesture is off.
+  VoidCallback? _agentPanelOpener() {
+    final attention = widget.agentAttention;
+    if (attention == null) {
+      return null;
+    }
+    return () => _openAgentAttention(attention);
   }
 
   void _setSystemUiFullscreen(bool fullscreen) {
@@ -416,54 +526,61 @@ class _TerminalPageState extends State<TerminalPage> {
                 right: !_fullscreen && (!landscape || !gestureNavigation),
                 child: Column(
                   children: [
-                    if (!_fullscreen) ...[
-                      if (activeSession != null)
-                        ListenableBuilder(
-                          listenable: widget.agentAttention ?? _inertListenable,
-                          builder: (context, _) {
-                            final attention = widget.agentAttention;
-                            final showAgents =
-                                attention != null &&
-                                (attention.monitoredHosts.isNotEmpty ||
-                                    activeSession.host.agentAttentionEnabled);
-                            return TerminalHeader(
-                              session: activeSession,
-                              palette: palette,
-                              brightness: brightness,
-                              onBack: () => Navigator.of(context).pop(),
-                              onReconnect: () async {
-                                await activeSession.disconnect();
-                                await activeSession.connect();
-                                _focusNode.requestFocus();
-                              },
-                              attentionCount: attention?.attentionCount ?? 0,
-                              onOpenAgentAttention: showAgents
-                                  ? () => _openAgentAttention(attention)
-                                  : null,
-                              actions: [
-                                if (widget.hostKeyVerifier != null &&
-                                    !activeSession.host.isLocal)
-                                  SessionToolsMenu(
-                                    color: palette.foregroundFor(brightness),
-                                    onSelected: (tool) =>
-                                        _openSessionTool(activeSession, tool),
-                                  ),
-                              ],
-                            );
-                          },
-                        ),
-                      SessionTabs(
-                        workspace: widget.workspace,
-                        activeSession: activeSession,
-                        palette: palette,
-                        brightness: brightness,
-                        onChanged: _showTerminal,
-                        fileTabs: fileTabs,
-                        activeFileTab: activeFileTab,
-                        onFileTabSelected: _fileTabs.activate,
-                        onFileTabClosed: _closeFileTab,
+                    if (!_fullscreen)
+                      ListenableBuilder(
+                        listenable: widget.agentAttention ?? _inertListenable,
+                        builder: (context, _) {
+                          final attention = widget.agentAttention;
+                          final showAgents =
+                              attention != null &&
+                              (attention.monitoredHosts.isNotEmpty ||
+                                  (activeSession?.host.agentAttentionEnabled ??
+                                      false));
+                          final connectFlow = widget.connectFlow;
+                          return TerminalHeader(
+                            workspace: widget.workspace,
+                            activeSession: activeSession,
+                            palette: palette,
+                            brightness: brightness,
+                            onBack: () => Navigator.of(context).pop(),
+                            onTabsChanged: _showTerminal,
+                            fileTabs: fileTabs,
+                            activeFileTab: activeFileTab,
+                            onFileTabSelected: _fileTabs.activate,
+                            onFileTabClosed: _closeFileTab,
+                            onReconnect: activeSession == null
+                                ? null
+                                : () async {
+                                    await activeSession.disconnect();
+                                    await activeSession.connect();
+                                    _focusNode.requestFocus();
+                                  },
+                            onToggleFullscreen: _toggleFullscreen,
+                            onNewSession: connectFlow == null
+                                ? null
+                                : () => _openNewSession(connectFlow),
+                            attentionCount: attention?.attentionCount ?? 0,
+                            onOpenAgentAttention: showAgents
+                                ? () => _openAgentAttention(attention)
+                                : null,
+                            onOpenSessionGrid: _openSessionGrid,
+                            swipeDownOpensSessionGrid: widget
+                                .themeController
+                                .terminalGestures
+                                .headerSwipeOpensSessions,
+                            actions: [
+                              if (activeSession != null &&
+                                  widget.hostKeyVerifier != null &&
+                                  !activeSession.host.isLocal)
+                                SessionToolsMenu(
+                                  color: palette.foregroundFor(brightness),
+                                  onSelected: (tool) =>
+                                      _openSessionTool(activeSession, tool),
+                                ),
+                            ],
+                          );
+                        },
                       ),
-                    ],
                     Expanded(
                       child: Container(
                         color: palette.terminalBackgroundFor(brightness),
@@ -481,15 +598,12 @@ class _TerminalPageState extends State<TerminalPage> {
                                 children: [
                                   for (final session
                                       in widget.workspace.sessions)
-                                    TerminalSurface(
+                                    TerminalGestureLayer(
                                       key: ValueKey(session.host.id),
-                                      session: session,
-                                      palette: palette,
-                                      brightness: brightness,
-                                      fontFamily: widget
+                                      preferences: widget
                                           .themeController
-                                          .terminalFont
-                                          .fontFamily,
+                                          .terminalGestures,
+                                      session: session,
                                       fontSize: widget
                                           .themeController
                                           .terminalFontSize,
@@ -499,25 +613,52 @@ class _TerminalPageState extends State<TerminalPage> {
                                               .setTerminalFontSize(fontSize),
                                         );
                                       },
-                                      predictiveEchoEnabled:
-                                          session.host.predictiveEchoEnabled,
-                                      terminalMouseInput: widget
-                                          .themeController
-                                          .terminalMouseInput,
-                                      focusNode:
-                                          session == activeSession &&
-                                              activeFileTab == null
-                                          ? _focusNode
-                                          : null,
-                                      tmuxScrollMode:
+                                      scrollMode:
                                           session == activeSession &&
                                           _tmuxScrollMode,
-                                      onExitTmuxScrollMode: () {
+                                      onEnterScrollMode: () {
+                                        setState(() => _tmuxScrollMode = true);
+                                        _focusNode.requestFocus();
+                                      },
+                                      onExitScrollMode: () {
                                         setState(() => _tmuxScrollMode = false);
                                         _focusNode.requestFocus();
                                       },
-                                      onPathTap: (path) =>
-                                          _handlePathTap(session, path),
+                                      onOpenSessionGrid: _openSessionGrid,
+                                      onOpenAgentPanel: _agentPanelOpener(),
+                                      child: TerminalSurface(
+                                        session: session,
+                                        palette: palette,
+                                        brightness: brightness,
+                                        fontFamily: widget
+                                            .themeController
+                                            .terminalFont
+                                            .fontFamily,
+                                        fontSize: widget
+                                            .themeController
+                                            .terminalFontSize,
+                                        predictiveEchoEnabled:
+                                            session.host.predictiveEchoEnabled,
+                                        terminalMouseInput: widget
+                                            .themeController
+                                            .terminalMouseInput,
+                                        focusNode:
+                                            session == activeSession &&
+                                                activeFileTab == null
+                                            ? _focusNode
+                                            : null,
+                                        tmuxScrollMode:
+                                            session == activeSession &&
+                                            _tmuxScrollMode,
+                                        onExitTmuxScrollMode: () {
+                                          setState(
+                                            () => _tmuxScrollMode = false,
+                                          );
+                                          _focusNode.requestFocus();
+                                        },
+                                        onPathTap: (path) =>
+                                            _handlePathTap(session, path),
+                                      ),
                                     ),
                                   for (final tab in fileTabs)
                                     _buildFileTab(tab, palette, brightness),
@@ -525,6 +666,17 @@ class _TerminalPageState extends State<TerminalPage> {
                               ),
                       ),
                     ),
+                    // Menu → buttons: tappable choices for prompts on screen.
+                    if (activeFileTab == null &&
+                        activeSession != null &&
+                        widget.themeController.menuButtonsEnabled)
+                      PromptMenuStrip(
+                        key: ValueKey('prompt-menu-${activeSession.host.id}'),
+                        session: activeSession,
+                        palette: palette,
+                        brightness: brightness,
+                        onSent: _focusNode.requestFocus,
+                      ),
                     if (activeFileTab != null || activeSession == null)
                       const SizedBox.shrink()
                     else if (_composeMode)
@@ -537,6 +689,7 @@ class _TerminalPageState extends State<TerminalPage> {
                         history: _composeHistory,
                         initialText:
                             _composeDrafts[activeSession.host.id] ?? '',
+                        dictation: _dictation,
                         onChanged: (draft) {
                           _composeDrafts[activeSession.host.id] = draft;
                         },
@@ -626,6 +779,17 @@ class _TerminalPageState extends State<TerminalPage> {
                           setState(() => _tmuxScrollMode = false);
                           _focusNode.requestFocus();
                         },
+                      ).withToolbarStyle(
+                        widget.themeController.terminalToolbarStyle,
+                        onReconnect: () async {
+                          await activeSession.disconnect();
+                          await activeSession.connect();
+                        },
+                        pillItems: widget.themeController.terminalPillItems,
+                        onPillItemsChanged: (items) => unawaited(
+                          widget.themeController.setTerminalPillItems(items),
+                        ),
+                        runnerFactory: widget.connectFlow?.runnerFactory,
                       ),
                   ],
                 ),
@@ -648,6 +812,7 @@ class _ComposeInputBar extends StatefulWidget {
     this.onExpand,
     this.history = const <String>[],
     this.initialText = '',
+    this.dictation,
     super.key,
   });
 
@@ -673,6 +838,9 @@ class _ComposeInputBar extends StatefulWidget {
 
   /// Draft text to restore into the field when compose reopens.
   final String initialText;
+
+  /// Voice input; null hides the mic.
+  final DictationController? dictation;
 
   @override
   State<_ComposeInputBar> createState() => _ComposeInputBarState();
@@ -802,6 +970,17 @@ class _ComposeInputBarState extends State<_ComposeInputBar> {
                 ),
               ),
             ),
+            if (widget.dictation != null)
+              DictationButton(
+                controller: widget.dictation!,
+                textController: _controller,
+                focusNode: _focusNode,
+                onMessage: (message) {
+                  ScaffoldMessenger.of(context)
+                    ..hideCurrentSnackBar()
+                    ..showSnackBar(SnackBar(content: Text(message)));
+                },
+              ),
             if (widget.onExpand != null)
               IconButton(
                 icon: const Icon(Icons.open_in_full_rounded),

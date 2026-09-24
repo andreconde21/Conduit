@@ -29,6 +29,7 @@ class TerminalSessionController extends ChangeNotifier {
     required this.host,
     required this.repository,
     this.connectivity,
+    this.startupCommand,
     bool predictiveEchoEnabled = false,
     TerminalEnterSequence enterSequence = TerminalEnterSequence.cr,
   }) : keyboard = TerminalKeyboardController(defaultInputHandler),
@@ -41,6 +42,11 @@ class TerminalSessionController extends ChangeNotifier {
   final SavedHost host;
   final SshTerminalRepository repository;
   final NetworkConnectivity? connectivity;
+
+  /// Command typed into the shell right after connecting (e.g. a Herdr
+  /// attach picked in the connect picker). Takes precedence over the host's
+  /// tmux-on-connect settings.
+  final String? startupCommand;
   final TerminalKeyboardController keyboard;
   final Terminal terminal;
   final _outputFilter = TerminalStringSequenceFilter();
@@ -66,6 +72,7 @@ class TerminalSessionController extends ChangeNotifier {
   TerminalEnterSequence _enterSequence = TerminalEnterSequence.cr;
   int _connectionGeneration = 0;
   int? _lastIosEnterOutputMs;
+  String _terminalTitle = '';
 
   static const _iosDuplicateEnterWindow = Duration(milliseconds: 80);
   static const _gracefulMoshCloseTimeout = Duration(milliseconds: 1500);
@@ -74,6 +81,10 @@ class TerminalSessionController extends ChangeNotifier {
 
   TerminalConnectionStatus get status => _status;
   String get title => host.name;
+
+  /// The window title the remote application last set (OSC 0/2), empty
+  /// until one arrives. Herdr and tmux both keep it current.
+  String get terminalTitle => _terminalTitle;
   bool get isConnected => _status == TerminalConnectionStatus.connected;
   bool get predictiveEchoEnabled => _predictiveEchoEnabled;
   TerminalEnterSequence get enterSequence => _enterSequence;
@@ -218,7 +229,7 @@ class TerminalSessionController extends ChangeNotifier {
 
       _status = TerminalConnectionStatus.connected;
       notifyListeners();
-      _startTmuxIfConfigured(session);
+      _runStartupCommandIfConfigured(session);
       _runConnectSnippetIfConfigured(session);
     } on AppFailure catch (failure) {
       if (_disposed || generation != _connectionGeneration) {
@@ -289,6 +300,20 @@ class TerminalSessionController extends ChangeNotifier {
     keyboard.clearModifiers();
   }
 
+  /// Sends a multiplexer prefix (the host's tmux/Herdr prefix, usually).
+  ///
+  /// A plain Ctrl+letter or Ctrl+Space goes through [sendControl] so the
+  /// terminal encodes it like any other control key; every other
+  /// combination is written as its raw byte sequence.
+  void sendPrefix(MultiplexerPrefixKey prefix) {
+    final controlKey = prefix.controlKey;
+    if (controlKey != null) {
+      sendControl(controlKey);
+      return;
+    }
+    sendText(prefix.sequence);
+  }
+
   void paste(String text) {
     terminal.paste(text);
     keyboard.clearModifiers();
@@ -357,8 +382,14 @@ class TerminalSessionController extends ChangeNotifier {
     r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]',
   );
 
-  void _startTmuxIfConfigured(SshTerminalSession session) {
-    final command = _buildTmuxCommand();
+  bool get _hasStartupCommand =>
+      startupCommand != null || host.startTmuxOnConnect;
+
+  void _runStartupCommandIfConfigured(SshTerminalSession session) {
+    final explicit = startupCommand;
+    final command = explicit != null
+        ? '$explicit${_enterSequence.value}'
+        : _buildTmuxCommand();
     if (command == null) {
       return;
     }
@@ -384,7 +415,7 @@ class TerminalSessionController extends ChangeNotifier {
     if (text.isEmpty) {
       return;
     }
-    final delay = host.startTmuxOnConnect
+    final delay = _hasStartupCommand
         ? _connectSnippetAfterTmuxDelay
         : Duration.zero;
     unawaited(_sendConnectSnippet(session, text, delay));
@@ -428,13 +459,7 @@ class TerminalSessionController extends ChangeNotifier {
     }
   }
 
-  List<int> _tmuxDetachBytes() {
-    final prefix = switch (host.tmuxPrefixKey) {
-      TmuxPrefixKey.controlA => 0x01,
-      TmuxPrefixKey.controlB => 0x02,
-    };
-    return [prefix, 0x64];
-  }
+  List<int> _tmuxDetachBytes() => [...host.tmuxPrefixKey.bytes, 0x64];
 
   @visibleForTesting
   String? buildTmuxCommandForTesting() => _buildTmuxCommand();
@@ -474,6 +499,13 @@ class TerminalSessionController extends ChangeNotifier {
       _resizeTimer = Timer(const Duration(milliseconds: 250), _flushResize);
     };
     terminal.onOutput = _sendTerminalOutput;
+    terminal.onTitleChange = (title) {
+      if (title == _terminalTitle || _disposed) {
+        return;
+      }
+      _terminalTitle = title;
+      notifyListeners();
+    };
   }
 
   void _sendTerminalOutput(String data) {

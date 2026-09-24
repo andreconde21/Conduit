@@ -91,6 +91,87 @@ void main() {
     expect(controller.terminalMouseInput, isTrue);
   });
 
+  testWidgets('appearance sheet switches the toolbar style', (tester) async {
+    final controller = ThemeController(InMemoryThemePreferences());
+    await controller.load();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) {
+            return Scaffold(
+              body: Center(
+                child: FilledButton(
+                  onPressed: () {
+                    showThemeSheet(context: context, controller: controller);
+                  },
+                  child: const Text('Appearance'),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Appearance'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Toolbar style'),
+      120,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.pumpAndSettle();
+
+    expect(controller.terminalToolbarStyle, TerminalToolbarStyle.floatingPill);
+
+    await tester.tap(find.text('Key rows').last);
+    await tester.pumpAndSettle();
+
+    expect(controller.terminalToolbarStyle, TerminalToolbarStyle.keyRows);
+  });
+
+  testWidgets('appearance sheet toggles menu buttons', (tester) async {
+    final controller = ThemeController(InMemoryThemePreferences());
+    await controller.load();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) {
+            return Scaffold(
+              body: Center(
+                child: FilledButton(
+                  onPressed: () {
+                    showThemeSheet(context: context, controller: controller);
+                  },
+                  child: const Text('Appearance'),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Appearance'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Menu buttons'),
+      120,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Menu buttons'), findsOneWidget);
+    expect(controller.menuButtonsEnabled, isTrue);
+
+    await tester.tap(find.text('Menu buttons'));
+    await tester.pumpAndSettle();
+
+    expect(controller.menuButtonsEnabled, isFalse);
+  });
+
   testWidgets('appearance sheet changes terminal enter sequence', (
     tester,
   ) async {
@@ -204,5 +285,45 @@ void main() {
     expect(custom.kind, TerminalKeyboardItemKind.customText);
     expect(custom.label, 'gs');
     expect(custom.text, 'git status');
+  });
+
+  testWidgets('appearance sheet credits upstream Conduit in About', (
+    tester,
+  ) async {
+    final controller = ThemeController(InMemoryThemePreferences());
+    await controller.load();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) {
+            return Scaffold(
+              body: Center(
+                child: FilledButton(
+                  onPressed: () {
+                    showThemeSheet(context: context, controller: controller);
+                  },
+                  child: const Text('Appearance'),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Appearance'));
+    await tester.pumpAndSettle();
+    final credit = find.byKey(const ValueKey('about-upstream-credit'));
+    for (var i = 0; i < 40 && credit.evaluate().isEmpty; i += 1) {
+      await tester.drag(find.byType(ListView).first, const Offset(0, -300));
+      await tester.pumpAndSettle();
+    }
+
+    expect(find.text('Conductore'), findsOneWidget);
+    expect(
+      find.text('Based on Conduit by gwitko (Apache-2.0)'),
+      findsOneWidget,
+    );
   });
 }

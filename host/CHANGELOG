@@ -1,0 +1,5 @@
+# Changelog — host companion
+
+## 0.1.0 (2026-09-24)
+
+- feat: conductore-hostd daemon + conductore-hook client: Claude Code hook events -> per-agent state over a unix socket, `status` / `events` long-poll / `decide` / `focus` / `install` / `uninstall` / `doctor` / `stop` CLI for the phone, PermissionRequest answered from the phone (allow / deny / always). Replaces moshi-hook.

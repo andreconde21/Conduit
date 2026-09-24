@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
+import 'package:conduit/core/theme/terminal_pill_items.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/core/theme/theme_preferences_repository.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
@@ -86,6 +87,27 @@ void main() {
         ]);
       },
     );
+
+    test('backs up and restores the pill toolbar buttons', () async {
+      final source = await _Fixture.create();
+      const items = [
+        TerminalPillItem.button(TerminalPillButton.herdr),
+        TerminalPillItem.button(TerminalPillButton.esc),
+        TerminalPillItem.custom('deploy'),
+      ];
+      await source.themeController.setTerminalPillItems(items);
+
+      final bytes = await source.service.exportBackup(includeSecrets: false);
+      final target = await _Fixture.create(empty: true);
+      expect(
+        target.themeController.terminalPillItems,
+        defaultTerminalPillItems,
+      );
+
+      await target.service.importBackup(bytes);
+
+      expect(target.themeController.terminalPillItems, items);
+    });
 
     test(
       'imports by merging matching hosts and keeping unrelated hosts',

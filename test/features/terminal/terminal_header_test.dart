@@ -1,0 +1,182 @@
+import 'package:conduit/core/theme/theme_controller.dart';
+import 'package:conduit/features/sessions/domain/connect_target.dart';
+import 'package:conduit/features/sessions/presentation/session_grid_page.dart';
+import 'package:conduit/features/terminal/presentation/terminal_file_tabs_controller.dart';
+import 'package:conduit/features/terminal/presentation/terminal_page.dart';
+import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
+import 'package:conduit/features/terminal/presentation/widgets/session_tabs.dart';
+import 'package:conduit/features/terminal/presentation/widgets/terminal_header.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import '../../support/test_doubles.dart';
+
+void main() {
+  late ThemeController themeController;
+
+  setUp(() async {
+    themeController = ThemeController(InMemoryThemePreferences());
+    await themeController.load();
+  });
+
+  Future<TerminalWorkspaceController> pumpTerminal(WidgetTester tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 2.6;
+    addTearDown(tester.view.reset);
+    final workspace = TerminalWorkspaceController(
+      ImmediateTerminalRepository(TrackableTerminalSession()),
+    );
+    addTearDown(workspace.dispose);
+    workspace
+      ..open(
+        const ConnectTarget.herdr(
+          workspaceId: 'w1',
+          label: 'Infrastructure',
+        ).apply(buildHost('a')),
+      )
+      ..open(
+        const ConnectTarget.herdr(
+          workspaceId: 'w2',
+          label: 'TheCalendar',
+        ).apply(buildHost('a')),
+      );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TerminalPage(
+          workspace: workspace,
+          themeController: themeController,
+          sftpRepository: NoNetworkSftpRepository(),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    return workspace;
+  }
+
+  testWidgets('one 40 dp row holds back, tabs and actions', (tester) async {
+    await pumpTerminal(tester);
+
+    expect(find.byType(TerminalHeader), findsOneWidget);
+    expect(tester.getSize(find.byType(TerminalHeader)).height, 40);
+    expect(find.byTooltip('Machines'), findsOneWidget);
+    expect(find.byTooltip('Sessions'), findsOneWidget);
+    expect(find.byTooltip('More'), findsOneWidget);
+    // Sessions on one machine show their target, not the machine name.
+    expect(find.text('Infrastructure'), findsOneWidget);
+    expect(find.text('TheCalendar'), findsOneWidget);
+    // Only the active tab carries a close button.
+    expect(find.byTooltip('Close'), findsOneWidget);
+  });
+
+  testWidgets('tapping a tab activates its session', (tester) async {
+    final workspace = await pumpTerminal(tester);
+    expect(workspace.activeSession!.host.id, 'a#herdr:w2');
+
+    await tester.tap(find.text('Infrastructure'));
+    await tester.pump();
+    expect(workspace.activeSession!.host.id, 'a#herdr:w1');
+  });
+
+  testWidgets('overflow keeps reconnect and close; fullscreen hides row', (
+    tester,
+  ) async {
+    final workspace = await pumpTerminal(tester);
+
+    await tester.tap(find.byTooltip('More'));
+    await tester.pumpAndSettle();
+    expect(find.text('Host a: TheCalendar'), findsOneWidget);
+    expect(find.text('Reconnect'), findsOneWidget);
+    expect(find.text('Fullscreen'), findsOneWidget);
+    expect(find.text('Close session'), findsOneWidget);
+    // No connect flow here, so no "New session".
+    expect(find.text('New session'), findsNothing);
+
+    await tester.tap(find.text('Close session'));
+    await tester.pumpAndSettle();
+    expect(workspace.sessions, hasLength(1));
+
+    await tester.tap(find.byTooltip('More'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Fullscreen'));
+    await tester.pumpAndSettle();
+    expect(find.byType(TerminalHeader), findsNothing);
+  });
+
+  testWidgets('swiping down on the row opens the session grid', (tester) async {
+    await pumpTerminal(tester);
+    final row = tester.getRect(find.byType(TerminalHeader));
+
+    final gesture = await tester.startGesture(
+      Offset(row.left + 60, row.center.dy),
+    );
+    for (var i = 0; i < 6; i += 1) {
+      await gesture.moveBy(const Offset(0, 25));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(find.byType(SessionGridPage), findsOneWidget);
+  });
+
+  testWidgets('file tabs sit in the same strip and close through the page', (
+    tester,
+  ) async {
+    final workspace = TerminalWorkspaceController(
+      ImmediateTerminalRepository(TrackableTerminalSession()),
+    );
+    addTearDown(workspace.dispose);
+    final session = workspace.open(buildHost('a'));
+    final files = TerminalFileTabsController(NoNetworkSftpRepository());
+    addTearDown(files.dispose);
+    final tab = files.open(buildHost('a'), '/srv/app/README.md');
+    final closed = <TerminalFileTab>[];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ListenableBuilder(
+            listenable: files,
+            builder: (context, _) => TerminalHeader(
+              workspace: workspace,
+              activeSession: session,
+              palette: themeController.palette,
+              brightness: Brightness.dark,
+              onBack: () {},
+              onTabsChanged: () {},
+              fileTabs: files.tabs,
+              activeFileTab: files.active,
+              onFileTabSelected: files.activate,
+              onFileTabClosed: closed.add,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(SessionTabs), findsOneWidget);
+    expect(find.text('README.md'), findsOneWidget);
+    expect(find.text('Host a'), findsOneWidget);
+
+    // The file tab is active: its close button asks the page.
+    await tester.tap(find.byTooltip('Close'));
+    await tester.pump();
+    expect(closed, [tab]);
+
+    // Selecting the session tab moves the close button there.
+    files.activate(null);
+    await tester.pump();
+    expect(
+      find.descendant(
+        of: find.ancestor(
+          of: find.text('Host a'),
+          matching: find.byType(InkWell),
+        ),
+        matching: find.byTooltip('Close'),
+      ),
+      findsOneWidget,
+    );
+  });
+}

@@ -1,10 +1,34 @@
+import 'package:conduit/features/hosts/domain/multiplexer_prefix_key.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
+
+export 'package:conduit/features/hosts/domain/multiplexer_prefix_key.dart';
 
 enum SshAuthMethod { password, privateKey, hardwareKey, external }
 
-enum TmuxPrefixKey { controlB, controlA }
+/// Which agent manager Agent Attention talks to on a host.
+enum AgentMonitorKind {
+  /// Conductore companion when `conductore-hostd` is installed, else Herdr.
+  auto,
+  herdr,
+  companion;
 
-const defaultTmuxPrefixKey = TmuxPrefixKey.controlB;
+  String get label => switch (this) {
+    AgentMonitorKind.auto => 'Auto',
+    AgentMonitorKind.herdr => 'Herdr',
+    AgentMonitorKind.companion => 'Conductore companion',
+  };
+
+  static AgentMonitorKind parse(Object? raw) {
+    return AgentMonitorKind.values
+            .where((kind) => kind.name == raw)
+            .firstOrNull ??
+        AgentMonitorKind.auto;
+  }
+}
+
+/// The prefix a host's multiplexer (tmux or Herdr) is driven with unless the
+/// host says otherwise.
+const defaultTmuxPrefixKey = MultiplexerPrefixKey.defaultKey;
 const defaultTmuxSessionName = 'conduit';
 
 bool _parseStartTmuxOnConnect(Map<String, Object?> json) {
@@ -115,13 +139,6 @@ String _parseMoshPorts(Map<String, Object?> json) {
   return MoshPortRange.tryParse(raw) == null ? '' : raw;
 }
 
-extension TmuxPrefixKeyDetails on TmuxPrefixKey {
-  String get label => switch (this) {
-    TmuxPrefixKey.controlB => 'Ctrl-B',
-    TmuxPrefixKey.controlA => 'Ctrl-A',
-  };
-}
-
 class SavedHost {
   const SavedHost({
     required this.id,
@@ -151,6 +168,8 @@ class SavedHost {
     this.agentAttentionEnabled = false,
     this.agentNotifyInput = true,
     this.agentNotifyFinished = true,
+    this.agentMonitor = AgentMonitorKind.auto,
+    this.shareInboxDirectory = '',
     this.lastConnectedAt,
     this.isLocal = false,
   });
@@ -186,7 +205,8 @@ class SavedHost {
   final String moshPorts;
   final bool predictiveEchoEnabled;
   final bool startTmuxOnConnect;
-  final TmuxPrefixKey tmuxPrefixKey;
+  /// Prefix sent before tmux and Herdr bindings on this host.
+  final MultiplexerPrefixKey tmuxPrefixKey;
   final String tmuxSessionName;
   final String tmuxStartDirectory;
   final List<TerminalSnippet> snippets;
@@ -200,6 +220,13 @@ class SavedHost {
 
   /// Notify when a monitored agent finishes background work.
   final bool agentNotifyFinished;
+
+  /// Which agent manager to read (see [AgentMonitorKind]).
+  final AgentMonitorKind agentMonitor;
+
+  /// Remote directory shared files are uploaded to (share-to-agent). Empty
+  /// means `~/conductore-inbox`; `~` and relative paths resolve under home.
+  final String shareInboxDirectory;
 
   final DateTime? lastConnectedAt;
   final bool isLocal;
@@ -269,7 +296,7 @@ class SavedHost {
     String? moshPorts,
     bool? predictiveEchoEnabled,
     bool? startTmuxOnConnect,
-    TmuxPrefixKey? tmuxPrefixKey,
+    MultiplexerPrefixKey? tmuxPrefixKey,
     String? tmuxSessionName,
     String? tmuxStartDirectory,
     List<TerminalSnippet>? snippets,
@@ -277,6 +304,8 @@ class SavedHost {
     bool? agentAttentionEnabled,
     bool? agentNotifyInput,
     bool? agentNotifyFinished,
+    AgentMonitorKind? agentMonitor,
+    String? shareInboxDirectory,
     DateTime? lastConnectedAt,
     bool clearLastConnectedAt = false,
     bool? isLocal,
@@ -312,6 +341,8 @@ class SavedHost {
           agentAttentionEnabled ?? this.agentAttentionEnabled,
       agentNotifyInput: agentNotifyInput ?? this.agentNotifyInput,
       agentNotifyFinished: agentNotifyFinished ?? this.agentNotifyFinished,
+      agentMonitor: agentMonitor ?? this.agentMonitor,
+      shareInboxDirectory: shareInboxDirectory ?? this.shareInboxDirectory,
       lastConnectedAt: clearLastConnectedAt
           ? null
           : lastConnectedAt ?? this.lastConnectedAt,
@@ -347,7 +378,7 @@ class SavedHost {
       'moshPorts': moshPorts,
       'predictiveEchoEnabled': predictiveEchoEnabled,
       'startTmuxOnConnect': startTmuxOnConnect,
-      'tmuxPrefixKey': tmuxPrefixKey.name,
+      'tmuxPrefixKey': tmuxPrefixKey.encode(),
       'tmuxSessionName': tmuxSessionName,
       'tmuxStartDirectory': tmuxStartDirectory,
       'snippets': [for (final snippet in snippets) snippet.toJson()],
@@ -355,6 +386,8 @@ class SavedHost {
       'agentAttentionEnabled': agentAttentionEnabled,
       'agentNotifyInput': agentNotifyInput,
       'agentNotifyFinished': agentNotifyFinished,
+      'agentMonitor': agentMonitor.name,
+      'shareInboxDirectory': shareInboxDirectory,
       'lastConnectedAt': lastConnectedAt?.toIso8601String(),
       'isLocal': isLocal,
     };
@@ -395,9 +428,8 @@ class SavedHost {
       moshPorts: _parseMoshPorts(json),
       predictiveEchoEnabled: json['predictiveEchoEnabled'] as bool? ?? false,
       startTmuxOnConnect: _parseStartTmuxOnConnect(json),
-      tmuxPrefixKey: TmuxPrefixKey.values.firstWhere(
-        (key) => key.name == json['tmuxPrefixKey'],
-        orElse: () => defaultTmuxPrefixKey,
+      tmuxPrefixKey: MultiplexerPrefixKey.decode(
+        json['tmuxPrefixKey'] as String?,
       ),
       tmuxSessionName:
           (json['tmuxSessionName'] as String?)?.trim().isNotEmpty == true
@@ -412,6 +444,9 @@ class SavedHost {
       agentAttentionEnabled: json['agentAttentionEnabled'] as bool? ?? false,
       agentNotifyInput: json['agentNotifyInput'] as bool? ?? true,
       agentNotifyFinished: json['agentNotifyFinished'] as bool? ?? true,
+      agentMonitor: AgentMonitorKind.parse(json['agentMonitor']),
+      shareInboxDirectory:
+          (json['shareInboxDirectory'] as String?)?.trim() ?? '',
       lastConnectedAt: lastConnectedAtRaw == null
           ? null
           : DateTime.tryParse(lastConnectedAtRaw),

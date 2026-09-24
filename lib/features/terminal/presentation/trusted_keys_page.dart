@@ -39,7 +39,7 @@ class _TrustedKeysPageState extends State<TrustedKeysPage> {
       builder: (context) => AlertDialog(
         title: const Text('Forget trusted key?'),
         content: Text(
-          'Conduit will prompt again the next time you connect to '
+          'Conductore will prompt again the next time you connect to '
           '${record.host}:${record.port}.',
         ),
         actions: [
@@ -132,7 +132,7 @@ class _Header extends StatelessWidget {
               children: [
                 Text('Trusted host keys', style: theme.textTheme.headlineSmall),
                 Text(
-                  'Servers Conduit has connected to before.',
+                  'Servers Conductore has connected to before.',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: colorScheme.onSurfaceVariant,
                   ),

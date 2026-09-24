@@ -287,6 +287,23 @@ class ImmediateTerminalRepository implements SshTerminalRepository {
   }
 }
 
+/// Hands out a fresh [TrackableTerminalSession] per connect, so a session
+/// can disconnect and reconnect.
+class FreshTerminalRepository implements SshTerminalRepository {
+  final List<TrackableTerminalSession> sessions = [];
+
+  @override
+  Future<SshTerminalSession> connect(
+    SavedHost host, {
+    required int columns,
+    required int rows,
+  }) async {
+    final session = TrackableTerminalSession();
+    sessions.add(session);
+    return session;
+  }
+}
+
 class FakeRoamingTerminalSession
     implements SshTerminalSession, RoamingTerminalSession {
   final Completer<void> _done = Completer<void>();
@@ -480,6 +497,13 @@ class ScriptedAgentCommandRunner implements AgentCommandRunner {
 class RecordingAgentNotifier implements AgentAttentionNotifier {
   final List<(String, String, String)> shown = [];
 
+  /// Permission notifications as (id, title, body, hostId, requestId).
+  final List<(String, String, String, String, String)> permissionsShown = [];
+  final List<String> cancelled = [];
+
+  /// Ids currently showing (shown or permission-shown, minus cancelled).
+  final Set<String> active = {};
+
   @override
   Future<void> show({
     required String id,
@@ -487,6 +511,25 @@ class RecordingAgentNotifier implements AgentAttentionNotifier {
     required String body,
   }) async {
     shown.add((id, title, body));
+    active.add(id);
+  }
+
+  @override
+  Future<void> showPermissionRequest({
+    required String id,
+    required String title,
+    required String body,
+    required String hostId,
+    required String requestId,
+  }) async {
+    permissionsShown.add((id, title, body, hostId, requestId));
+    active.add(id);
+  }
+
+  @override
+  Future<void> cancel({required String id}) async {
+    cancelled.add(id);
+    active.remove(id);
   }
 }
 

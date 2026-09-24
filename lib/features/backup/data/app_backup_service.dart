@@ -5,12 +5,14 @@ import 'dart:math';
 
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
+import 'package:conduit/core/theme/terminal_pill_items.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/domain/saved_hosts_repository.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
+import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:pinenacl/x25519.dart';
@@ -28,7 +30,7 @@ class AppBackupService {
        _crypto = crypto,
        _now = now ?? DateTime.now;
 
-  static const fileExtension = 'conduit-backup.json';
+  static const fileExtension = 'conductore-backup.json';
 
   final HostsController _hostsController;
   final ThemeController _themeController;
@@ -145,6 +147,13 @@ class AppBackupService {
       'terminalMouseInput': _themeController.terminalMouseInput,
       'terminalEnterSequence': _themeController.terminalEnterSequence.name,
       'composeSubmitEnter': _themeController.composeSubmitEnter,
+      'terminalToolbarStyle': _themeController.terminalToolbarStyle.name,
+      'terminalPillItems': TerminalPillItem.encodeList(
+        _themeController.terminalPillItems,
+      ),
+      'menuButtonsEnabled': _themeController.menuButtonsEnabled,
+      'terminalGestures': _themeController.terminalGestures.toJson(),
+      'speechLanguage': _themeController.speechLanguage,
     };
   }
 
@@ -206,6 +215,33 @@ class AppBackupService {
     if (composeSubmitEnter is bool) {
       await _themeController.setComposeSubmitEnter(composeSubmitEnter);
     }
+    await _themeController.setTerminalToolbarStyle(
+      TerminalToolbarStyle.values.firstWhere(
+        (style) => style.name == json['terminalToolbarStyle'],
+        orElse: () => _themeController.terminalToolbarStyle,
+      ),
+    );
+    if (json['terminalPillItems'] is List) {
+      await _themeController.setTerminalPillItems(
+        TerminalPillItem.decodeList(json['terminalPillItems']),
+      );
+    }
+    final menuButtonsEnabled = json['menuButtonsEnabled'];
+    if (menuButtonsEnabled is bool) {
+      await _themeController.setMenuButtonsEnabled(menuButtonsEnabled);
+    }
+
+    final terminalGestures = json['terminalGestures'];
+    if (terminalGestures is Map) {
+      await _themeController.setTerminalGestures(
+        TerminalGesturePreferences.fromJson(terminalGestures),
+      );
+    }
+
+    final speechLanguage = json['speechLanguage'];
+    if (speechLanguage is String) {
+      await _themeController.setSpeechLanguage(speechLanguage);
+    }
   }
 
   Map<String, Object?> _decodeDocument(Uint8List bytes) {
@@ -217,7 +253,7 @@ class AppBackupService {
       throw const FormatException('Backup root is not an object.');
     } catch (error) {
       throw const AppBackupException(
-        'This does not look like a Conduit backup.',
+        'This does not look like a Conductore backup.',
       );
     }
   }

@@ -1,10 +1,18 @@
 import 'package:conduit/core/theme/app_palette.dart';
+import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/terminal/presentation/terminal_file_tabs_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:flutter/material.dart';
 
-class SessionTabs extends StatelessWidget {
+/// Compact, horizontally scrolling tabs for the open sessions and file
+/// viewers, sized to sit inside the terminal's single chrome row.
+///
+/// Each tab shows a connection dot (or a file icon) and a short name; the
+/// active tab is highlighted and carries the close button, so the row stays
+/// narrow. Closing a file tab goes through [onFileTabClosed], which asks
+/// before discarding unsaved edits.
+class SessionTabs extends StatefulWidget {
   const SessionTabs({
     required this.workspace,
     required this.activeSession,
@@ -28,50 +36,128 @@ class SessionTabs extends StatelessWidget {
   final ValueChanged<TerminalFileTab> onFileTabSelected;
   final ValueChanged<TerminalFileTab> onFileTabClosed;
 
+  /// Height of one tab chip.
+  static const tabHeight = 30.0;
+
+  /// Short display name for [session]: the target part of a derived title
+  /// ("Host: Infrastructure" shows "Infrastructure") when every open
+  /// session is on the same machine, the full title otherwise.
+  static String labelFor(
+    TerminalSessionController session,
+    List<TerminalSessionController> sessions,
+  ) {
+    final title = session.title;
+    final machine = baseHostId(session.host.id);
+    final oneMachine = sessions.every(
+      (other) => baseHostId(other.host.id) == machine,
+    );
+    final cut = title.lastIndexOf(': ');
+    if (!oneMachine ||
+        ConnectTarget.keyFromSessionHostId(session.host.id) == null ||
+        cut <= 0 ||
+        cut + 2 >= title.length) {
+      return title;
+    }
+    return title.substring(cut + 2);
+  }
+
+  @override
+  State<SessionTabs> createState() => _SessionTabsState();
+}
+
+class _SessionTabsState extends State<SessionTabs> {
+  final _activeKey = GlobalKey();
+  Object? _lastActive;
+
+  @override
+  void didUpdateWidget(covariant SessionTabs oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _revealActive();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _revealActive();
+  }
+
+  /// Scrolls the active tab into view whenever it changes.
+  void _revealActive() {
+    final active = widget.activeFileTab ?? widget.activeSession;
+    if (identical(active, _lastActive)) return;
+    _lastActive = active;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final context = _activeKey.currentContext;
+      if (!mounted || context == null) return;
+      Scrollable.ensureVisible(
+        context,
+        alignment: 0.5,
+        duration: const Duration(milliseconds: 180),
+      );
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    final tabCount = workspace.sessions.length + fileTabs.length;
-    return Container(
-      height: 38,
-      decoration: BoxDecoration(
-        color: palette.canvasFor(brightness),
-        border: Border(
-          bottom: BorderSide(color: palette.hairlineFor(brightness)),
-        ),
-      ),
+    final sessions = widget.workspace.sessions;
+    final fileTabs = widget.fileTabs;
+    final tabCount = sessions.length + fileTabs.length;
+    return SizedBox(
+      height: SessionTabs.tabHeight,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 2),
         itemCount: tabCount,
         separatorBuilder: (context, index) => const SizedBox(width: 4),
         itemBuilder: (context, index) {
-          if (index >= workspace.sessions.length) {
-            final tab = fileTabs[index - workspace.sessions.length];
-            return _FileTab(
-              tab: tab,
-              selected: tab == activeFileTab,
-              palette: palette,
-              brightness: brightness,
-              onTap: () => onFileTabSelected(tab),
-              onClose: () => onFileTabClosed(tab),
+          if (index >= sessions.length) {
+            final tab = fileTabs[index - sessions.length];
+            final selected = tab == widget.activeFileTab;
+            final dirty = tab.viewerKey.currentState?.isDirty ?? false;
+            // Tool tabs (git diff, live preview) retitle themselves as
+            // their state changes, so the label listens to the tab.
+            return ListenableBuilder(
+              key: selected ? _activeKey : ValueKey(tab),
+              listenable: tab.listenable ?? _inertListenable,
+              builder: (context, _) => _Tab(
+                label: tab.title,
+                tooltip: tab.tooltip,
+                leading: Icon(
+                  tab.icon,
+                  size: 13,
+                  color: selected
+                      ? widget.palette.accent
+                      : widget.palette.mutedForegroundFor(widget.brightness),
+                ),
+                dirty: dirty,
+                selected: selected,
+                palette: widget.palette,
+                brightness: widget.brightness,
+                onTap: () => widget.onFileTabSelected(tab),
+                onClose: () => widget.onFileTabClosed(tab),
+              ),
             );
           }
-          final session = workspace.sessions[index];
-          final selected = activeFileTab == null && session == activeSession;
-          return _SessionTab(
-            session: session,
+          final session = sessions[index];
+          final selected =
+              widget.activeFileTab == null && session == widget.activeSession;
+          return _Tab(
+            key: selected ? _activeKey : ValueKey(session),
+            label: SessionTabs.labelFor(session, sessions),
+            tooltip: '${session.title}\n${session.host.endpoint}',
+            leading: _StatusDot(status: session.status),
             selected: selected,
-            palette: palette,
-            brightness: brightness,
+            palette: widget.palette,
+            brightness: widget.brightness,
             onTap: () {
-              workspace.activate(session);
-              onChanged();
+              widget.workspace.activate(session);
+              widget.onChanged();
             },
             onClose: () async {
-              await workspace.close(session);
-              onChanged();
+              await widget.workspace.close(session);
+              widget.onChanged();
               if (!context.mounted) return;
-              if (!workspace.hasSessions && fileTabs.isEmpty) {
+              if (!widget.workspace.hasSessions && widget.fileTabs.isEmpty) {
                 Navigator.of(context).pop();
               }
             },
@@ -84,18 +170,25 @@ class SessionTabs extends StatelessWidget {
 
 final Listenable _inertListenable = ChangeNotifier();
 
-class _FileTab extends StatelessWidget {
-  const _FileTab({
-    required this.tab,
+class _Tab extends StatelessWidget {
+  const _Tab({
+    required this.label,
+    required this.tooltip,
+    required this.leading,
     required this.selected,
     required this.palette,
     required this.brightness,
     required this.onTap,
     required this.onClose,
+    this.dirty = false,
+    super.key,
   });
 
-  final TerminalFileTab tab;
+  final String label;
+  final String tooltip;
+  final Widget leading;
   final bool selected;
+  final bool dirty;
   final AppPalette palette;
   final Brightness brightness;
   final VoidCallback onTap;
@@ -104,150 +197,80 @@ class _FileTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final accent = palette.accent;
+    final foreground = palette.foregroundFor(brightness);
+    final muted = palette.mutedForegroundFor(brightness);
     final background = selected
         ? Color.alphaBlend(
-            accent.withValues(alpha: 0.14),
+            accent.withValues(alpha: 0.16),
             palette.panelFor(brightness),
           )
-        : palette.panelFor(brightness);
-    final border = selected
-        ? accent.withValues(alpha: 0.55)
-        : palette.hairlineFor(brightness);
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(10),
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 140),
-          width: 170,
-          decoration: BoxDecoration(
-            color: background,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: border),
-          ),
-          padding: const EdgeInsets.only(left: 10),
-          child: Row(
-            children: [
-              Icon(
-                tab.icon,
-                size: 13,
+        : Colors.transparent;
+    return Tooltip(
+      message: tooltip,
+      waitDuration: const Duration(milliseconds: 600),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
+            constraints: const BoxConstraints(maxWidth: 176),
+            decoration: BoxDecoration(
+              color: background,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
                 color: selected
-                    ? accent
-                    : palette.mutedForegroundFor(brightness),
+                    ? accent.withValues(alpha: 0.55)
+                    : palette.hairlineFor(brightness),
               ),
-              const SizedBox(width: 7),
-              Expanded(
-                child: ListenableBuilder(
-                  listenable: tab.listenable ?? _inertListenable,
-                  builder: (context, _) => Text(
-                    tab.title,
+            ),
+            padding: EdgeInsets.only(left: 8, right: selected ? 0 : 9),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                leading,
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    label,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: palette.foregroundFor(brightness),
+                      color: selected ? foreground : muted,
                       fontSize: 12.5,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
                     ),
                   ),
                 ),
-              ),
-              SizedBox(
-                width: 26,
-                height: 26,
-                child: IconButton(
-                  tooltip: 'Close',
-                  iconSize: 14,
-                  padding: EdgeInsets.zero,
-                  color: palette.mutedForegroundFor(brightness),
-                  onPressed: onClose,
-                  icon: const Icon(Icons.close_rounded),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SessionTab extends StatelessWidget {
-  const _SessionTab({
-    required this.session,
-    required this.selected,
-    required this.palette,
-    required this.brightness,
-    required this.onTap,
-    required this.onClose,
-  });
-
-  final TerminalSessionController session;
-  final bool selected;
-  final AppPalette palette;
-  final Brightness brightness;
-  final VoidCallback onTap;
-  final VoidCallback onClose;
-
-  @override
-  Widget build(BuildContext context) {
-    final foreground = palette.foregroundFor(brightness);
-    final muted = palette.mutedForegroundFor(brightness);
-    final accent = palette.accent;
-    final background = selected
-        ? Color.alphaBlend(
-            accent.withValues(alpha: 0.14),
-            palette.panelFor(brightness),
-          )
-        : palette.panelFor(brightness);
-    final border = selected
-        ? accent.withValues(alpha: 0.55)
-        : palette.hairlineFor(brightness);
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(10),
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 140),
-          width: 190,
-          decoration: BoxDecoration(
-            color: background,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: border),
-          ),
-          padding: const EdgeInsets.only(left: 10),
-          child: Row(
-            children: [
-              _StatusDot(status: session.status),
-              const SizedBox(width: 7),
-              Expanded(
-                child: Text(
-                  session.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: foreground,
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
+                if (dirty)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4),
+                    child: Container(
+                      key: const ValueKey('dirty-dot'),
+                      width: 6,
+                      height: 6,
+                      decoration: BoxDecoration(
+                        color: accent,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
                   ),
-                ),
-              ),
-              SizedBox(
-                width: 26,
-                height: 26,
-                child: IconButton(
-                  tooltip: 'Close',
-                  iconSize: 14,
-                  padding: EdgeInsets.zero,
-                  color: muted,
-                  onPressed: onClose,
-                  icon: const Icon(Icons.close_rounded),
-                ),
-              ),
-            ],
+                if (selected)
+                  SizedBox(
+                    width: 26,
+                    height: 26,
+                    child: IconButton(
+                      tooltip: 'Close',
+                      iconSize: 14,
+                      padding: EdgeInsets.zero,
+                      color: muted,
+                      onPressed: onClose,
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
@@ -270,8 +293,8 @@ class _StatusDot extends StatelessWidget {
       TerminalConnectionStatus.disconnected => const Color(0xFF64748B),
     };
     return Container(
-      width: 8,
-      height: 8,
+      width: 7,
+      height: 7,
       decoration: BoxDecoration(color: color, shape: BoxShape.circle),
     );
   }

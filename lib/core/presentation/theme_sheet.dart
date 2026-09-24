@@ -6,7 +6,11 @@ import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
 import 'package:conduit/features/backup/presentation/backup_sheet.dart';
+import 'package:conduit/features/home_widget/data/platform_agent_status_widget_channel.dart';
+import 'package:conduit/features/home_widget/presentation/quick_settings_tile_controls.dart';
 import 'package:conduit/features/snippets/presentation/snippet_editor.dart';
+import 'package:conduit/features/terminal/presentation/gestures/terminal_gestures_settings.dart';
+import 'package:conduit/features/voice/presentation/speech_settings_controls.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -72,11 +76,23 @@ class _ThemeSheet extends StatelessWidget {
                   const ConduitSectionLabel('Terminal'),
                   const SizedBox(height: 10),
                   _TerminalAppearanceControls(controller: controller),
+                  const SizedBox(height: 22),
+                  const ConduitSectionLabel('Gestures'),
+                  const SizedBox(height: 10),
+                  TerminalGesturesSettings(controller: controller),
                   if (defaultTargetPlatform == TargetPlatform.android) ...[
                     const SizedBox(height: 22),
                     const ConduitSectionLabel('Home'),
                     const SizedBox(height: 10),
                     _HomeAppearanceControls(controller: controller),
+                    const SizedBox(height: 10),
+                    QuickSettingsTileControls(
+                      channel: PlatformAgentStatusWidgetChannel.instance,
+                    ),
+                    const SizedBox(height: 22),
+                    const ConduitSectionLabel('Speech'),
+                    const SizedBox(height: 10),
+                    SpeechSettingsControls(controller: controller),
                   ],
                   if (backupService != null) ...[
                     const SizedBox(height: 22),
@@ -107,6 +123,10 @@ class _ThemeSheet extends StatelessWidget {
                       );
                     },
                   ),
+                  const SizedBox(height: 22),
+                  const ConduitSectionLabel('About'),
+                  const SizedBox(height: 10),
+                  const _AboutControls(),
                 ],
               ),
             );
@@ -346,6 +366,54 @@ class _TerminalAppearanceControls extends StatelessWidget {
               children: [
                 Row(
                   children: [
+                    const Icon(Icons.space_bar_rounded, size: 20),
+                    const SizedBox(width: 10),
+                    Text('Toolbar style', style: theme.textTheme.titleSmall),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  controller.terminalToolbarStyle.description,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: SegmentedButton<TerminalToolbarStyle>(
+                    segments: [
+                      for (final style in TerminalToolbarStyle.values)
+                        ButtonSegment<TerminalToolbarStyle>(
+                          value: style,
+                          label: Text(style.label),
+                        ),
+                    ],
+                    selected: {controller.terminalToolbarStyle},
+                    onSelectionChanged: (selection) {
+                      controller.setTerminalToolbarStyle(selection.single);
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
+        Material(
+          color: colorScheme.surface,
+          shape: RoundedRectangleBorder(
+            side: BorderSide(color: colorScheme.outlineVariant),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
                     const Icon(Icons.keyboard_return_rounded, size: 20),
                     const SizedBox(width: 10),
                     Text('Enter sends', style: theme.textTheme.titleSmall),
@@ -398,6 +466,28 @@ class _TerminalAppearanceControls extends StatelessWidget {
             ),
             value: controller.terminalMouseInput,
             onChanged: controller.setTerminalMouseInput,
+          ),
+        ),
+        const SizedBox(height: 14),
+        Material(
+          color: colorScheme.surface,
+          shape: RoundedRectangleBorder(
+            side: BorderSide(color: colorScheme.outlineVariant),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: SwitchListTile(
+            secondary: const Icon(Icons.smart_button_rounded),
+            title: const Text('Menu buttons'),
+            subtitle: Text(
+              'Answer numbered menus and y/n prompts (Claude Code, installers) '
+              'with buttons above the keyboard bar.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+            value: controller.menuButtonsEnabled,
+            onChanged: controller.setMenuButtonsEnabled,
           ),
         ),
         const SizedBox(height: 14),
@@ -1245,6 +1335,43 @@ class _Swatch extends StatelessWidget {
         color: color,
         borderRadius: BorderRadius.circular(4),
       ),
+    );
+  }
+}
+
+/// App identity and the upstream credit Conductore keeps under Apache-2.0.
+class _AboutControls extends StatelessWidget {
+  const _AboutControls();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Conductore', style: theme.textTheme.titleMedium),
+        const SizedBox(height: 4),
+        Text(
+          'Based on Conduit by gwitko (Apache-2.0)',
+          key: const ValueKey('about-upstream-credit'),
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () => showLicensePage(
+              context: context,
+              applicationName: 'Conductore',
+              applicationLegalese: 'Based on Conduit by gwitko (Apache-2.0)',
+            ),
+            icon: const Icon(Icons.description_outlined, size: 18),
+            label: const Text('Open-source licenses'),
+          ),
+        ),
+      ],
     );
   }
 }

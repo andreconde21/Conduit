@@ -6,6 +6,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.NFC" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-feature
+        android:name="android.hardware.microphone"
+        android:required="false" />
     <uses-feature
         android:name="android.hardware.usb.host"
         android:required="false" />
@@ -35,6 +39,24 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- Share-to-agent: text, images, PDFs and anything else land in
+                 the active session's Chat composer (files via SFTP). -->
+            <intent-filter android:label="Send to agent">
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/plain"/>
+                <data android:mimeType="image/*"/>
+                <data android:mimeType="application/pdf"/>
+                <data android:mimeType="*/*"/>
+            </intent-filter>
+            <intent-filter android:label="Send to agent">
+                <action android:name="android.intent.action.SEND_MULTIPLE"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/plain"/>
+                <data android:mimeType="image/*"/>
+                <data android:mimeType="application/pdf"/>
+                <data android:mimeType="*/*"/>
+            </intent-filter>
         </activity>
         <meta-data
             android:name="flutterEmbedding"
@@ -43,11 +65,48 @@
             android:name=".BackgroundConnectionService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Agent status home-screen widget and quick-settings tile (feat/home-widget) -->
+        <receiver
+            android:name=".AgentStatusWidgetProvider"
+            android:exported="true"
+            android:label="@string/agent_widget_title">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/agent_status_widget_info" />
+        </receiver>
+        <service
+            android:name=".AgentStatusTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_agent_tile"
+            android:label="@string/agent_tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="false" />
+        </service>
+        <!-- End agent status widget/tile -->
+
+        <!-- Allow / Deny / Always buttons on permission notifications (feat/host-approvals) -->
+        <receiver
+            android:name=".AgentPermissionActionReceiver"
+            android:exported="false" />
     </application>
     <queries>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- Lets SpeechRecognizer.isRecognitionAvailable see the system
+             speech service under Android 11+ package visibility rules. -->
+        <intent>
+            <action android:name="android.speech.RecognitionService"/>
         </intent>
     </queries>
 </manifest>

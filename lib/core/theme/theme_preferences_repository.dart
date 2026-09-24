@@ -2,7 +2,9 @@ import 'dart:convert';
 
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
+import 'package:conduit/core/theme/terminal_pill_items.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
+import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -19,6 +21,11 @@ class ThemePreferences {
     this.terminalEnterSequence = TerminalEnterSequence.cr,
     this.touchModeHintSeen = false,
     this.composeSubmitEnter = false,
+    this.terminalToolbarStyle = TerminalToolbarStyle.floatingPill,
+    this.terminalPillItems = defaultTerminalPillItems,
+    this.menuButtonsEnabled = true,
+    this.terminalGestures = TerminalGesturePreferences.defaults,
+    this.speechLanguage = '',
   });
 
   final ThemeMode themeMode;
@@ -37,6 +44,23 @@ class ThemePreferences {
   /// Whether the prompt composer presses Enter after inserting a prompt.
   /// Off by default so composed text lands in the TUI for review.
   final bool composeSubmitEnter;
+
+  /// Which input toolbar the terminal page shows; the floating pill is the
+  /// default, the key rows remain available as the classic layout.
+  final TerminalToolbarStyle terminalToolbarStyle;
+
+  /// Buttons on the floating pill, in order (the ⋯ button always follows).
+  final List<TerminalPillItem> terminalPillItems;
+
+  /// Whether choice prompts on screen (Claude Code menus, y/n questions)
+  /// are offered as tappable buttons above the keyboard bar.
+  final bool menuButtonsEnabled;
+
+  /// Per-gesture switches for the terminal touch gestures.
+  final TerminalGesturePreferences terminalGestures;
+
+  /// BCP-47 tag dictation listens in; empty means the device locale.
+  final String speechLanguage;
 }
 
 class ThemePreferencesRepository {
@@ -57,6 +81,11 @@ class ThemePreferencesRepository {
   static const _terminalEnterSequenceKey = 'conduit.terminal_enter_sequence.v1';
   static const _touchModeHintSeenKey = 'conduit.touch_mode_hint_seen.v1';
   static const _composeSubmitEnterKey = 'conduit.compose_submit_enter.v1';
+  static const _terminalToolbarStyleKey = 'conduit.terminal_toolbar_style.v1';
+  static const _terminalPillItemsKey = 'conduit.terminal_pill_items.v1';
+  static const _menuButtonsEnabledKey = 'conduit.menu_buttons_enabled.v1';
+  static const _terminalGesturesKey = 'conduit.terminal_gestures.v1';
+  static const _speechLanguageKey = 'conduit.speech_language.v1';
 
   final FlutterSecureStorage _storage;
 
@@ -88,6 +117,18 @@ class ThemePreferencesRepository {
     final rawComposeSubmitEnter = await _storage.read(
       key: _composeSubmitEnterKey,
     );
+    final rawTerminalToolbarStyle = await _storage.read(
+      key: _terminalToolbarStyleKey,
+    );
+    final rawTerminalPillItems = await _storage.read(
+      key: _terminalPillItemsKey,
+    );
+
+    final rawMenuButtonsEnabled = await _storage.read(
+      key: _menuButtonsEnabledKey,
+    );
+    final rawTerminalGestures = await _storage.read(key: _terminalGesturesKey);
+    final rawSpeechLanguage = await _storage.read(key: _speechLanguageKey);
     final terminalFontSize = double.tryParse(rawTerminalFontSize ?? '');
     final terminalKeyboardRows = _appendUnseenBuiltIns(
       _parseTerminalKeyboardRows(
@@ -123,6 +164,15 @@ class ThemePreferencesRepository {
       ),
       touchModeHintSeen: rawTouchModeHintSeen == 'true',
       composeSubmitEnter: rawComposeSubmitEnter == 'true',
+      terminalToolbarStyle: TerminalToolbarStyle.values.firstWhere(
+        (style) => style.name == rawTerminalToolbarStyle,
+        orElse: () => TerminalToolbarStyle.floatingPill,
+      ),
+      terminalPillItems: _parseTerminalPillItems(rawTerminalPillItems),
+      menuButtonsEnabled:
+          rawMenuButtonsEnabled == null || rawMenuButtonsEnabled == 'true',
+      terminalGestures: TerminalGesturePreferences.decode(rawTerminalGestures),
+      speechLanguage: rawSpeechLanguage?.trim() ?? '',
     );
   }
 
@@ -181,6 +231,39 @@ class ThemePreferencesRepository {
       key: _composeSubmitEnterKey,
       value: preferences.composeSubmitEnter.toString(),
     );
+    await _storage.write(
+      key: _terminalToolbarStyleKey,
+      value: preferences.terminalToolbarStyle.name,
+    );
+    await _storage.write(
+      key: _terminalPillItemsKey,
+      value: jsonEncode(
+        TerminalPillItem.encodeList(preferences.terminalPillItems),
+      ),
+    );
+    await _storage.write(
+      key: _menuButtonsEnabledKey,
+      value: preferences.menuButtonsEnabled.toString(),
+    );
+    await _storage.write(
+      key: _terminalGesturesKey,
+      value: preferences.terminalGestures.encode(),
+    );
+    await _storage.write(
+      key: _speechLanguageKey,
+      value: preferences.speechLanguage,
+    );
+  }
+
+  List<TerminalPillItem> _parseTerminalPillItems(String? raw) {
+    if (raw == null || raw.trim().isEmpty) {
+      return defaultTerminalPillItems;
+    }
+    try {
+      return TerminalPillItem.decodeList(jsonDecode(raw));
+    } catch (_) {
+      return defaultTerminalPillItems;
+    }
   }
 
   List<TerminalSnippet> _parseTerminalSnippets(String? raw) {

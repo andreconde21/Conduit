@@ -23,6 +23,9 @@ class TerminalFileTab {
 
   IconData get icon => Icons.description_rounded;
 
+  /// Shown on long-press of the tab: the remote path for files.
+  String get tooltip => path;
+
   /// Notifies when [title] may have changed; null for a static title.
   Listenable? get listenable => null;
 
