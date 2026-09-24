@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="agent_widget_surface">#1C1B1F</color>
+    <color name="agent_widget_on_surface">#E6E1E5</color>
+    <color name="agent_widget_on_surface_variant">#B0ACB8</color>
+    <color name="agent_widget_accent">#D0BCFF</color>
+    <color name="agent_widget_on_accent">#381E72</color>
+    <color name="agent_widget_urgent">#F2B8B5</color>
+</resources>

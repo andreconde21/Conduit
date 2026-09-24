@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="agent_widget_title">Agents</string>
+    <string name="agent_widget_description">Which coding agents need your input, at a glance.</string>
+    <string name="agent_widget_empty">Open Conductore to monitor agents</string>
+    <string name="agent_widget_no_agents">No agents running</string>
+    <string name="agent_widget_all_clear">All clear</string>
+    <string name="agent_widget_one_needs_input">agent needs input</string>
+    <string name="agent_widget_needs_input">agents need input</string>
+    <string name="agent_widget_updated">Updated %1$s</string>
+    <string name="agent_tile_label">Agents</string>
+    <string name="agent_tile_not_monitoring">Open app to monitor</string>
+    <string name="agent_tile_one_needs_input">1 needs input</string>
+    <string name="agent_tile_needs_input">%1$d need input</string>
+
+    <!-- Fallback palette (pre-Android 12): matches the app's dark launcher look. -->
+    <color name="agent_widget_surface">#F4F1F8</color>
+    <color name="agent_widget_on_surface">#1C1B1F</color>
+    <color name="agent_widget_on_surface_variant">#5C5966</color>
+    <color name="agent_widget_accent">#6750A4</color>
+    <color name="agent_widget_on_accent">#FFFFFF</color>
+    <color name="agent_widget_urgent">#B3261E</color>
+
+    <dimen name="agent_widget_corner_radius">16dp</dimen>
+</resources>

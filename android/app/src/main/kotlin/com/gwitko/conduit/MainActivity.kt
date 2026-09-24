@@ -27,6 +27,7 @@ class MainActivity : FlutterFragmentActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        flutterEngine.plugins.add(AgentStatusWidgetChannel()) // home widget + QS tile bridge
         fidoUsbCtapTransport = FidoUsbCtapTransport(this)
         val speech = SpeechRecognitionBridge(this)
         speechRecognition = speech

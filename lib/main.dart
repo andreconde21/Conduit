@@ -12,6 +12,9 @@ import 'package:conduit/features/app_lock/data/local_app_authenticator.dart';
 import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart';
 import 'package:conduit/features/app_lock/presentation/lock_page.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
+import 'package:conduit/features/home_widget/data/platform_agent_status_widget_channel.dart';
+import 'package:conduit/features/home_widget/presentation/agent_status_launch_listener.dart';
+import 'package:conduit/features/home_widget/presentation/agent_status_widget_pusher.dart';
 import 'package:conduit/features/hosts/data/secure_saved_hosts_repository.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/hosts/presentation/hosts_page.dart';
@@ -91,6 +94,12 @@ void main() {
     runnerFactory: (host) => SshAgentCommandRunner(hostKeyVerifier, host),
     preferences: const SecureConnectPreferencesRepository(secureStorage),
   );
+  // Mirrors the agent dashboard onto the Android home-screen widget and
+  // quick-settings tile for the app's whole lifetime.
+  AgentStatusWidgetPusher.forController(
+    agentAttention,
+    channel: PlatformAgentStatusWidgetChannel.instance,
+  ).start();
   final backupService = AppBackupService(
     hostsController: hostsController,
     themeController: themeController,
@@ -366,7 +375,14 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
                 fileExport: widget.fileExport,
                 connectFlow: widget.connectFlow,
               );
-              return _wrapShareTargetHost(home);
+              return _wrapShareTargetHost(
+                AgentStatusLaunchListener(
+                  channel: PlatformAgentStatusWidgetChannel.instance,
+                  agentAttention: widget.agentAttention,
+                  workspace: widget.workspaceController,
+                  child: home,
+                ),
+              );
             },
           ),
         );
