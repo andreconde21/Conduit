@@ -21,7 +21,7 @@ class LocalAppAuthenticator implements AppAuthenticator {
   Future<AppAuthenticationResult> authenticate() async {
     try {
       final authenticated = await _localAuthentication.authenticate(
-        localizedReason: 'Unlock Conduit to access saved SSH machines.',
+        localizedReason: 'Unlock Conductore to access saved SSH machines.',
       );
       return authenticated
           ? AppAuthenticationResult.success

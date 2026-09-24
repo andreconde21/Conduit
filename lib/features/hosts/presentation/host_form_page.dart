@@ -620,7 +620,7 @@ class _HostFormPageState extends State<HostFormPage> {
   Future<({String comment, String passphrase})?> _promptGenerateOptions() {
     final username = _usernameController.text.trim();
     final commentController = TextEditingController(
-      text: username.isEmpty ? 'conduit' : '$username@conduit',
+      text: username.isEmpty ? 'conductore' : '$username@conductore',
     );
     final passphraseController = TextEditingController();
     return showDialog<({String comment, String passphrase})>(

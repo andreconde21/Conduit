@@ -29,7 +29,7 @@ class AppBackupService {
        _crypto = crypto,
        _now = now ?? DateTime.now;
 
-  static const fileExtension = 'conduit-backup.json';
+  static const fileExtension = 'conductore-backup.json';
 
   final HostsController _hostsController;
   final ThemeController _themeController;
@@ -244,7 +244,7 @@ class AppBackupService {
       throw const FormatException('Backup root is not an object.');
     } catch (error) {
       throw const AppBackupException(
-        'This does not look like a Conduit backup.',
+        'This does not look like a Conductore backup.',
       );
     }
   }

@@ -192,10 +192,10 @@ class AuthExplainer extends StatelessWidget {
             child: Text(
               hardwareKey
                   ? 'Add the OpenSSH *_sk key stub for each security key you '
-                        'own. When you connect, Conduit asks whichever key '
+                        'own. When you connect, Conductore asks whichever key '
                         'you present to sign over USB or NFC.'
                   : external
-                  ? 'Use this when authentication is handled outside Conduit, '
+                  ? 'Use this when authentication is handled outside Conductore, '
                         'without storing a password or private key in the app.'
                   : 'Use a normal SSH private key. If the key is encrypted, '
                         'enter its passphrase below.',

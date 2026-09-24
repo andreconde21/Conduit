@@ -4,12 +4,12 @@ import 'package:flutter/services.dart';
 void registerLocalShellLicenses() {
   LicenseRegistry.addLicense(() async* {
     yield const LicenseEntryWithLineBreaks([
-      'Conduit - local shell (Termux tooling)',
+      'Conductore - local shell (Termux tooling)',
     ], _notice);
 
     for (final license in _noticeAssets.entries) {
       yield LicenseEntryWithLineBreaks([
-        'Conduit - local shell (${license.key})',
+        'Conductore - local shell (${license.key})',
       ], await rootBundle.loadString(license.value));
     }
   });
@@ -29,7 +29,7 @@ const Map<String, String> _noticeAssets = {
 
 const String _notice = '''
 The on-device local Linux shell includes Android (aarch64) binaries that
-Conduit redistributes but did not create. They are built from pinned Termux
+Conductore redistributes but did not create. They are built from pinned Termux
 package recipes (https://termux.dev) and are used under their respective
 open-source licenses:
 
@@ -51,8 +51,8 @@ The downloadable root filesystems are packaged via Termux's proot-distro
 Arch Linux ARM (archlinuxarm.org), Debian, Ubuntu, Alpine Linux, Rocky Linux,
 openSUSE, Void Linux, and Manjaro.
 
-Conduit's own source code is Apache-2.0. These bundled components and downloaded
-rootfs packages are not relicensed by Conduit.
+Conductore is based on Conduit by gwitko; both are Apache-2.0. These bundled
+components and downloaded rootfs packages are not relicensed by either.
 
 For GPL/LGPL components, Conduit publishes corresponding-source details, exact
 upstream source archives, package checksums, pinned Termux package recipes and

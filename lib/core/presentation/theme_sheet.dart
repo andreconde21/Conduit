@@ -123,6 +123,10 @@ class _ThemeSheet extends StatelessWidget {
                       );
                     },
                   ),
+                  const SizedBox(height: 22),
+                  const ConduitSectionLabel('About'),
+                  const SizedBox(height: 10),
+                  const _AboutControls(),
                 ],
               ),
             );
@@ -1331,6 +1335,43 @@ class _Swatch extends StatelessWidget {
         color: color,
         borderRadius: BorderRadius.circular(4),
       ),
+    );
+  }
+}
+
+/// App identity and the upstream credit Conductore keeps under Apache-2.0.
+class _AboutControls extends StatelessWidget {
+  const _AboutControls();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Conductore', style: theme.textTheme.titleMedium),
+        const SizedBox(height: 4),
+        Text(
+          'Based on Conduit by gwitko (Apache-2.0)',
+          key: const ValueKey('about-upstream-credit'),
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () => showLicensePage(
+              context: context,
+              applicationName: 'Conductore',
+              applicationLegalese: 'Based on Conduit by gwitko (Apache-2.0)',
+            ),
+            icon: const Icon(Icons.description_outlined, size: 18),
+            label: const Text('Open-source licenses'),
+          ),
+        ),
+      ],
     );
   }
 }

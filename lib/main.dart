@@ -318,7 +318,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
       listenable: widget.themeController,
       builder: (context, _) {
         return MaterialApp(
-          title: 'Conduit',
+          title: 'Conductore',
           debugShowCheckedModeBanner: false,
           theme: AppTheme.build(
             brightness: Brightness.light,

@@ -465,7 +465,7 @@ class HostAdvancedSection extends StatelessWidget {
             decoration: const InputDecoration(
               labelText: 'Tmux session name',
               hintText: defaultTmuxSessionName,
-              helperText: 'Conduit attaches to this session, or creates it.',
+              helperText: 'Conductore attaches to this session, or creates it.',
               helperMaxLines: 2,
               prefixIcon: Icon(Icons.view_stream_outlined),
             ),
