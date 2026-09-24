@@ -1,68 +1,79 @@
 import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:flutter/material.dart';
 
-class HostsHero extends StatelessWidget {
-  const HostsHero({
-    required this.hostCount,
-    required this.activeSessionCount,
+/// Slim app bar of the home page: brand glyph plus the app-level actions
+/// (trusted keys, appearance and backup, lock).
+class HomeTopBar extends StatelessWidget {
+  const HomeTopBar({
     required this.onAppearance,
     required this.onTrustedKeys,
     required this.onLock,
+    super.key,
+  });
+
+  final VoidCallback onAppearance;
+  final VoidCallback onTrustedKeys;
+  final VoidCallback onLock;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 8, 18, 10),
+      child: Row(
+        children: [
+          const ConduitGlyph(size: 26),
+          const Spacer(),
+          _GhostIconButton(
+            tooltip: 'Trusted keys',
+            icon: Icons.shield_outlined,
+            onPressed: onTrustedKeys,
+          ),
+          const SizedBox(width: 8),
+          _GhostIconButton(
+            tooltip: 'Appearance',
+            icon: Icons.palette_outlined,
+            onPressed: onAppearance,
+          ),
+          const SizedBox(width: 8),
+          _GhostIconButton(
+            tooltip: 'Lock',
+            icon: Icons.lock_outline,
+            onPressed: onLock,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Saved-machine and live-session counters, shown in the home page's
+/// "More" area.
+class HomeStats extends StatelessWidget {
+  const HomeStats({
+    required this.hostCount,
+    required this.activeSessionCount,
     required this.onOpenSessions,
     super.key,
   });
 
   final int hostCount;
   final int activeSessionCount;
-  final VoidCallback onAppearance;
-  final VoidCallback onTrustedKeys;
-  final VoidCallback onLock;
   final VoidCallback? onOpenSessions;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 10, 18, 18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              const ConduitGlyph(size: 30),
-              const Spacer(),
-              _GhostIconButton(
-                tooltip: 'Trusted keys',
-                icon: Icons.shield_outlined,
-                onPressed: onTrustedKeys,
-              ),
-              const SizedBox(width: 8),
-              _GhostIconButton(
-                tooltip: 'Appearance',
-                icon: Icons.palette_outlined,
-                onPressed: onAppearance,
-              ),
-              const SizedBox(width: 8),
-              _GhostIconButton(
-                tooltip: 'Lock',
-                icon: Icons.lock_outline,
-                onPressed: onLock,
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          _StatsRow(
-            hostCount: hostCount,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _StatsRow(hostCount: hostCount, activeSessionCount: activeSessionCount),
+        if (activeSessionCount > 0) ...[
+          const SizedBox(height: 12),
+          _ResumeBanner(
             activeSessionCount: activeSessionCount,
+            onOpenSessions: onOpenSessions,
           ),
-          if (activeSessionCount > 0) ...[
-            const SizedBox(height: 12),
-            _ResumeBanner(
-              activeSessionCount: activeSessionCount,
-              onOpenSessions: onOpenSessions,
-            ),
-          ],
         ],
-      ),
+      ],
     );
   }
 }
@@ -145,11 +156,15 @@ class _StatTile extends StatelessWidget {
                 color: accent ? accentColor : colorScheme.onSurfaceVariant,
               ),
               const SizedBox(width: 6),
-              Text(
-                label,
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: accent ? accentColor : colorScheme.onSurfaceVariant,
-                  fontWeight: FontWeight.w800,
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: accent ? accentColor : colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
               ),
             ],

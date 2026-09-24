@@ -4,19 +4,20 @@ import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/presentation/theme_sheet.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
+import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
-import 'package:conduit/features/hosts/domain/saved_hosts_repository.dart';
+import 'package:conduit/features/hosts/presentation/home_board_controller.dart';
 import 'package:conduit/features/hosts/presentation/host_form_page.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
-import 'package:conduit/features/hosts/presentation/widgets/connection_fab.dart';
+import 'package:conduit/features/hosts/presentation/widgets/herdr_board.dart';
+import 'package:conduit/features/hosts/presentation/widgets/home_chrome.dart';
 import 'package:conduit/features/hosts/presentation/widgets/host_card.dart';
-import 'package:conduit/features/hosts/presentation/widgets/host_search_field.dart';
-import 'package:conduit/features/hosts/presentation/widgets/hosts_hero.dart';
+import 'package:conduit/features/hosts/presentation/widgets/host_sessions_strip.dart';
+import 'package:conduit/features/hosts/presentation/widgets/machine_switcher.dart';
 import 'package:conduit/features/hosts/presentation/widgets/message_state.dart';
-import 'package:conduit/features/hosts/presentation/widgets/tag_filter_bar.dart';
 import 'package:conduit/features/local_shell/domain/local_shell_instance.dart';
 import 'package:conduit/features/local_shell/presentation/local_shell_controller.dart';
 import 'package:conduit/features/local_shell/presentation/local_shell_instance_page.dart';
@@ -34,12 +35,20 @@ import 'package:conduit/features/terminal/domain/ssh_terminal_repository.dart';
 import 'package:conduit/features/terminal/presentation/host_key_prompt_coordinator.dart';
 import 'package:conduit/features/terminal/presentation/host_key_prompt_dialog.dart';
 import 'package:conduit/features/terminal/presentation/terminal_page.dart';
+import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:conduit/features/terminal/presentation/trusted_keys_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
 
+/// The home page: one machine at a time, showing what is happening on it.
+///
+/// A machine switcher at the top picks the machine (the last connected one
+/// by default) and carries its actions; below it a live board lists the
+/// machine's Herdr workspaces and agent panes, then the app's open sessions
+/// on that machine as preview tiles. The local shell and counters sit in a
+/// "More" area at the bottom.
 class HostsPage extends StatefulWidget {
   const HostsPage({
     required this.hostsController,
@@ -56,6 +65,9 @@ class HostsPage extends StatefulWidget {
     required this.backupService,
     required this.fileExport,
     this.connectFlow,
+    this.homeBoard,
+    this.previewRefreshInterval = const Duration(seconds: 3),
+    this.paneRefocusDelay = const Duration(seconds: 4),
     super.key,
   });
 
@@ -77,34 +89,148 @@ class HostsPage extends StatefulWidget {
   /// shell like before.
   final SessionConnectFlow? connectFlow;
 
+  /// Live Herdr board for the selected machine. When null the page builds
+  /// one from [connectFlow]'s runner factory (and hides the board without
+  /// a connect flow).
+  final HomeBoardController? homeBoard;
+
+  /// How often session preview tiles are re-captured while visible.
+  final Duration previewRefreshInterval;
+
+  /// After opening a new session for a pane, the pane is focused again
+  /// once Herdr has attached.
+  final Duration paneRefocusDelay;
+
   @override
   State<HostsPage> createState() => _HostsPageState();
 }
 
-class _HostsPageState extends State<HostsPage> {
-  final _searchController = TextEditingController();
+class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
   bool _terminalPageOpen = false;
   bool _showingHostKeyPrompt = false;
-  String _query = '';
-  String? _selectedTag;
+  bool _appResumed = true;
+  bool _routeVisible = true;
+  bool? _moreExpanded;
+  String? _selectedHostId;
+  HomeBoardController? _ownedBoard;
+  Timer? _previewTimer;
+  Timer? _refocusTimer;
+
+  HomeBoardController? get _board => widget.homeBoard ?? _ownedBoard;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    final flow = widget.connectFlow;
+    if (widget.homeBoard == null && flow != null) {
+      _ownedBoard = HomeBoardController(
+        runnerFactory: flow.runnerFactory,
+        provider: widget.agentAttention.provider,
+      );
+    }
+    widget.hostsController.addListener(_syncSelection);
+    widget.workspaceController.addListener(_syncSelection);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(widget.hostsController.load());
       unawaited(widget.localShellController.refresh());
       _handlePromptChanged();
+      _syncSelection();
+      _syncVisibility();
     });
     widget.promptCoordinator.addListener(_handlePromptChanged);
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Routes pushed on top (terminal, forms, SFTP) put this page offstage
+    // with tickers disabled; that is the signal to pause live polling.
+    final visible = TickerMode.valuesOf(context).enabled;
+    if (visible != _routeVisible) {
+      _routeVisible = visible;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _syncVisibility());
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _appResumed = state == AppLifecycleState.resumed;
+    _syncVisibility();
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    widget.hostsController.removeListener(_syncSelection);
+    widget.workspaceController.removeListener(_syncSelection);
     widget.promptCoordinator.removeListener(_handlePromptChanged);
     widget.promptCoordinator.rejectAll();
-    _searchController.dispose();
+    _previewTimer?.cancel();
+    _refocusTimer?.cancel();
+    widget.homeBoard?.setVisible(false);
+    _ownedBoard?.dispose();
     super.dispose();
+  }
+
+  void _syncVisibility() {
+    if (!mounted) return;
+    final visible = _appResumed && _routeVisible;
+    _board?.setVisible(visible);
+    if (visible) {
+      _previewTimer ??= Timer.periodic(widget.previewRefreshInterval, (_) {
+        if (mounted && _selectedSessions().isNotEmpty) setState(() {});
+      });
+    } else {
+      _previewTimer?.cancel();
+      _previewTimer = null;
+    }
+  }
+
+  /// The machine the page shows: the one picked in the switcher, else the
+  /// active session's machine, else the most recently connected one.
+  SavedHost? get _selectedHost {
+    final hosts = widget.hostsController.hosts;
+    if (hosts.isEmpty) return null;
+    final picked = _selectedHostId;
+    if (picked != null) {
+      final match = hosts.where((host) => host.id == picked).firstOrNull;
+      if (match != null) return match;
+    }
+    final active = widget.workspaceController.activeSession;
+    if (active != null) {
+      final id = baseHostId(active.host.id);
+      final match = hosts.where((host) => host.id == id).firstOrNull;
+      if (match != null) return match;
+    }
+    SavedHost? latest;
+    for (final host in hosts) {
+      final at = host.lastConnectedAt;
+      if (at == null) continue;
+      if (latest == null || at.isAfter(latest.lastConnectedAt!)) {
+        latest = host;
+      }
+    }
+    return latest ?? widget.hostsController.sortedHosts.first;
+  }
+
+  void _syncSelection() {
+    if (!mounted) return;
+    final host = _selectedHost;
+    if (host == null && _selectedHostId != null) {
+      _selectedHostId = null;
+    }
+    _board?.selectHost(host);
+  }
+
+  List<TerminalSessionController> _sessionsFor(SavedHost host) => [
+    for (final session in widget.workspaceController.sessions)
+      if (baseHostId(session.host.id) == host.id) session,
+  ];
+
+  List<TerminalSessionController> _selectedSessions() {
+    final host = _selectedHost;
+    return host == null ? const [] : _sessionsFor(host);
   }
 
   void _handlePromptChanged() {
@@ -133,316 +259,414 @@ class _HostsPageState extends State<HostsPage> {
         HostKeyDecision.reject;
   }
 
+  Future<void> _refreshAll() async {
+    await widget.hostsController.load();
+    await _board?.refresh();
+  }
+
   @override
   Widget build(BuildContext context) {
     final palette = widget.themeController.palette;
     return Scaffold(
-      floatingActionButton: ListenableBuilder(
-        listenable: widget.hostsController,
-        builder: (context, _) {
-          final hideFab =
-              !widget.hostsController.isLoading &&
-              widget.hostsController.errorMessage == null &&
-              widget.hostsController.hosts.isEmpty;
-          return hideFab
-              ? const SizedBox.shrink()
-              : ConnectionFab(onTap: _openForm);
-        },
-      ),
       body: ConduitBackdrop(
         palette: palette,
         child: SafeArea(
           bottom: shouldApplyBottomSafeArea(context),
           child: RefreshIndicator(
             color: Theme.of(context).colorScheme.primary,
-            onRefresh: widget.hostsController.load,
-            child: CustomScrollView(
-              slivers: [
-                SliverToBoxAdapter(
-                  child: ListenableBuilder(
-                    listenable: Listenable.merge([
-                      widget.hostsController,
-                      widget.workspaceController,
-                    ]),
-                    builder: (context, _) {
-                      return HostsHero(
-                        hostCount: widget.hostsController.hosts.length,
-                        activeSessionCount:
-                            widget.workspaceController.sessions.length,
-                        onAppearance: () => showThemeSheet(
-                          context: context,
-                          controller: widget.themeController,
-                          backupService: widget.backupService,
-                        ),
-                        onTrustedKeys: _openTrustedKeys,
-                        onLock: _lock,
-                        onOpenSessions: widget.workspaceController.hasSessions
-                            ? _openTerminalWorkspace
-                            : null,
-                      );
-                    },
-                  ),
-                ),
-                SliverToBoxAdapter(
-                  child: ListenableBuilder(
-                    listenable: Listenable.merge([
-                      widget.workspaceController,
-                      widget.themeController,
-                    ]),
-                    builder: (context, _) {
-                      if (!widget.themeController.showLocalShell) {
-                        return const SizedBox.shrink();
-                      }
-                      final activeInstanceIds = widget
-                          .workspaceController
-                          .sessions
-                          .map(
-                            (session) =>
-                                localShellInstanceIdFromHostId(session.host.id),
-                          )
-                          .whereType<String>()
-                          .toSet();
-                      return LocalShellSection(
-                        controller: widget.localShellController,
-                        activeInstanceIds: activeInstanceIds,
-                        onAdd: _openLocalShellSetup,
-                        onOpenInstance: _openLocalSession,
-                        onManageInstance: _openLocalShellInstance,
-                      );
-                    },
-                  ),
-                ),
-                ListenableBuilder(
-                  listenable: Listenable.merge([
-                    widget.hostsController,
-                    widget.workspaceController,
-                  ]),
-                  builder: (context, _) => _buildBody(context),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildBody(BuildContext context) {
-    final controller = widget.hostsController;
-    if (controller.isLoading) {
-      return const SliverFillRemaining(
-        hasScrollBody: false,
-        child: Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    if (controller.errorMessage != null) {
-      return SliverFillRemaining(
-        hasScrollBody: false,
-        child: MessageState(
-          icon: Icons.error_outline,
-          title: 'Something went wrong',
-          message: controller.errorMessage!,
-          actionLabel: 'Retry',
-          onAction: controller.load,
-        ),
-      );
-    }
-
-    if (controller.hosts.isEmpty) {
-      return SliverPadding(
-        padding: const EdgeInsets.fromLTRB(18, 0, 18, 120),
-        sliver: SliverList(
-          delegate: SliverChildListDelegate.fixed([
-            const _MachineSectionHeader(),
-            const SizedBox(height: 24),
-            MessageState(
-              icon: Icons.dns_outlined,
-              title: 'No saved machines yet',
-              message:
-                  'Add an SSH or Mosh server and Conduit will keep its '
-                  'credentials in your device’s secure storage.',
-              actionLabel: 'Add machine',
-              onAction: _openForm,
-            ),
-          ]),
-        ),
-      );
-    }
-
-    final filteredHosts = _filteredHosts(controller.sortedHosts);
-    final tags = _tagsFor(controller.hosts);
-    final isFiltered = _query.trim().isNotEmpty || _selectedTag != null;
-    final canReorder =
-        controller.sortMode == HostListSortMode.manual && !isFiltered;
-
-    return SliverPadding(
-      padding: const EdgeInsets.fromLTRB(18, 0, 18, 120),
-      sliver: SliverMainAxisGroup(
-        slivers: [
-          SliverToBoxAdapter(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const _MachineSectionHeader(),
-                const SizedBox(height: 12),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: HostSearchField(
-                        controller: _searchController,
-                        onChanged: (value) => setState(() => _query = value),
-                        hasContent: _query.isNotEmpty || _selectedTag != null,
-                        onClear: _clearFilters,
+            onRefresh: _refreshAll,
+            child: ListenableBuilder(
+              listenable: Listenable.merge([
+                widget.hostsController,
+                widget.workspaceController,
+                widget.themeController,
+              ]),
+              builder: (context, _) => CustomScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                slivers: [
+                  SliverToBoxAdapter(
+                    child: HomeTopBar(
+                      onAppearance: () => showThemeSheet(
+                        context: context,
+                        controller: widget.themeController,
+                        backupService: widget.backupService,
                       ),
+                      onTrustedKeys: _openTrustedKeys,
+                      onLock: _lock,
                     ),
-                    const SizedBox(width: 8),
-                    _HostSortMenu(
-                      value: controller.sortMode,
-                      onChanged: widget.hostsController.setSortMode,
-                    ),
-                  ],
-                ),
-                if (tags.isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  TagFilterBar(
-                    tags: tags,
-                    selectedTag: _selectedTag,
-                    onSelected: (tag) {
-                      setState(() {
-                        _selectedTag = _selectedTag == tag ? null : tag;
-                      });
-                    },
                   ),
+                  ..._buildMain(context),
+                  SliverToBoxAdapter(child: _buildMore(context)),
+                  const SliverToBoxAdapter(child: SizedBox(height: 32)),
                 ],
-                const SizedBox(height: 16),
-              ],
-            ),
-          ),
-          if (filteredHosts.isEmpty)
-            SliverToBoxAdapter(
-              child: MessageState(
-                icon: Icons.search_off,
-                title: 'No matches',
-                message: 'Try a different search or clear filters.',
-                actionLabel: 'Clear',
-                onAction: _clearFilters,
               ),
-            )
-          else if (canReorder)
-            SliverReorderableList(
-              itemCount: filteredHosts.length,
-              onReorderItem: widget.hostsController.reorderManual,
-              proxyDecorator: _reorderProxyDecorator,
-              itemBuilder: (context, index) {
-                final host = filteredHosts[index];
-                return Padding(
-                  key: ValueKey(host.id),
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: _buildHostCard(
-                    host,
-                    dragHandle: ReorderableDragStartListener(
-                      index: index,
-                      child: const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 4),
-                        child: Icon(Icons.drag_handle_rounded),
-                      ),
-                    ),
-                  ),
-                );
-              },
-            )
-          else
-            SliverList.list(
-              children: [
-                for (final host in filteredHosts) ...[
-                  _buildHostCard(host),
-                  const SizedBox(height: 8),
-                ],
-              ],
             ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHostCard(SavedHost host, {Widget? dragHandle}) {
-    return HostCard(
-      host: host,
-      active: widget.workspaceController.sessions.any(
-        (session) => baseHostId(session.host.id) == host.id,
-      ),
-      selectedTag: _selectedTag,
-      onConnect: () => _connect(host),
-      onAction: (action) => _handleHostAction(action, host),
-      onTagTap: (tag) {
-        setState(() {
-          _selectedTag = _selectedTag == tag ? null : tag;
-        });
-      },
-      dragHandle: dragHandle,
-    );
-  }
-
-  Widget _reorderProxyDecorator(
-    Widget child,
-    int index,
-    Animation<double> animation,
-  ) {
-    return AnimatedBuilder(
-      animation: animation,
-      builder: (context, child) {
-        final lift = Curves.easeOut.transform(animation.value);
-        return Transform.scale(
-          scale: 1 + (0.015 * lift),
-          child: Material(
-            color: Colors.transparent,
-            elevation: 8 * lift,
-            shadowColor: Colors.black.withValues(alpha: 0.22),
-            borderRadius: BorderRadius.circular(14),
-            child: child,
           ),
-        );
-      },
-      child: child,
+        ),
+      ),
     );
   }
 
-  List<SavedHost> _filteredHosts(List<SavedHost> hosts) {
-    final normalizedQuery = _query.trim().toLowerCase();
-    return hosts.where((host) {
-      final matchesTag =
-          _selectedTag == null || host.tags.contains(_selectedTag);
-      final matchesQuery =
-          normalizedQuery.isEmpty ||
-          host.name.toLowerCase().contains(normalizedQuery) ||
-          host.host.toLowerCase().contains(normalizedQuery) ||
-          host.username.toLowerCase().contains(normalizedQuery) ||
-          host.tags.any((tag) => tag.toLowerCase().contains(normalizedQuery));
-      return matchesTag && matchesQuery;
-    }).toList();
+  List<Widget> _buildMain(BuildContext context) {
+    final controller = widget.hostsController;
+    if (controller.isLoading && controller.hosts.isEmpty) {
+      return const [
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.all(48),
+            child: Center(child: CircularProgressIndicator()),
+          ),
+        ),
+      ];
+    }
+    if (controller.errorMessage != null && controller.hosts.isEmpty) {
+      return [
+        SliverToBoxAdapter(
+          child: MessageState(
+            icon: Icons.error_outline,
+            title: 'Something went wrong',
+            message: controller.errorMessage!,
+            actionLabel: 'Retry',
+            onAction: controller.load,
+          ),
+        ),
+      ];
+    }
+    final host = _selectedHost;
+    if (host == null) {
+      return [
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(18, 8, 18, 24),
+          sliver: SliverList(
+            delegate: SliverChildListDelegate.fixed([
+              const _MachineSectionHeader(),
+              const SizedBox(height: 24),
+              MessageState(
+                icon: Icons.dns_outlined,
+                title: 'No saved machines yet',
+                message:
+                    'Add an SSH or Mosh server and Conduit will keep its '
+                    'credentials in your device’s secure storage.',
+                actionLabel: 'Add machine',
+                onAction: _openForm,
+              ),
+            ]),
+          ),
+        ),
+      ];
+    }
+
+    final sessions = _sessionsFor(host);
+    final brightness = Theme.of(context).brightness;
+    final board = _board;
+    return [
+      SliverToBoxAdapter(
+        child: ListenableBuilder(
+          listenable: widget.agentAttention,
+          builder: (context, _) => MachineSwitcher(
+            host: host,
+            sessionCount: sessions.length,
+            hostCount: widget.hostsController.hosts.length,
+            otherAttentionCount: _otherAttentionCount(host),
+            onSwitch: _switchMachine,
+            onOpen: () => _openMachine(host),
+            onMenu: (choice) => _handleMenu(choice, host),
+          ),
+        ),
+      ),
+      if (board != null)
+        SliverToBoxAdapter(
+          child: ListenableBuilder(
+            listenable: board,
+            builder: (context, _) => HerdrBoard(
+              state: board.state,
+              attachedWorkspaceIds: _attachedWorkspaceIds(sessions),
+              onOpenPane: (workspace, pane) => _openPane(host, workspace, pane),
+              onOpenWorkspace: (workspace) => _openPane(host, workspace, null),
+              onRefresh: () => unawaited(board.refresh()),
+              onRequestLoad: board.requestLoad,
+              onStartHerdr: () =>
+                  _openTarget(host, const ConnectTarget.herdr(workspaceId: '')),
+              onOpenShell: () => _openTarget(host, const ConnectTarget.shell()),
+            ),
+          ),
+        ),
+      SliverToBoxAdapter(
+        child: ListenableBuilder(
+          listenable: widget.agentAttention,
+          builder: (context, _) => HostSessionsStrip(
+            sessions: sessions,
+            activeSession: widget.workspaceController.activeSession,
+            palette: widget.themeController.palette,
+            brightness: brightness,
+            agentAttention: widget.agentAttention,
+            onOpen: (session) {
+              widget.workspaceController.activate(session);
+              unawaited(_openTerminalWorkspace());
+            },
+            onActions: _showSessionActions,
+            onNewSession: () => _connect(host, forcePicker: true),
+          ),
+        ),
+      ),
+    ];
   }
 
-  List<String> _tagsFor(List<SavedHost> hosts) {
-    final tags = <String>{};
-    for (final host in hosts) {
-      for (final tag in host.tags) {
-        final trimmed = tag.trim();
-        if (trimmed.isNotEmpty) tags.add(trimmed);
+  static Set<String> _attachedWorkspaceIds(
+    List<TerminalSessionController> sessions,
+  ) {
+    final ids = <String>{};
+    for (final session in sessions) {
+      final target = ConnectTarget.fromSessionHostId(session.host.id);
+      if (target != null && target.kind == ConnectTargetKind.herdr) {
+        ids.add(target.name);
       }
     }
-    final list = tags.toList();
-    list.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-    return list;
+    return ids;
   }
 
-  void _clearFilters() {
-    _searchController.clear();
-    setState(() {
-      _query = '';
-      _selectedTag = null;
-    });
+  int _otherAttentionCount(SavedHost selected) {
+    var count = 0;
+    for (final host in widget.agentAttention.monitoredHosts) {
+      if (baseHostId(host.id) == selected.id) continue;
+      final agents = widget.agentAttention.statusFor(host.id)?.agents;
+      if (agents == null) continue;
+      count += agents.where((agent) => agent.state.needsAttention).length;
+    }
+    return count;
+  }
+
+  Widget _buildMore(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final hasHosts = widget.hostsController.hosts.isNotEmpty;
+    final expanded = _moreExpanded ?? !hasHosts;
+    final showLocalShell = widget.themeController.showLocalShell;
+    final activeInstanceIds = widget.workspaceController.sessions
+        .map((session) => localShellInstanceIdFromHostId(session.host.id))
+        .whereType<String>()
+        .toSet();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 18),
+          child: Divider(height: 24),
+        ),
+        InkWell(
+          onTap: () => setState(() => _moreExpanded = !expanded),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 6, 12, 6),
+            child: Row(
+              children: [
+                Text(
+                  'MORE',
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.1,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    showLocalShell
+                        ? 'Local shell and counters'
+                        : 'Machine and session counters',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                Icon(
+                  expanded
+                      ? Icons.expand_less_rounded
+                      : Icons.expand_more_rounded,
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (expanded) ...[
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
+            child: HomeStats(
+              hostCount: widget.hostsController.hosts.length,
+              activeSessionCount: widget.workspaceController.sessions.length,
+              onOpenSessions: widget.workspaceController.hasSessions
+                  ? _openTerminalWorkspace
+                  : null,
+            ),
+          ),
+          if (showLocalShell)
+            LocalShellSection(
+              controller: widget.localShellController,
+              activeInstanceIds: activeInstanceIds,
+              onAdd: _openLocalShellSetup,
+              onOpenInstance: _openLocalSession,
+              onManageInstance: _openLocalShellInstance,
+            ),
+        ],
+      ],
+    );
+  }
+
+  Future<void> _switchMachine() async {
+    final result = await showMachinePicker(
+      context: context,
+      hostsController: widget.hostsController,
+      selectedHostId: _selectedHost?.id,
+      liveHostIds: {
+        for (final session in widget.workspaceController.sessions)
+          baseHostId(session.host.id),
+      },
+    );
+    if (!mounted || result == null) return;
+    switch (result) {
+      case MachinePicked(:final host):
+        setState(() => _selectedHostId = host.id);
+        _syncSelection();
+      case MachineAddRequested():
+        await _openForm();
+      case MachineActionRequested(:final host, :final action):
+        await _handleHostAction(action, host);
+    }
+  }
+
+  Future<void> _handleMenu(MachineMenuChoice choice, SavedHost host) async {
+    final action = choice.hostAction;
+    if (action == null) {
+      await _openForm();
+      return;
+    }
+    await _handleHostAction(action, host);
+  }
+
+  /// Resumes the machine's open sessions, or connects when there are none.
+  Future<void> _openMachine(SavedHost host) async {
+    final sessions = _sessionsFor(host);
+    if (sessions.isEmpty) {
+      await _connect(host);
+      return;
+    }
+    final active = widget.workspaceController.activeSession;
+    if (active == null || !sessions.contains(active)) {
+      widget.workspaceController.activate(sessions.first);
+    }
+    await _openTerminalWorkspace();
+  }
+
+  /// Opens (or activates) the Herdr session for [workspace] and focuses
+  /// [pane] in it (or the whole workspace when [pane] is null).
+  Future<void> _openPane(
+    SavedHost host,
+    HomeBoardWorkspace workspace,
+    HomeBoardPane? pane,
+  ) async {
+    final board = _board;
+    final existing = _herdrSessionFor(host, workspace.id);
+    if (existing != null) {
+      widget.workspaceController.activate(existing);
+      if (board != null) {
+        if (pane != null) {
+          unawaited(board.focusPane(pane.agent));
+        } else {
+          unawaited(board.focusWorkspace(workspace.id));
+        }
+      }
+      await _openTerminalWorkspace();
+      return;
+    }
+    if (pane != null && board != null) {
+      // Focus over the socket before attaching, and once more after the
+      // new client is up (its startup focuses the workspace).
+      await board.focusPane(pane.agent);
+      _refocusTimer?.cancel();
+      _refocusTimer = Timer(widget.paneRefocusDelay, () {
+        unawaited(board.focusPane(pane.agent));
+      });
+    }
+    await _openTarget(
+      host,
+      ConnectTarget.herdr(workspaceId: workspace.id, label: workspace.label),
+    );
+  }
+
+  /// An open Herdr session on [host], preferring one attached to
+  /// [workspaceId].
+  TerminalSessionController? _herdrSessionFor(
+    SavedHost host,
+    String workspaceId,
+  ) {
+    TerminalSessionController? anyHerdr;
+    for (final session in _sessionsFor(host)) {
+      final target = ConnectTarget.fromSessionHostId(session.host.id);
+      if (target == null || target.kind != ConnectTargetKind.herdr) continue;
+      if (target.name == workspaceId) return session;
+      anyHerdr ??= session;
+    }
+    return anyHerdr;
+  }
+
+  Future<void> _openTarget(SavedHost host, ConnectTarget target) async {
+    await widget.hostsController.markConnected(host);
+    final flow = widget.connectFlow;
+    if (flow != null) {
+      flow.open(host, target);
+    } else {
+      widget.workspaceController.open(
+        target.apply(host),
+        startupCommand: target.startupCommand,
+      );
+    }
+    if (!mounted) return;
+    await _openTerminalWorkspace();
+  }
+
+  Future<void> _showSessionActions(TerminalSessionController session) async {
+    final action = await showModalBottomSheet<_SessionAction>(
+      context: context,
+      useSafeArea: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: Text(
+                session.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              subtitle: Text(session.host.endpoint),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.refresh_rounded),
+              title: const Text('Reconnect'),
+              onTap: () => Navigator.of(context).pop(_SessionAction.reconnect),
+            ),
+            ListTile(
+              leading: const Icon(Icons.close_rounded),
+              title: const Text('Close session'),
+              onTap: () => Navigator.of(context).pop(_SessionAction.close),
+            ),
+          ],
+        ),
+      ),
+    );
+    switch (action) {
+      case _SessionAction.reconnect:
+        await session.disconnect();
+        await session.connect();
+      case _SessionAction.close:
+        await widget.workspaceController.close(session);
+      case null:
+        break;
+    }
   }
 
   Future<void> _openTerminalWorkspace() async {
@@ -598,6 +822,11 @@ class _HostsPageState extends State<HostsPage> {
     );
     if (savedHost != null) {
       await widget.hostsController.upsert(savedHost);
+      if (host == null && mounted) {
+        // A newly added machine becomes the one on screen.
+        setState(() => _selectedHostId = savedHost.id);
+        _syncSelection();
+      }
     }
   }
 
@@ -682,9 +911,15 @@ class _HostsPageState extends State<HostsPage> {
     );
     if (shouldDelete ?? false) {
       await widget.hostsController.remove(host);
+      if (_selectedHostId == host.id && mounted) {
+        setState(() => _selectedHostId = null);
+        _syncSelection();
+      }
     }
   }
 }
+
+enum _SessionAction { reconnect, close }
 
 class _MachineSectionHeader extends StatelessWidget {
   const _MachineSectionHeader();
@@ -713,50 +948,4 @@ class _MachineSectionHeader extends StatelessWidget {
       ],
     );
   }
-}
-
-class _HostSortMenu extends StatelessWidget {
-  const _HostSortMenu({required this.value, required this.onChanged});
-
-  final HostListSortMode value;
-  final ValueChanged<HostListSortMode> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return PopupMenuButton<HostListSortMode>(
-      tooltip: 'Sort machines',
-      initialValue: value,
-      onSelected: onChanged,
-      icon: const Icon(Icons.sort_rounded),
-      itemBuilder: (context) => [
-        for (final mode in HostListSortMode.values)
-          PopupMenuItem(
-            value: mode,
-            child: Row(
-              children: [
-                Icon(mode.icon, size: 18),
-                const SizedBox(width: 10),
-                Text(mode.label),
-              ],
-            ),
-          ),
-      ],
-    );
-  }
-}
-
-extension on HostListSortMode {
-  String get label => switch (this) {
-    HostListSortMode.lastConnected => 'Last connected',
-    HostListSortMode.name => 'Name',
-    HostListSortMode.added => 'Added',
-    HostListSortMode.manual => 'Manual',
-  };
-
-  IconData get icon => switch (this) {
-    HostListSortMode.lastConnected => Icons.schedule_rounded,
-    HostListSortMode.name => Icons.sort_by_alpha_rounded,
-    HostListSortMode.added => Icons.playlist_add_check_rounded,
-    HostListSortMode.manual => Icons.drag_indicator_rounded,
-  };
 }
