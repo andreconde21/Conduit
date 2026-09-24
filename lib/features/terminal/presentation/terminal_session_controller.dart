@@ -305,22 +305,25 @@ class TerminalSessionController extends ChangeNotifier {
   /// path with newlines normalized to carriage returns, which is what each
   /// line's Enter key would have sent.
   ///
+  /// Control characters other than tab and newline are stripped in both
+  /// paths: a prompt copied from a terminal can carry ESC, ^C or ^D bytes
+  /// that the remote application would act on as keystrokes, and inside a
+  /// bracketed paste an embedded paste-end marker would let the rest of the
+  /// text escape the paste guard.
+  ///
   /// With [submit], Enter is delivered as a separate write shortly after the
   /// text. Some TUIs classify a single read that contains a long line ending
   /// in CR as a paste and insert the trailing CR literally instead of
   /// submitting; an isolated Enter keypress submits regardless.
   Future<void> sendComposed(String text, {required bool submit}) async {
+    final sanitized = sanitizeComposedText(text);
     if (terminal.bracketedPasteMode) {
-      // Strip any embedded paste-end marker so pasted content can never
-      // break out of the bracketed-paste guard and be interpreted as
-      // keystrokes or control sequences by the remote application.
-      terminal.paste(text.replaceAll('\x1b[201~', ''));
+      terminal.paste(sanitized);
     } else {
       // Without bracketed paste, newlines are delivered as carriage returns
       // (what Enter sends). Trailing newlines are dropped so "insert only"
       // never submits the final line on its own.
-      final normalized = text
-          .replaceAll('\r\n', '\n')
+      final normalized = sanitized
           .replaceAll(RegExp(r'\n+$'), '')
           .replaceAll('\n', '\r');
       terminal.textInput(normalized);
@@ -333,6 +336,21 @@ class TerminalSessionController extends ChangeNotifier {
       }
     }
   }
+
+  /// Normalizes line endings to `\n` and strips every C0 control character
+  /// except tab and newline (plus DEL), so composed text can only ever reach
+  /// the remote application as printable input. Stripping ESC also removes
+  /// any embedded bracketed-paste end marker.
+  static String sanitizeComposedText(String text) {
+    return text
+        .replaceAll('\r\n', '\n')
+        .replaceAll('\r', '\n')
+        .replaceAll(_composedControlCharacters, '');
+  }
+
+  static final _composedControlCharacters = RegExp(
+    r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]',
+  );
 
   void _startTmuxIfConfigured(SshTerminalSession session) {
     final command = _buildTmuxCommand();

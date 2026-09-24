@@ -70,13 +70,51 @@ void main() {
       controller.terminal.write('\x1b[?2004h');
 
       await controller.sendComposed(
-        'safe\x1b[201~\x1b[200~; rm -rf ~\ntail',
+        'safe\x1b[201~\x1b[200~; echo escaped\ntail',
         submit: false,
       );
 
+      // ESC is stripped, so the marker degrades to harmless printable text.
       expect(session.sent, [
-        utf8.encode('\x1b[200~safe\x1b[200~; rm -rf ~\ntail\x1b[201~'),
+        utf8.encode('\x1b[200~safe[201~[200~; echo escaped\ntail\x1b[201~'),
       ]);
+    });
+
+    test(
+      'strips control characters that the remote app would act on',
+      () async {
+        final session = TrackableTerminalSession();
+        final controller = TerminalSessionController(
+          host: buildHost('a'),
+          repository: ImmediateTerminalRepository(session),
+        );
+        addTearDown(controller.dispose);
+        await controller.connect();
+
+        await controller.sendComposed(
+          'keep\ttab\x03\x04\x1b[A\x7f and\r\nnormalize\rline endings',
+          submit: false,
+        );
+
+        expect(session.sent, [
+          utf8.encode('keep\ttab[A and\rnormalize\rline endings'),
+        ]);
+      },
+    );
+
+    test('normalizes CRLF to LF inside a bracketed paste', () async {
+      final session = TrackableTerminalSession();
+      final controller = TerminalSessionController(
+        host: buildHost('a'),
+        repository: ImmediateTerminalRepository(session),
+      );
+      addTearDown(controller.dispose);
+      await controller.connect();
+      controller.terminal.write('\x1b[?2004h');
+
+      await controller.sendComposed('one\r\ntwo\rthree', submit: false);
+
+      expect(session.sent, [utf8.encode('\x1b[200~one\ntwo\nthree\x1b[201~')]);
     });
 
     test('drops trailing newlines so insert-only cannot self-submit', () async {
