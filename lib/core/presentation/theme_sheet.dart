@@ -6,6 +6,8 @@ import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
 import 'package:conduit/features/backup/presentation/backup_sheet.dart';
+import 'package:conduit/features/home_widget/data/platform_agent_status_widget_channel.dart';
+import 'package:conduit/features/home_widget/presentation/quick_settings_tile_controls.dart';
 import 'package:conduit/features/snippets/presentation/snippet_editor.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -77,6 +79,10 @@ class _ThemeSheet extends StatelessWidget {
                     const ConduitSectionLabel('Home'),
                     const SizedBox(height: 10),
                     _HomeAppearanceControls(controller: controller),
+                    const SizedBox(height: 10),
+                    QuickSettingsTileControls(
+                      channel: PlatformAgentStatusWidgetChannel.instance,
+                    ),
                   ],
                   if (backupService != null) ...[
                     const SizedBox(height: 22),

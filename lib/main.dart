@@ -12,6 +12,9 @@ import 'package:conduit/features/app_lock/data/local_app_authenticator.dart';
 import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart';
 import 'package:conduit/features/app_lock/presentation/lock_page.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
+import 'package:conduit/features/home_widget/data/platform_agent_status_widget_channel.dart';
+import 'package:conduit/features/home_widget/presentation/agent_status_launch_listener.dart';
+import 'package:conduit/features/home_widget/presentation/agent_status_widget_pusher.dart';
 import 'package:conduit/features/hosts/data/secure_saved_hosts_repository.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/hosts/presentation/hosts_page.dart';
@@ -77,6 +80,12 @@ void main() {
     provider: const HerdrAttentionProvider(),
     notifier: const PlatformAgentAttentionNotifier(),
   );
+  // Mirrors the agent dashboard onto the Android home-screen widget and
+  // quick-settings tile for the app's whole lifetime.
+  AgentStatusWidgetPusher.forController(
+    agentAttention,
+    channel: PlatformAgentStatusWidgetChannel.instance,
+  ).start();
   final backupService = AppBackupService(
     hostsController: hostsController,
     themeController: themeController,
@@ -280,20 +289,25 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
                 );
               }
 
-              return HostsPage(
-                hostsController: widget.hostsController,
-                lockController: widget.lockController,
-                terminalRepository: widget.terminalRepository,
-                workspaceController: widget.workspaceController,
-                localShellController: widget.localShellController,
-                themeController: widget.themeController,
-                hostKeyVerifier: widget.hostKeyVerifier,
-                promptCoordinator: widget.promptCoordinator,
-                sftpRepository: widget.sftpRepository,
-                sftpBookmarksRepository: widget.sftpBookmarksRepository,
+              return AgentStatusLaunchListener(
+                channel: PlatformAgentStatusWidgetChannel.instance,
                 agentAttention: widget.agentAttention,
-                backupService: widget.backupService,
-                fileExport: widget.fileExport,
+                workspace: widget.workspaceController,
+                child: HostsPage(
+                  hostsController: widget.hostsController,
+                  lockController: widget.lockController,
+                  terminalRepository: widget.terminalRepository,
+                  workspaceController: widget.workspaceController,
+                  localShellController: widget.localShellController,
+                  themeController: widget.themeController,
+                  hostKeyVerifier: widget.hostKeyVerifier,
+                  promptCoordinator: widget.promptCoordinator,
+                  sftpRepository: widget.sftpRepository,
+                  sftpBookmarksRepository: widget.sftpBookmarksRepository,
+                  agentAttention: widget.agentAttention,
+                  backupService: widget.backupService,
+                  fileExport: widget.fileExport,
+                ),
               );
             },
           ),
