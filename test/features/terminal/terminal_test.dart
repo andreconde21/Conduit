@@ -686,6 +686,68 @@ void main() {
       expect(exitedScrollMode, isTrue);
     });
 
+    testWidgets('herdr menu sends ctrl+b then the binding and wires copy '
+        'mode into scrollback', (tester) async {
+      final controller = _RecordingTerminalSessionController();
+      final focusNode = FocusNode();
+      var enteredScrollMode = false;
+      addTearDown(focusNode.dispose);
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: TerminalKeyboardBar(
+              controller: controller,
+              focusNode: focusNode,
+              palette: AppPalette.catppuccin,
+              brightness: Brightness.dark,
+              rows: const [
+                TerminalKeyboardRow(
+                  items: [
+                    TerminalKeyboardItem.builtIn(
+                      TerminalKeyboardAction.herdrMenu,
+                    ),
+                  ],
+                ),
+              ],
+              globalSnippets: const [],
+              fullscreen: false,
+              onToggleFullscreen: () {},
+              onEnterTmuxScrollMode: () => enteredScrollMode = true,
+              onExitTmuxScrollMode: () {},
+              // Herdr's prefix is fixed at ctrl+b even when the host's tmux
+              // prefix is something else.
+              tmuxPrefixKey: TmuxPrefixKey.controlA,
+              tmuxScrollMode: false,
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Herdr'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Split right'));
+      await tester.pumpAndSettle();
+
+      expect(controller.sentControlKeys, [TerminalKey.keyB]);
+      expect(controller.sentText, ['v']);
+      expect(controller.sentKeys, isEmpty);
+      expect(enteredScrollMode, isFalse);
+
+      await tester.tap(find.text('Herdr'));
+      await tester.pumpAndSettle();
+      // The menu is taller than a phone screen; the popup scrolls internally.
+      await tester.ensureVisible(find.text('Scrollback'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Scrollback'));
+      await tester.pumpAndSettle();
+
+      expect(controller.sentControlKeys, [TerminalKey.keyB, TerminalKey.keyB]);
+      expect(controller.sentText, ['v', '[']);
+      expect(enteredScrollMode, isTrue);
+    });
+
     testWidgets('touch mode key reflects selection, armed, and active '
         'mouse states', (tester) async {
       final controller = _RecordingTerminalSessionController();
