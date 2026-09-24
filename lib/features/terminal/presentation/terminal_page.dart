@@ -10,6 +10,9 @@ import 'package:conduit/features/agent_attention/presentation/agent_attention_sh
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/discard_changes_dialog.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/sftp_file_viewer.dart';
+import 'package:conduit/features/share_target/domain/share_inbox.dart';
+import 'package:conduit/features/share_target/presentation/share_target_controller.dart';
+import 'package:conduit/features/share_target/presentation/share_target_scope.dart';
 import 'package:conduit/features/terminal/domain/security_key_interaction.dart';
 import 'package:conduit/features/terminal/presentation/security_key_picker_dialog.dart';
 import 'package:conduit/features/terminal/presentation/security_key_pin_dialog.dart';
@@ -77,6 +80,7 @@ class _TerminalPageState extends State<TerminalPage> {
   // sheet), forcing the bar to rebuild with the updated text.
   int _composeRevision = 0;
   DictationController? _dictation;
+  ShareTargetController? _shareTarget;
 
   @override
   void initState() {
@@ -107,9 +111,55 @@ class _TerminalPageState extends State<TerminalPage> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final shareTarget = ShareTargetScope.maybeOf(context);
+    if (shareTarget == _shareTarget) {
+      return;
+    }
+    _shareTarget?.removeListener(_consumeSharedDraft);
+    _shareTarget?.detachTerminalPage();
+    _shareTarget = shareTarget;
+    shareTarget?.attachTerminalPage();
+    shareTarget?.addListener(_consumeSharedDraft);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _consumeSharedDraft());
+  }
+
+  /// Moves a delivered share (uploaded file paths and/or shared text) into
+  /// the active session's Chat draft and opens the composer so the user can
+  /// add instructions before sending.
+  void _consumeSharedDraft() {
+    final shareTarget = _shareTarget;
+    final session = widget.workspace.activeSession;
+    if (!mounted || shareTarget == null || session == null) {
+      return;
+    }
+    final hostId = session.host.id;
+    if (!shareTarget.hasDraft(hostId)) {
+      return;
+    }
+    final draft = shareTarget.takeDraft(hostId)!;
+    setState(() {
+      _composeDrafts[hostId] = mergeShareDraft(
+        _composeDrafts[hostId] ?? '',
+        draft,
+      );
+      _composeMode = true;
+      _composeRevision += 1;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.workspace.activeSession == session) {
+        unawaited(_openPromptComposer(session));
+      }
+    });
+  }
+
+  @override
   void dispose() {
     unawaited(WakelockPlus.disable());
     _setSystemUiFullscreen(false);
+    _shareTarget?.removeListener(_consumeSharedDraft);
+    _shareTarget?.detachTerminalPage();
     _dictation?.dispose();
     SecurityKeyInteraction.instance.unregisterPinPrompt(_promptSecurityKeyPin);
     SecurityKeyInteraction.instance.unregisterSelectionPrompt(

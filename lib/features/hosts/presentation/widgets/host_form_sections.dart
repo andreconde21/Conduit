@@ -299,6 +299,7 @@ class HostAdvancedSection extends StatelessWidget {
     required this.moshPortsController,
     required this.tmuxSessionNameController,
     required this.tmuxStartDirectoryController,
+    required this.shareInboxDirectoryController,
     required this.useMosh,
     required this.predictiveEchoEnabled,
     required this.startTmuxOnConnect,
@@ -332,6 +333,7 @@ class HostAdvancedSection extends StatelessWidget {
   final TextEditingController moshPortsController;
   final TextEditingController tmuxSessionNameController;
   final TextEditingController tmuxStartDirectoryController;
+  final TextEditingController shareInboxDirectoryController;
   final bool useMosh;
   final bool predictiveEchoEnabled;
   final bool startTmuxOnConnect;
@@ -540,6 +542,22 @@ class HostAdvancedSection extends StatelessWidget {
             ),
           ),
         ],
+        const SizedBox(height: 16),
+        TextFormField(
+          controller: shareInboxDirectoryController,
+          decoration: const InputDecoration(
+            labelText: 'Share inbox directory',
+            hintText: '~/conductore-inbox',
+            helperText:
+                'Files shared to Conductore are uploaded here before their '
+                'paths go into Chat mode.',
+            helperMaxLines: 2,
+            prefixIcon: Icon(Icons.move_to_inbox_outlined),
+          ),
+          autocorrect: false,
+          enableSuggestions: false,
+          textInputAction: TextInputAction.next,
+        ),
         const SizedBox(height: 18),
         SnippetListEditor(
           title: 'Host snippets',

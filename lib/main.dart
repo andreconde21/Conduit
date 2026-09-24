@@ -24,6 +24,11 @@ import 'package:conduit/features/sftp/data/secure_sftp_bookmarks_repository.dart
 import 'package:conduit/features/sftp/domain/file_export.dart';
 import 'package:conduit/features/sftp/domain/sftp_bookmarks_repository.dart';
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
+import 'package:conduit/features/share_target/data/platform_share_target_source.dart';
+import 'package:conduit/features/share_target/data/sftp_share_uploader.dart';
+import 'package:conduit/features/share_target/presentation/share_target_controller.dart';
+import 'package:conduit/features/share_target/presentation/share_target_host.dart';
+import 'package:conduit/features/share_target/presentation/share_target_scope.dart';
 import 'package:conduit/features/terminal/data/connectivity_plus_network.dart';
 import 'package:conduit/features/terminal/data/dart_ssh_terminal_repository.dart';
 import 'package:conduit/features/terminal/data/mosh_terminal_repository.dart';
@@ -33,6 +38,7 @@ import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:conduit/features/terminal/domain/ssh_terminal_repository.dart';
 import 'package:conduit/features/terminal/presentation/host_key_prompt_coordinator.dart';
 import 'package:conduit/features/terminal/presentation/terminal_background_keepalive.dart';
+import 'package:conduit/features/terminal/presentation/terminal_page.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -83,8 +89,14 @@ void main() {
     hostKeyVerifier: hostKeyVerifier,
   );
   const fileExport = FilePickerFileExport();
+  final shareTarget = ShareTargetController(
+    source: PlatformShareTargetSource(),
+    workspace: workspaceController,
+    uploader: SftpShareUploader(sftpRepository),
+  );
 
   unawaited(themeController.load());
+  unawaited(shareTarget.start());
 
   runApp(
     ConduitApp(
@@ -101,6 +113,7 @@ void main() {
       agentAttention: agentAttention,
       backupService: backupService,
       fileExport: fileExport,
+      shareTarget: shareTarget,
     ),
   );
 }
@@ -120,6 +133,7 @@ class ConduitApp extends StatefulWidget {
     required this.agentAttention,
     required this.backupService,
     required this.fileExport,
+    this.shareTarget,
     super.key,
   });
 
@@ -136,6 +150,9 @@ class ConduitApp extends StatefulWidget {
   final AgentAttentionController agentAttention;
   final AppBackupService backupService;
   final FileExport fileExport;
+
+  /// Share-to-agent flow; null disables the Android share target.
+  final ShareTargetController? shareTarget;
 
   @override
   State<ConduitApp> createState() => _ConduitAppState();
@@ -154,7 +171,14 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     widget.workspaceController.addListener(_syncBackgroundKeepalive);
     widget.themeController.addListener(_syncTerminalPreferences);
+    widget.lockController.addListener(_syncShareTargetGate);
     _syncTerminalPreferences();
+    _syncShareTargetGate();
+  }
+
+  // Shares wait behind the lock screen instead of opening pickers over it.
+  void _syncShareTargetGate() {
+    widget.shareTarget?.setGateOpen(widget.lockController.isUnlocked);
   }
 
   void _syncTerminalPreferences() {
@@ -232,8 +256,40 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     widget.workspaceController.removeListener(_syncBackgroundKeepalive);
     widget.themeController.removeListener(_syncTerminalPreferences);
+    widget.lockController.removeListener(_syncShareTargetGate);
     unawaited(_backgroundKeepalive.stop());
     super.dispose();
+  }
+
+  Widget _buildTerminalPage(BuildContext context) {
+    return TerminalPage(
+      workspace: widget.workspaceController,
+      themeController: widget.themeController,
+      sftpRepository: widget.sftpRepository,
+      agentAttention: widget.agentAttention,
+    );
+  }
+
+  /// Wraps the home page with the share-to-agent UI (banner, pickers).
+  Widget _wrapShareTargetHost(Widget home) {
+    final shareTarget = widget.shareTarget;
+    if (shareTarget == null) {
+      return home;
+    }
+    return ShareTargetHost(
+      controller: shareTarget,
+      workspace: widget.workspaceController,
+      terminalPageBuilder: _buildTerminalPage,
+      child: home,
+    );
+  }
+
+  Widget _wrapShareTargetScope(Widget app) {
+    final shareTarget = widget.shareTarget;
+    if (shareTarget == null) {
+      return app;
+    }
+    return ShareTargetScope(controller: shareTarget, child: app);
   }
 
   @override
@@ -258,7 +314,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
               Theme.of(context).brightness,
             );
             SystemChrome.setSystemUIOverlayStyle(overlayStyle);
-            return AnnotatedRegion<SystemUiOverlayStyle>(
+            final content = AnnotatedRegion<SystemUiOverlayStyle>(
               value: overlayStyle,
               child: Stack(
                 children: [
@@ -269,6 +325,9 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
                 ],
               ),
             );
+            // The builder sits above the Navigator, so pushed routes (the
+            // terminal page) can read the share-target controller.
+            return _wrapShareTargetScope(content);
           },
           home: ListenableBuilder(
             listenable: widget.lockController,
@@ -280,7 +339,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
                 );
               }
 
-              return HostsPage(
+              final home = HostsPage(
                 hostsController: widget.hostsController,
                 lockController: widget.lockController,
                 terminalRepository: widget.terminalRepository,
@@ -295,6 +354,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
                 backupService: widget.backupService,
                 fileExport: widget.fileExport,
               );
+              return _wrapShareTargetHost(home);
             },
           ),
         );

@@ -39,6 +39,24 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- Share-to-agent: text, images, PDFs and anything else land in
+                 the active session's Chat composer (files via SFTP). -->
+            <intent-filter android:label="Send to agent">
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/plain"/>
+                <data android:mimeType="image/*"/>
+                <data android:mimeType="application/pdf"/>
+                <data android:mimeType="*/*"/>
+            </intent-filter>
+            <intent-filter android:label="Send to agent">
+                <action android:name="android.intent.action.SEND_MULTIPLE"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/plain"/>
+                <data android:mimeType="image/*"/>
+                <data android:mimeType="application/pdf"/>
+                <data android:mimeType="*/*"/>
+            </intent-filter>
         </activity>
         <meta-data
             android:name="flutterEmbedding"

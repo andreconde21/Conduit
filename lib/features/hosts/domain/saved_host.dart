@@ -151,6 +151,7 @@ class SavedHost {
     this.agentAttentionEnabled = false,
     this.agentNotifyInput = true,
     this.agentNotifyFinished = true,
+    this.shareInboxDirectory = '',
     this.lastConnectedAt,
     this.isLocal = false,
   });
@@ -200,6 +201,10 @@ class SavedHost {
 
   /// Notify when a monitored agent finishes background work.
   final bool agentNotifyFinished;
+
+  /// Remote directory shared files are uploaded to (share-to-agent). Empty
+  /// means `~/conductore-inbox`; `~` and relative paths resolve under home.
+  final String shareInboxDirectory;
 
   final DateTime? lastConnectedAt;
   final bool isLocal;
@@ -277,6 +282,7 @@ class SavedHost {
     bool? agentAttentionEnabled,
     bool? agentNotifyInput,
     bool? agentNotifyFinished,
+    String? shareInboxDirectory,
     DateTime? lastConnectedAt,
     bool clearLastConnectedAt = false,
     bool? isLocal,
@@ -312,6 +318,7 @@ class SavedHost {
           agentAttentionEnabled ?? this.agentAttentionEnabled,
       agentNotifyInput: agentNotifyInput ?? this.agentNotifyInput,
       agentNotifyFinished: agentNotifyFinished ?? this.agentNotifyFinished,
+      shareInboxDirectory: shareInboxDirectory ?? this.shareInboxDirectory,
       lastConnectedAt: clearLastConnectedAt
           ? null
           : lastConnectedAt ?? this.lastConnectedAt,
@@ -355,6 +362,7 @@ class SavedHost {
       'agentAttentionEnabled': agentAttentionEnabled,
       'agentNotifyInput': agentNotifyInput,
       'agentNotifyFinished': agentNotifyFinished,
+      'shareInboxDirectory': shareInboxDirectory,
       'lastConnectedAt': lastConnectedAt?.toIso8601String(),
       'isLocal': isLocal,
     };
@@ -412,6 +420,8 @@ class SavedHost {
       agentAttentionEnabled: json['agentAttentionEnabled'] as bool? ?? false,
       agentNotifyInput: json['agentNotifyInput'] as bool? ?? true,
       agentNotifyFinished: json['agentNotifyFinished'] as bool? ?? true,
+      shareInboxDirectory:
+          (json['shareInboxDirectory'] as String?)?.trim() ?? '',
       lastConnectedAt: lastConnectedAtRaw == null
           ? null
           : DateTime.tryParse(lastConnectedAtRaw),
