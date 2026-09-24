@@ -121,7 +121,7 @@ class LivePreviewController extends ChangeNotifier {
       if (_disposed || generation != _generation) {
         return;
       }
-      _fail(error is AppFailure ? error.message : error.toString());
+      _fail(error is AppFailure ? error.userMessage : error.toString());
     }
   }
 

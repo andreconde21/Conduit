@@ -36,6 +36,7 @@ class FakePortForwarder implements PortForwarder {
   final List<int> requested = [];
   final List<FakeLocalPortForward> opened = [];
   final Set<int> refused = {};
+  AppFailure? failure;
   Completer<void>? gate;
   int nextLocalPort = 40000;
   bool closed = false;
@@ -44,6 +45,10 @@ class FakePortForwarder implements PortForwarder {
   Future<LocalPortForward> open(int remotePort) async {
     requested.add(remotePort);
     await gate?.future;
+    final failure = this.failure;
+    if (failure != null) {
+      throw failure;
+    }
     if (refused.contains(remotePort)) {
       throw AppFailure('Nothing is listening on port $remotePort on Host h.');
     }
@@ -105,6 +110,20 @@ void main() {
     expect(controller.phase, LivePreviewPhase.failed);
     expect(controller.error, 'Nothing is listening on port 9999 on Host h.');
     expect(controller.url, isNull);
+  });
+
+  test('a connection failure shows why the host could not be reached', () async {
+    forwarder.failure = const AppFailure(
+      'Could not reach Host h.',
+      'Authentication failed. Check the username and key.',
+    );
+    await controller.start(3000);
+    expect(controller.phase, LivePreviewPhase.failed);
+    expect(
+      controller.error,
+      'Could not reach Host h.\n'
+      'Authentication failed. Check the username and key.',
+    );
   });
 
   test('out-of-range ports are rejected without touching the host', () async {

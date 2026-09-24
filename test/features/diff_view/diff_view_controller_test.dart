@@ -117,6 +117,21 @@ void main() {
     expect(controller.path, '/bad');
   });
 
+  test('a failure cause that is text is shown under the message', () async {
+    source.snapshots['/x'] = const AppFailure(
+      'git failed in /x.',
+      'fatal: detected dubious ownership in repository at /x',
+    );
+    await controller.load('/x');
+    expect(
+      controller.error,
+      'git failed in /x.\nfatal: detected dubious ownership in repository at /x',
+    );
+    source.snapshots['/y'] = AppFailure('Could not reach h.', StateError('x'));
+    await controller.load('/y');
+    expect(controller.error, 'Could not reach h.');
+  });
+
   test('a newer load wins over a slower older one', () async {
     await controller.start();
     final gate = source.pending = Completer<GitDiffSnapshot>();

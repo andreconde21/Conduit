@@ -129,7 +129,7 @@ class DiffViewController extends ChangeNotifier {
 
   void _fail(Object error) {
     _phase = DiffViewPhase.failed;
-    _error = error is AppFailure ? error.message : error.toString();
+    _error = error is AppFailure ? error.userMessage : error.toString();
     notifyListeners();
   }
 
