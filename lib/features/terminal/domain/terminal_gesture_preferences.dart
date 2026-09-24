@@ -2,9 +2,9 @@ import 'dart:convert';
 
 /// Which multiplexer a horizontal swipe on the terminal drives.
 ///
-/// tmux and Herdr both switch windows with `prefix + n` / `prefix + p`, but
-/// Herdr's prefix is fixed at ctrl+b while the tmux prefix follows the host's
-/// configured key. The app cannot tell which one is running inside the
+/// tmux and Herdr both switch windows with `prefix + n` / `prefix + p` using
+/// the host's configured multiplexer prefix; the bindings after the prefix
+/// are what differ. The app cannot tell which one is running inside the
 /// session, so the choice is a preference; tmux is the default because that
 /// is what the connect flow starts.
 enum TerminalWindowSwitchTarget { tmux, herdr }

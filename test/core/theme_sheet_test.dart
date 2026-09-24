@@ -286,4 +286,44 @@ void main() {
     expect(custom.label, 'gs');
     expect(custom.text, 'git status');
   });
+
+  testWidgets('appearance sheet credits upstream Conduit in About', (
+    tester,
+  ) async {
+    final controller = ThemeController(InMemoryThemePreferences());
+    await controller.load();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) {
+            return Scaffold(
+              body: Center(
+                child: FilledButton(
+                  onPressed: () {
+                    showThemeSheet(context: context, controller: controller);
+                  },
+                  child: const Text('Appearance'),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Appearance'));
+    await tester.pumpAndSettle();
+    final credit = find.byKey(const ValueKey('about-upstream-credit'));
+    for (var i = 0; i < 40 && credit.evaluate().isEmpty; i += 1) {
+      await tester.drag(find.byType(ListView).first, const Offset(0, -300));
+      await tester.pumpAndSettle();
+    }
+
+    expect(find.text('Conductore'), findsOneWidget);
+    expect(
+      find.text('Based on Conduit by gwitko (Apache-2.0)'),
+      findsOneWidget,
+    );
+  });
 }

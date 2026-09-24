@@ -518,7 +518,7 @@ class _CreditFooter extends StatelessWidget {
         Text(
           'The local shell uses proot and root filesystem images packaged '
           'through Termux, maintained by their upstream distributions. '
-          'Conduit redistributes the bundled tools under their own '
+          'Conductore redistributes the bundled tools under their own '
           'open-source licenses.',
           style: theme.textTheme.bodySmall?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
@@ -528,7 +528,7 @@ class _CreditFooter extends StatelessWidget {
           alignment: Alignment.centerLeft,
           child: TextButton.icon(
             onPressed: () =>
-                showLicensePage(context: context, applicationName: 'Conduit'),
+                showLicensePage(context: context, applicationName: 'Conductore'),
             style: TextButton.styleFrom(
               padding: const EdgeInsets.symmetric(horizontal: 4),
             ),

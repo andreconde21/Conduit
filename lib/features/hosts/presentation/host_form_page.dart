@@ -18,17 +18,25 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
 
+/// Runs the Conductore companion's `doctor` on [draft] and returns its
+/// report text (throws on connection problems).
+typedef CompanionDoctor = Future<String> Function(SavedHost draft);
+
 class HostFormPage extends StatefulWidget {
   const HostFormPage({
     this.host,
     this.themeController,
     this.keyService = const Dartssh2SshKeyService(),
+    this.companionDoctor,
     super.key,
   });
 
   final SavedHost? host;
   final ThemeController? themeController;
   final SshKeyService keyService;
+
+  /// Backs the "Set up companion" button; null hides it.
+  final CompanionDoctor? companionDoctor;
 
   @override
   State<HostFormPage> createState() => _HostFormPageState();
@@ -60,11 +68,13 @@ class _HostFormPageState extends State<HostFormPage> {
   bool _agentAttentionEnabled = false;
   bool _agentNotifyInput = true;
   bool _agentNotifyFinished = true;
+  AgentMonitorKind _agentMonitor = AgentMonitorKind.auto;
+  bool _checkingCompanion = false;
   bool _predictiveEchoEnabled = false;
   bool _externalAuthOfferKey = true;
   bool _forwardAgent = false;
   bool _startTmuxOnConnect = false;
-  TmuxPrefixKey _tmuxPrefixKey = defaultTmuxPrefixKey;
+  MultiplexerPrefixKey _tmuxPrefixKey = defaultTmuxPrefixKey;
   List<String> _tags = const [];
   List<HardwareKeyEntry> _hardwareKeys = const [];
   List<TerminalSnippet> _snippets = const [];
@@ -124,6 +134,7 @@ class _HostFormPageState extends State<HostFormPage> {
       _agentAttentionEnabled = host.agentAttentionEnabled;
       _agentNotifyInput = host.agentNotifyInput;
       _agentNotifyFinished = host.agentNotifyFinished;
+      _agentMonitor = host.agentMonitor;
     }
     _keyInspection = _cheapPreview();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -307,6 +318,7 @@ class _HostFormPageState extends State<HostFormPage> {
               agentAttentionEnabled: _agentAttentionEnabled,
               agentNotifyInput: _agentNotifyInput,
               agentNotifyFinished: _agentNotifyFinished,
+              agentMonitor: _agentMonitor,
               snippets: _snippets,
               connectSnippetId: _connectSnippetId,
               timeoutValidator: _validateTimeout,
@@ -331,6 +343,12 @@ class _HostFormPageState extends State<HostFormPage> {
                   setState(() => _agentNotifyInput = value),
               onAgentNotifyFinishedChanged: (value) =>
                   setState(() => _agentNotifyFinished = value),
+              onAgentMonitorChanged: (value) =>
+                  setState(() => _agentMonitor = value),
+              onCheckCompanion:
+                  widget.companionDoctor == null || _checkingCompanion
+                  ? null
+                  : _checkCompanion,
               onSnippetsChanged: (snippets) => setState(() {
                 _snippets = snippets;
                 if (!_snippets.any(
@@ -620,7 +638,7 @@ class _HostFormPageState extends State<HostFormPage> {
   Future<({String comment, String passphrase})?> _promptGenerateOptions() {
     final username = _usernameController.text.trim();
     final commentController = TextEditingController(
-      text: username.isEmpty ? 'conduit' : '$username@conduit',
+      text: username.isEmpty ? 'conductore' : '$username@conductore',
     );
     final passphraseController = TextEditingController();
     return showDialog<({String comment, String passphrase})>(
@@ -686,14 +704,16 @@ class _HostFormPageState extends State<HostFormPage> {
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  void _save() {
-    if (!_formKey.currentState!.validate()) return;
+  /// Validates the form and builds the host it describes, or null (with the
+  /// errors shown) when it is not complete.
+  SavedHost? _validatedHost() {
+    if (!_formKey.currentState!.validate()) return null;
 
     if (_authMethod == SshAuthMethod.hardwareKey && _hardwareKeys.isEmpty) {
       setState(() {
         _hardwareKeysError = 'Add at least one hardware key.';
       });
-      return;
+      return null;
     }
 
     if (_tagController.text.trim().isNotEmpty) {
@@ -701,7 +721,7 @@ class _HostFormPageState extends State<HostFormPage> {
     }
 
     final currentHost = widget.host;
-    final savedHost = SavedHost(
+    return SavedHost(
       id: currentHost?.id ?? const Uuid().v4(),
       name: _nameController.text.trim(),
       host: _hostController.text.trim(),
@@ -739,6 +759,7 @@ class _HostFormPageState extends State<HostFormPage> {
       agentAttentionEnabled: _agentAttentionEnabled,
       agentNotifyInput: _agentNotifyInput,
       agentNotifyFinished: _agentNotifyFinished,
+      agentMonitor: _agentMonitor,
       shareInboxDirectory: _shareInboxDirectoryController.text.trim(),
       snippets: List<TerminalSnippet>.unmodifiable(_snippets),
       connectSnippetId:
@@ -747,8 +768,53 @@ class _HostFormPageState extends State<HostFormPage> {
           : '',
       lastConnectedAt: currentHost?.lastConnectedAt,
     );
+  }
 
+  void _save() {
+    final savedHost = _validatedHost();
+    if (savedHost == null) return;
     Navigator.of(context).pop(savedHost);
+  }
+
+  /// "Set up companion": runs `conductore-hostd doctor` on the machine as
+  /// the form currently describes it and shows the report. Installing the
+  /// companion itself is done on the machine (see the report's advice).
+  Future<void> _checkCompanion() async {
+    final doctor = widget.companionDoctor;
+    final draft = _validatedHost();
+    if (doctor == null || draft == null) return;
+    setState(() => _checkingCompanion = true);
+    String report;
+    var failed = false;
+    try {
+      report = await doctor(draft);
+    } catch (error) {
+      failed = true;
+      report = error.toString();
+    } finally {
+      if (mounted) {
+        setState(() => _checkingCompanion = false);
+      }
+    }
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(failed ? 'Companion check failed' : 'Companion check'),
+        content: SingleChildScrollView(
+          child: SelectableText(
+            report.trim().isEmpty ? '(no output)' : report.trim(),
+            style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
   }
 
   String? _required(String? value) {

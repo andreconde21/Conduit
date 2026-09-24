@@ -4,6 +4,7 @@ import 'package:conduit/features/hosts/presentation/widgets/auth_method_picker.d
 import 'package:conduit/features/hosts/presentation/widgets/hardware_key_list.dart';
 import 'package:conduit/features/hosts/presentation/widgets/host_form_chrome.dart';
 import 'package:conduit/features/hosts/presentation/widgets/key_source_actions.dart';
+import 'package:conduit/features/hosts/presentation/widgets/multiplexer_prefix_picker.dart';
 import 'package:conduit/features/hosts/presentation/widgets/ssh_key_summary.dart';
 import 'package:conduit/features/hosts/presentation/widgets/tag_editor.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
@@ -307,6 +308,7 @@ class HostAdvancedSection extends StatelessWidget {
     required this.agentAttentionEnabled,
     required this.agentNotifyInput,
     required this.agentNotifyFinished,
+    required this.agentMonitor,
     required this.snippets,
     required this.connectSnippetId,
     required this.timeoutValidator,
@@ -320,8 +322,10 @@ class HostAdvancedSection extends StatelessWidget {
     required this.onAgentAttentionEnabledChanged,
     required this.onAgentNotifyInputChanged,
     required this.onAgentNotifyFinishedChanged,
+    required this.onAgentMonitorChanged,
     required this.onSnippetsChanged,
     required this.onConnectSnippetChanged,
+    this.onCheckCompanion,
     super.key,
   });
 
@@ -337,10 +341,11 @@ class HostAdvancedSection extends StatelessWidget {
   final bool useMosh;
   final bool predictiveEchoEnabled;
   final bool startTmuxOnConnect;
-  final TmuxPrefixKey tmuxPrefixKey;
+  final MultiplexerPrefixKey tmuxPrefixKey;
   final bool agentAttentionEnabled;
   final bool agentNotifyInput;
   final bool agentNotifyFinished;
+  final AgentMonitorKind agentMonitor;
   final List<TerminalSnippet> snippets;
   final String connectSnippetId;
   final FormFieldValidator<String> timeoutValidator;
@@ -350,12 +355,17 @@ class HostAdvancedSection extends StatelessWidget {
   final ValueChanged<bool> onUseMoshChanged;
   final ValueChanged<bool> onPredictiveEchoChanged;
   final ValueChanged<bool> onStartTmuxOnConnectChanged;
-  final ValueChanged<TmuxPrefixKey> onTmuxPrefixKeyChanged;
+  final ValueChanged<MultiplexerPrefixKey> onTmuxPrefixKeyChanged;
   final ValueChanged<bool> onAgentAttentionEnabledChanged;
   final ValueChanged<bool> onAgentNotifyInputChanged;
   final ValueChanged<bool> onAgentNotifyFinishedChanged;
+  final ValueChanged<AgentMonitorKind> onAgentMonitorChanged;
   final ValueChanged<List<TerminalSnippet>> onSnippetsChanged;
   final ValueChanged<String> onConnectSnippetChanged;
+
+  /// Runs the Conductore companion's `doctor` on this machine and shows
+  /// the result; null hides the button (e.g. no SSH stack in tests).
+  final VoidCallback? onCheckCompanion;
 
   @override
   Widget build(BuildContext context) {
@@ -464,7 +474,7 @@ class HostAdvancedSection extends StatelessWidget {
             decoration: const InputDecoration(
               labelText: 'Tmux session name',
               hintText: defaultTmuxSessionName,
-              helperText: 'Conduit attaches to this session, or creates it.',
+              helperText: 'Conductore attaches to this session, or creates it.',
               helperMaxLines: 2,
               prefixIcon: Icon(Icons.view_stream_outlined),
             ),
@@ -490,23 +500,9 @@ class HostAdvancedSection extends StatelessWidget {
           ),
         ],
         const SizedBox(height: 12),
-        DropdownButtonFormField<TmuxPrefixKey>(
-          initialValue: tmuxPrefixKey,
-          decoration: const InputDecoration(
-            labelText: 'Tmux prefix',
-            helperText: 'Used by the Tmux and Tmux+ key-row buttons.',
-            helperMaxLines: 2,
-            prefixIcon: Icon(Icons.keyboard_command_key_rounded),
-          ),
-          items: [
-            for (final key in TmuxPrefixKey.values)
-              DropdownMenuItem(value: key, child: Text(key.label)),
-          ],
-          onChanged: (value) {
-            if (value != null) {
-              onTmuxPrefixKeyChanged(value);
-            }
-          },
+        MultiplexerPrefixField(
+          value: tmuxPrefixKey,
+          onChanged: onTmuxPrefixKeyChanged,
         ),
         const SizedBox(height: 16),
         Material(
@@ -515,7 +511,7 @@ class HostAdvancedSection extends StatelessWidget {
             contentPadding: EdgeInsets.zero,
             title: const Text('Monitor coding agents'),
             subtitle: const Text(
-              'Poll Herdr on this machine while connected and show agent '
+              'Watch agents on this machine while connected and show their '
               'states in the terminal dashboard.',
             ),
             value: agentAttentionEnabled,
@@ -541,6 +537,39 @@ class HostAdvancedSection extends StatelessWidget {
               onChanged: onAgentNotifyFinishedChanged,
             ),
           ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<AgentMonitorKind>(
+            initialValue: agentMonitor,
+            decoration: const InputDecoration(
+              labelText: 'Agent monitor',
+              helperText:
+                  'Auto uses the Conductore companion when conductore-hostd '
+                  'is installed (permission prompts answerable from the '
+                  'phone), otherwise Herdr.',
+              helperMaxLines: 3,
+              prefixIcon: Icon(Icons.monitor_heart_outlined),
+            ),
+            items: [
+              for (final kind in AgentMonitorKind.values)
+                DropdownMenuItem(value: kind, child: Text(kind.label)),
+            ],
+            onChanged: (value) {
+              if (value != null) {
+                onAgentMonitorChanged(value);
+              }
+            },
+          ),
+          if (onCheckCompanion != null) ...[
+            const SizedBox(height: 8),
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: OutlinedButton.icon(
+                onPressed: onCheckCompanion,
+                icon: const Icon(Icons.health_and_safety_outlined, size: 18),
+                label: const Text('Set up companion'),
+              ),
+            ),
+          ],
         ],
         const SizedBox(height: 16),
         TextFormField(

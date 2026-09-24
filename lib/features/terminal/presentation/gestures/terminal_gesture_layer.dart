@@ -15,18 +15,15 @@ class TerminalGestureCommands {
   final TerminalSessionController session;
   final TerminalWindowSwitchTarget target;
 
-  /// The prefix key for [target]: the host's configured tmux prefix, or
-  /// Herdr's fixed ctrl+b.
-  TerminalKey get prefixKey => switch (target) {
-    TerminalWindowSwitchTarget.herdr => TerminalKey.keyB,
-    TerminalWindowSwitchTarget.tmux => switch (session.host.tmuxPrefixKey) {
-      TmuxPrefixKey.controlB => TerminalKey.keyB,
-      TmuxPrefixKey.controlA => TerminalKey.keyA,
-    },
+  /// The prefix key for [target]: the host's configured multiplexer prefix
+  /// (Ctrl+B unless changed), which tmux and Herdr share on a host.
+  MultiplexerPrefixKey get prefixKey => switch (target) {
+    TerminalWindowSwitchTarget.herdr ||
+    TerminalWindowSwitchTarget.tmux => session.host.tmuxPrefixKey,
   };
 
   void _prefixed(String binding) {
-    session.sendControl(prefixKey);
+    session.sendPrefix(prefixKey);
     session.sendText(binding);
   }
 

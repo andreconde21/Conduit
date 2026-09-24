@@ -643,6 +643,11 @@ class _TerminalPageState extends State<TerminalPage> {
                           await activeSession.disconnect();
                           await activeSession.connect();
                         },
+                        pillItems: widget.themeController.terminalPillItems,
+                        onPillItemsChanged: (items) => unawaited(
+                          widget.themeController.setTerminalPillItems(items),
+                        ),
+                        runnerFactory: widget.connectFlow?.runnerFactory,
                       ),
                   ],
                 ),

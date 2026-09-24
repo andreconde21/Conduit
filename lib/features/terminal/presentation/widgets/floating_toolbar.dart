@@ -3,9 +3,16 @@ import 'dart:async';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
+import 'package:conduit/core/theme/terminal_pill_items.dart';
+import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
+import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
+import 'package:conduit/features/terminal/domain/herdr_navigator.dart';
+import 'package:conduit/features/terminal/presentation/herdr_shortcuts.dart';
 import 'package:conduit/features/terminal/presentation/terminal_keyboard_bar.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
+import 'package:conduit/features/terminal/presentation/widgets/herdr_navigator_sheet.dart';
+import 'package:conduit/features/terminal/presentation/widgets/pill_configurator_sheet.dart';
 import 'package:conduit/features/terminal/presentation/widgets/toolbar_arrow_pad.dart';
 import 'package:conduit/features/terminal/presentation/widgets/toolbar_snippet_palette.dart';
 import 'package:conduit_vt/conduit_vt.dart';
@@ -14,6 +21,19 @@ import 'package:flutter/services.dart';
 
 /// Minimum upward travel of a drag on the pill before it opens the palette.
 const floatingToolbarSwipeThreshold = 32.0;
+
+/// Height of the pill itself, buttons included.
+const floatingToolbarPillHeight = 40.0;
+
+/// Height and width of an icon button inside the pill.
+const floatingToolbarButtonSize = 36.0;
+
+/// Gap between the pill and whatever is below it (the navigation bar or the
+/// soft keyboard).
+const floatingToolbarBottomGap = 8.0;
+
+/// Runs non-interactive commands on a host (the Herdr pane list).
+typedef PillCommandRunnerFactory = AgentCommandRunner Function(SavedHost host);
 
 /// Delay between a quick prompt's text and its Enter, kept as a separate
 /// write so TUIs do not classify the line as a paste (see the compose bar).
@@ -36,11 +56,16 @@ const floatingToolbarSubmitDelay = Duration(milliseconds: 120);
 /// * Tab: tap sends Tab; long-press sends Shift+Tab (Claude Code cycles its
 ///   permission mode with it).
 /// * ↻: tap redraws the screen (Ctrl+L); long-press reconnects the session.
+/// * Herdr: opens the pane switcher and Herdr shortcuts.
 /// * Swipe up anywhere on the pill: opens the quick prompt / snippet palette.
+/// * Long-press the pill (or ⋯): choose and order the buttons.
 class FloatingTerminalToolbar extends StatefulWidget {
   const FloatingTerminalToolbar({
     required this.keyRows,
     this.onReconnect,
+    this.items = defaultTerminalPillItems,
+    this.onItemsChanged,
+    this.runnerFactory,
     super.key,
   });
 
@@ -49,6 +74,17 @@ class FloatingTerminalToolbar extends StatefulWidget {
 
   /// Long-press on the ↻ button. When null the button only redraws.
   final Future<void> Function()? onReconnect;
+
+  /// The buttons to show, in order; the ⋯ button always follows.
+  final List<TerminalPillItem> items;
+
+  /// Saves the configurator's result. When null the pill cannot be
+  /// configured.
+  final ValueChanged<List<TerminalPillItem>>? onItemsChanged;
+
+  /// Opens the command channel the Herdr pane list runs over. Null limits
+  /// the Herdr navigator to its shortcuts.
+  final PillCommandRunnerFactory? runnerFactory;
 
   @override
   State<FloatingTerminalToolbar> createState() =>
@@ -123,8 +159,16 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
                   onVerticalDragUpdate: (details) =>
                       _swipeDistance += details.delta.dy,
                   onVerticalDragEnd: _handleSwipeEnd,
+                  onLongPress: widget.onItemsChanged == null
+                      ? null
+                      : _openConfigurator,
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
+                    padding: const EdgeInsets.fromLTRB(
+                      8,
+                      4,
+                      8,
+                      floatingToolbarBottomGap,
+                    ),
                     child: _buildPill(context, keyboardVisible),
                   ),
                 ),
@@ -137,9 +181,80 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
   }
 
   Widget _buildPill(BuildContext context, bool keyboardVisible) {
-    final keyboard = _controller.keyboard;
     final buttons = <Widget>[
+      for (final item in widget.items) ?_buildItem(item, keyboardVisible),
       _PillButton(
+        key: const ValueKey('toolbar-more'),
+        icon: Icons.more_horiz_rounded,
+        tooltip: _rowsExpanded
+            ? 'Hide key rows. Long-press to customize'
+            : 'Show key rows. Long-press to customize',
+        palette: _palette,
+        brightness: _brightness,
+        selected: _rowsExpanded,
+        onTap: () => setState(() => _rowsExpanded = !_rowsExpanded),
+        onLongPress: widget.onItemsChanged == null ? null : _openConfigurator,
+      ),
+    ];
+    return Material(
+      key: const ValueKey('floating-toolbar-pill'),
+      color: _palette.panelFor(_brightness).withValues(alpha: 0.9),
+      elevation: 2,
+      shadowColor: Colors.black.withValues(alpha: 0.3),
+      shape: StadiumBorder(
+        side: BorderSide(color: _palette.hairlineFor(_brightness)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
+        height: floatingToolbarPillHeight,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            // Narrow phones and landscape with system insets: scroll the
+            // pill sideways instead of squeezing the buttons below a
+            // finger's width.
+            return SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minWidth: (constraints.maxWidth - 12).clamp(
+                    0,
+                    double.infinity,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    for (final (index, button) in buttons.indexed) ...[
+                      if (index > 0) const SizedBox(width: 2),
+                      button,
+                    ],
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget? _buildItem(TerminalPillItem item, bool keyboardVisible) {
+    final customKeyId = item.customKeyId;
+    if (customKeyId != null) {
+      final key = _customKey(customKeyId);
+      if (key == null) {
+        return null;
+      }
+      return KeyedSubtree(
+        key: ValueKey('toolbar-custom-$customKeyId'),
+        child: widget.keyRows.buildKey(key),
+      );
+    }
+    final keyboard = _controller.keyboard;
+    return switch (item.button!) {
+      TerminalPillButton.ctrl => _PillButton(
         key: const ValueKey('toolbar-ctrl'),
         label: 'Ctrl',
         tooltip: 'Ctrl. Long-press to latch',
@@ -150,7 +265,7 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
         onTap: _tapCtrl,
         onLongPress: _latchCtrl,
       ),
-      _PillButton(
+      TerminalPillButton.esc => _PillButton(
         key: const ValueKey('toolbar-esc'),
         label: 'Esc',
         tooltip: 'Escape. Long-press for Ctrl+C',
@@ -159,7 +274,7 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
         onTap: () => _sendKey(TerminalKey.escape),
         onLongPress: () => _sendControl(TerminalKey.keyC),
       ),
-      _PillButton(
+      TerminalPillButton.tab => _PillButton(
         key: const ValueKey('toolbar-tab'),
         label: 'Tab',
         tooltip: 'Tab. Long-press for Shift+Tab',
@@ -168,13 +283,22 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
         onTap: () => _sendKey(TerminalKey.tab),
         onLongPress: () => _sendKey(TerminalKey.backtab),
       ),
-      ToolbarArrowPad(
+      TerminalPillButton.arrows => ToolbarArrowPad(
         key: const ValueKey('toolbar-arrows'),
         palette: _palette,
         brightness: _brightness,
+        size: const Size(40, floatingToolbarButtonSize),
         onArrow: _sendKey,
       ),
-      _PillButton(
+      TerminalPillButton.herdr => _PillButton(
+        key: const ValueKey('toolbar-herdr'),
+        icon: Icons.view_quilt_rounded,
+        tooltip: 'Herdr panes and shortcuts',
+        palette: _palette,
+        brightness: _brightness,
+        onTap: _openHerdrNavigator,
+      ),
+      TerminalPillButton.reconnect => _PillButton(
         key: const ValueKey('toolbar-redraw'),
         icon: Icons.refresh_rounded,
         tooltip: widget.onReconnect == null
@@ -185,7 +309,7 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
         onTap: () => _sendControl(TerminalKey.keyL),
         onLongPress: widget.onReconnect == null ? null : _reconnect,
       ),
-      _PillButton(
+      TerminalPillButton.paste => _PillButton(
         key: const ValueKey('toolbar-paste'),
         icon: Icons.content_paste_rounded,
         tooltip: 'Paste',
@@ -193,7 +317,7 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
         brightness: _brightness,
         onTap: _paste,
       ),
-      _PillButton(
+      TerminalPillButton.chat => _PillButton(
         key: const ValueKey('toolbar-chat'),
         icon: Icons.chat_bubble_outline_rounded,
         tooltip: 'Chat mode',
@@ -202,7 +326,7 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
         selected: widget.keyRows.composeActive,
         onTap: widget.keyRows.onToggleCompose,
       ),
-      _PillButton(
+      TerminalPillButton.keyboard => _PillButton(
         key: const ValueKey('toolbar-keyboard'),
         icon: keyboardVisible
             ? Icons.keyboard_hide_rounded
@@ -212,51 +336,150 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
         brightness: _brightness,
         onTap: () => _toggleKeyboard(keyboardVisible),
       ),
-      _PillButton(
-        key: const ValueKey('toolbar-more'),
-        icon: Icons.more_horiz_rounded,
-        tooltip: _rowsExpanded ? 'Hide key rows' : 'Show key rows',
+      TerminalPillButton.tmux => KeyedSubtree(
+        key: const ValueKey('toolbar-tmux'),
+        child: widget.keyRows.buildKey(
+          const TerminalKeyboardItem.builtIn(TerminalKeyboardAction.tmuxMenu),
+        ),
+      ),
+      TerminalPillButton.touch => KeyedSubtree(
+        key: const ValueKey('toolbar-touch'),
+        child: widget.keyRows.buildKey(
+          const TerminalKeyboardItem.builtIn(TerminalKeyboardAction.touchMode),
+        ),
+      ),
+      TerminalPillButton.snippets => _PillButton(
+        key: const ValueKey('toolbar-snippets'),
+        icon: Icons.bolt_rounded,
+        tooltip: 'Quick prompts and snippets',
         palette: _palette,
         brightness: _brightness,
-        selected: _rowsExpanded,
-        onTap: () => setState(() => _rowsExpanded = !_rowsExpanded),
+        onTap: () => unawaited(_openPalette()),
       ),
-    ];
-    return Material(
-      key: const ValueKey('floating-toolbar-pill'),
-      color: _palette.panelFor(_brightness),
-      elevation: 3,
-      shadowColor: Colors.black.withValues(alpha: 0.35),
-      shape: StadiumBorder(
-        side: BorderSide(color: _palette.hairlineFor(_brightness)),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          // Narrow phones and landscape with system insets: scroll the pill
-          // sideways instead of squeezing the buttons below a finger's width.
-          return SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                minWidth: (constraints.maxWidth - 12).clamp(0, double.infinity),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  for (final (index, button) in buttons.indexed) ...[
-                    if (index > 0) const SizedBox(width: 4),
-                    button,
-                  ],
-                ],
-              ),
-            ),
-          );
+      TerminalPillButton.fullscreen => _PillButton(
+        key: const ValueKey('toolbar-fullscreen'),
+        icon: widget.keyRows.fullscreen
+            ? Icons.fullscreen_exit_rounded
+            : Icons.fullscreen_rounded,
+        tooltip: widget.keyRows.fullscreen ? 'Exit fullscreen' : 'Fullscreen',
+        palette: _palette,
+        brightness: _brightness,
+        onTap: () {
+          widget.keyRows.onToggleFullscreen();
+          _focusTerminal();
         },
       ),
+    };
+  }
+
+  /// Custom keys defined in the key rows, the only ones the pill can host.
+  List<TerminalKeyboardItem> get _customKeys => [
+    for (final row in widget.keyRows.rows)
+      for (final item in row.items)
+        if (item.kind != TerminalKeyboardItemKind.builtIn) item,
+  ];
+
+  TerminalKeyboardItem? _customKey(String id) {
+    for (final item in _customKeys) {
+      if (item.id == id) {
+        return item;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _openConfigurator() async {
+    final onItemsChanged = widget.onItemsChanged;
+    if (onItemsChanged == null) {
+      return;
+    }
+    unawaited(HapticFeedback.mediumImpact());
+    final items = await showPillConfigurator(
+      context: context,
+      items: widget.items,
+      customKeys: _customKeys,
     );
+    if (items != null) {
+      onItemsChanged(items);
+    }
+  }
+
+  /// Why the pane list cannot be fetched for this session's host, or null
+  /// when it can.
+  String? _paneListUnavailableReason(SavedHost host) {
+    if (host.isLocal) {
+      return 'The pane list needs an SSH machine.';
+    }
+    if (widget.runnerFactory == null) {
+      return 'The pane list is not available here.';
+    }
+    if (host.authMethod == SshAuthMethod.hardwareKey) {
+      return 'The pane list is off for security-key machines: every refresh '
+          'would ask for a touch.';
+    }
+    return null;
+  }
+
+  Future<void> _openHerdrNavigator() async {
+    final host = _controller.host;
+    final reason = _paneListUnavailableReason(host);
+    final runner = reason == null ? widget.runnerFactory!(host) : null;
+    final cache = HerdrPaneListingCache.instance;
+    try {
+      final pick = await showHerdrNavigatorSheet(
+        context: context,
+        palette: _palette,
+        brightness: _brightness,
+        prefixLabel: widget.keyRows.tmuxPrefixKey.label,
+        cached: cache[host.id],
+        paneListUnavailableReason: reason,
+        load: runner == null
+            ? null
+            : () async {
+                final listing = await HerdrNavigator.load(runner);
+                if (listing is! HerdrListingFailed) {
+                  cache[host.id] = listing;
+                }
+                return listing;
+              },
+      );
+      switch (pick) {
+        case null:
+          _focusTerminal();
+        case HerdrShortcutPick(:final shortcut):
+          _sendHerdrShortcut(shortcut);
+        case HerdrPanePick(:final entry):
+          final switched =
+              runner != null && await HerdrNavigator.focus(runner, entry);
+          if (!switched) {
+            // No CLI route (older Herdr, security-key host): let Herdr's own
+            // picker take over inside the session.
+            _sendHerdrShortcut(HerdrShortcut.gotoPicker);
+            if (mounted) {
+              ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                const SnackBar(
+                  content: Text(
+                    "Could not switch directly; opened Herdr's goto picker.",
+                  ),
+                ),
+              );
+            }
+          } else {
+            _focusTerminal();
+          }
+      }
+    } finally {
+      unawaited(runner?.close());
+    }
+  }
+
+  void _sendHerdrShortcut(HerdrShortcut shortcut) {
+    _controller.sendPrefix(widget.keyRows.tmuxPrefixKey);
+    _controller.sendText(shortcut.text);
+    if (shortcut.entersScrollMode) {
+      widget.keyRows.onEnterTmuxScrollMode();
+    }
+    _focusTerminal();
   }
 
   void _handleSwipeEnd(DragEndDetails details) {
@@ -412,11 +635,20 @@ extension FloatingToolbarStyle on TerminalKeyboardBar {
   Widget withToolbarStyle(
     TerminalToolbarStyle style, {
     Future<void> Function()? onReconnect,
+    List<TerminalPillItem> pillItems = defaultTerminalPillItems,
+    ValueChanged<List<TerminalPillItem>>? onPillItemsChanged,
+    PillCommandRunnerFactory? runnerFactory,
   }) {
     if (style == TerminalToolbarStyle.keyRows) {
       return this;
     }
-    return FloatingTerminalToolbar(keyRows: this, onReconnect: onReconnect);
+    return FloatingTerminalToolbar(
+      keyRows: this,
+      onReconnect: onReconnect,
+      items: pillItems,
+      onItemsChanged: onPillItemsChanged,
+      runnerFactory: runnerFactory,
+    );
   }
 }
 
@@ -448,9 +680,9 @@ class _PillButton extends StatelessWidget {
   /// Stronger highlight than [selected], used for the latched Ctrl.
   final bool emphasized;
 
-  static const _height = 40.0;
-  static const _iconWidth = 40.0;
-  static const _labelMinWidth = 46.0;
+  static const _height = floatingToolbarButtonSize;
+  static const _iconWidth = floatingToolbarButtonSize;
+  static const _labelMinWidth = 40.0;
 
   @override
   Widget build(BuildContext context) {
@@ -477,7 +709,7 @@ class _PillButton extends StatelessWidget {
       message: tooltip,
       child: Material(
         color: background,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           // One deliberate haptic per long-press, below, instead of the
@@ -496,16 +728,16 @@ class _PillButton extends StatelessWidget {
             constraints: BoxConstraints(
               minWidth: isIcon ? _iconWidth : _labelMinWidth,
             ),
-            padding: EdgeInsets.symmetric(horizontal: isIcon ? 0 : 8),
+            padding: EdgeInsets.symmetric(horizontal: isIcon ? 0 : 6),
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(10),
               border: selected && !emphasized
                   ? Border.all(color: accent.withValues(alpha: 0.7), width: 1.2)
                   : null,
             ),
             child: isIcon
-                ? Icon(icon, color: foreground, size: 21)
+                ? Icon(icon, color: foreground, size: 20)
                 : Text(
                     label ?? '',
                     maxLines: 1,

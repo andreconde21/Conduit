@@ -49,7 +49,7 @@ void main() {
 
     test('installs a one-time welcome naming the distro and its updater', () {
       expect(script, contains('/etc/profile.d/conduit-welcome.sh'));
-      expect(script, contains('Debian - running locally via Conduit.'));
+      expect(script, contains('Debian - running locally via Conductore.'));
       expect(script, contains('apt update && apt upgrade'));
     });
   });

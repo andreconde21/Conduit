@@ -1,5 +1,6 @@
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
+import 'package:conduit/core/theme/terminal_pill_items.dart';
 import 'package:conduit/core/theme/theme_preferences_repository.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
 import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
@@ -23,6 +24,7 @@ class ThemeController extends ChangeNotifier {
   bool _composeSubmitEnter = false;
   TerminalToolbarStyle _terminalToolbarStyle =
       TerminalToolbarStyle.floatingPill;
+  List<TerminalPillItem> _terminalPillItems = defaultTerminalPillItems;
   bool _menuButtonsEnabled = true;
   TerminalGesturePreferences _terminalGestures =
       TerminalGesturePreferences.defaults;
@@ -42,6 +44,8 @@ class ThemeController extends ChangeNotifier {
   bool get touchModeHintSeen => _touchModeHintSeen;
   bool get composeSubmitEnter => _composeSubmitEnter;
   TerminalToolbarStyle get terminalToolbarStyle => _terminalToolbarStyle;
+  List<TerminalPillItem> get terminalPillItems =>
+      List.unmodifiable(_terminalPillItems);
   bool get menuButtonsEnabled => _menuButtonsEnabled;
   TerminalGesturePreferences get terminalGestures => _terminalGestures;
 
@@ -62,6 +66,7 @@ class ThemeController extends ChangeNotifier {
     _touchModeHintSeen = preferences.touchModeHintSeen;
     _composeSubmitEnter = preferences.composeSubmitEnter;
     _terminalToolbarStyle = preferences.terminalToolbarStyle;
+    _terminalPillItems = List.of(preferences.terminalPillItems);
     _menuButtonsEnabled = preferences.menuButtonsEnabled;
     _terminalGestures = preferences.terminalGestures;
     _speechLanguage = preferences.speechLanguage;
@@ -214,6 +219,15 @@ class ThemeController extends ChangeNotifier {
     await _save();
   }
 
+  Future<void> setTerminalPillItems(List<TerminalPillItem> items) async {
+    if (_listEquals(_terminalPillItems, items)) {
+      return;
+    }
+    _terminalPillItems = List.of(items);
+    notifyListeners();
+    await _save();
+  }
+
   Future<void> setMenuButtonsEnabled(bool enabled) async {
     if (_menuButtonsEnabled == enabled) {
       return;
@@ -257,6 +271,7 @@ class ThemeController extends ChangeNotifier {
         touchModeHintSeen: _touchModeHintSeen,
         composeSubmitEnter: _composeSubmitEnter,
         terminalToolbarStyle: _terminalToolbarStyle,
+        terminalPillItems: _terminalPillItems,
         menuButtonsEnabled: _menuButtonsEnabled,
         terminalGestures: _terminalGestures,
         speechLanguage: _speechLanguage,

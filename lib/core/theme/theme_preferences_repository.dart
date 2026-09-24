@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
+import 'package:conduit/core/theme/terminal_pill_items.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
 import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
 import 'package:flutter/material.dart';
@@ -21,6 +22,7 @@ class ThemePreferences {
     this.touchModeHintSeen = false,
     this.composeSubmitEnter = false,
     this.terminalToolbarStyle = TerminalToolbarStyle.floatingPill,
+    this.terminalPillItems = defaultTerminalPillItems,
     this.menuButtonsEnabled = true,
     this.terminalGestures = TerminalGesturePreferences.defaults,
     this.speechLanguage = '',
@@ -46,6 +48,9 @@ class ThemePreferences {
   /// Which input toolbar the terminal page shows; the floating pill is the
   /// default, the key rows remain available as the classic layout.
   final TerminalToolbarStyle terminalToolbarStyle;
+
+  /// Buttons on the floating pill, in order (the ⋯ button always follows).
+  final List<TerminalPillItem> terminalPillItems;
 
   /// Whether choice prompts on screen (Claude Code menus, y/n questions)
   /// are offered as tappable buttons above the keyboard bar.
@@ -77,6 +82,7 @@ class ThemePreferencesRepository {
   static const _touchModeHintSeenKey = 'conduit.touch_mode_hint_seen.v1';
   static const _composeSubmitEnterKey = 'conduit.compose_submit_enter.v1';
   static const _terminalToolbarStyleKey = 'conduit.terminal_toolbar_style.v1';
+  static const _terminalPillItemsKey = 'conduit.terminal_pill_items.v1';
   static const _menuButtonsEnabledKey = 'conduit.menu_buttons_enabled.v1';
   static const _terminalGesturesKey = 'conduit.terminal_gestures.v1';
   static const _speechLanguageKey = 'conduit.speech_language.v1';
@@ -113,6 +119,9 @@ class ThemePreferencesRepository {
     );
     final rawTerminalToolbarStyle = await _storage.read(
       key: _terminalToolbarStyleKey,
+    );
+    final rawTerminalPillItems = await _storage.read(
+      key: _terminalPillItemsKey,
     );
 
     final rawMenuButtonsEnabled = await _storage.read(
@@ -159,6 +168,7 @@ class ThemePreferencesRepository {
         (style) => style.name == rawTerminalToolbarStyle,
         orElse: () => TerminalToolbarStyle.floatingPill,
       ),
+      terminalPillItems: _parseTerminalPillItems(rawTerminalPillItems),
       menuButtonsEnabled:
           rawMenuButtonsEnabled == null || rawMenuButtonsEnabled == 'true',
       terminalGestures: TerminalGesturePreferences.decode(rawTerminalGestures),
@@ -226,6 +236,12 @@ class ThemePreferencesRepository {
       value: preferences.terminalToolbarStyle.name,
     );
     await _storage.write(
+      key: _terminalPillItemsKey,
+      value: jsonEncode(
+        TerminalPillItem.encodeList(preferences.terminalPillItems),
+      ),
+    );
+    await _storage.write(
       key: _menuButtonsEnabledKey,
       value: preferences.menuButtonsEnabled.toString(),
     );
@@ -237,6 +253,17 @@ class ThemePreferencesRepository {
       key: _speechLanguageKey,
       value: preferences.speechLanguage,
     );
+  }
+
+  List<TerminalPillItem> _parseTerminalPillItems(String? raw) {
+    if (raw == null || raw.trim().isEmpty) {
+      return defaultTerminalPillItems;
+    }
+    try {
+      return TerminalPillItem.decodeList(jsonDecode(raw));
+    } catch (_) {
+      return defaultTerminalPillItems;
+    }
   }
 
   List<TerminalSnippet> _parseTerminalSnippets(String? raw) {
