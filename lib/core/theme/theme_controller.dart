@@ -20,6 +20,8 @@ class ThemeController extends ChangeNotifier {
   TerminalEnterSequence _terminalEnterSequence = TerminalEnterSequence.cr;
   bool _touchModeHintSeen = false;
   bool _composeSubmitEnter = false;
+  TerminalToolbarStyle _terminalToolbarStyle =
+      TerminalToolbarStyle.floatingPill;
 
   ThemeMode get themeMode => _themeMode;
   AppPalette get palette => _palette;
@@ -34,6 +36,7 @@ class ThemeController extends ChangeNotifier {
   TerminalEnterSequence get terminalEnterSequence => _terminalEnterSequence;
   bool get touchModeHintSeen => _touchModeHintSeen;
   bool get composeSubmitEnter => _composeSubmitEnter;
+  TerminalToolbarStyle get terminalToolbarStyle => _terminalToolbarStyle;
 
   Future<void> load() async {
     final preferences = await _repository.load();
@@ -48,6 +51,7 @@ class ThemeController extends ChangeNotifier {
     _terminalEnterSequence = preferences.terminalEnterSequence;
     _touchModeHintSeen = preferences.touchModeHintSeen;
     _composeSubmitEnter = preferences.composeSubmitEnter;
+    _terminalToolbarStyle = preferences.terminalToolbarStyle;
     notifyListeners();
   }
 
@@ -188,6 +192,15 @@ class ThemeController extends ChangeNotifier {
     await _save();
   }
 
+  Future<void> setTerminalToolbarStyle(TerminalToolbarStyle style) async {
+    if (_terminalToolbarStyle == style) {
+      return;
+    }
+    _terminalToolbarStyle = style;
+    notifyListeners();
+    await _save();
+  }
+
   Future<void> _save() {
     return _repository.save(
       ThemePreferences(
@@ -202,6 +215,7 @@ class ThemeController extends ChangeNotifier {
         terminalEnterSequence: _terminalEnterSequence,
         touchModeHintSeen: _touchModeHintSeen,
         composeSubmitEnter: _composeSubmitEnter,
+        terminalToolbarStyle: _terminalToolbarStyle,
       ),
     );
   }

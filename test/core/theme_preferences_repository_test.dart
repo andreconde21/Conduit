@@ -232,6 +232,42 @@ void main() {
       },
     );
 
+    test('defaults the toolbar style to the floating pill and persists a '
+        'change', () async {
+      final storage = InMemorySecureStorage();
+      final repository = ThemePreferencesRepository(storage);
+
+      final defaults = await repository.load();
+      expect(defaults.terminalToolbarStyle, TerminalToolbarStyle.floatingPill);
+
+      await repository.save(
+        const ThemePreferences(
+          themeMode: ThemeMode.dark,
+          palette: AppPalette.synthwave,
+          terminalToolbarStyle: TerminalToolbarStyle.keyRows,
+        ),
+      );
+
+      final preferences = await repository.load();
+      expect(preferences.terminalToolbarStyle, TerminalToolbarStyle.keyRows);
+    });
+
+    test('treats an unknown toolbar style as the floating pill', () async {
+      final storage = InMemorySecureStorage();
+      await storage.write(
+        key: 'conduit.terminal_toolbar_style.v1',
+        value: 'hologram',
+      );
+      final repository = ThemePreferencesRepository(storage);
+
+      final preferences = await repository.load();
+
+      expect(
+        preferences.terminalToolbarStyle,
+        TerminalToolbarStyle.floatingPill,
+      );
+    });
+
     test('treats a corrupt touch mode hint value as unseen', () async {
       final storage = InMemorySecureStorage();
       await storage.write(

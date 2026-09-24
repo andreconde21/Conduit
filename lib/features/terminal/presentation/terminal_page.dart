@@ -18,6 +18,7 @@ import 'package:conduit/features/terminal/presentation/terminal_keyboard_bar.dar
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:conduit/features/terminal/presentation/widgets/empty_terminal_state.dart';
+import 'package:conduit/features/terminal/presentation/widgets/floating_toolbar.dart';
 import 'package:conduit/features/terminal/presentation/widgets/prompt_composer_sheet.dart';
 import 'package:conduit/features/terminal/presentation/widgets/session_tabs.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_header.dart';
@@ -483,6 +484,12 @@ class _TerminalPageState extends State<TerminalPage> {
                         onExitTmuxScrollMode: () {
                           setState(() => _tmuxScrollMode = false);
                           _focusNode.requestFocus();
+                        },
+                      ).withToolbarStyle(
+                        widget.themeController.terminalToolbarStyle,
+                        onReconnect: () async {
+                          await activeSession.disconnect();
+                          await activeSession.connect();
                         },
                       ),
                   ],
