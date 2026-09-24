@@ -7,6 +7,7 @@ import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
+import 'package:conduit/features/prompt_menus/presentation/prompt_menu_strip.dart';
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/discard_changes_dialog.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/sftp_file_viewer.dart';
@@ -384,6 +385,17 @@ class _TerminalPageState extends State<TerminalPage> {
                               ),
                       ),
                     ),
+                    // Menu → buttons: tappable choices for prompts on screen.
+                    if (activeFileTab == null &&
+                        activeSession != null &&
+                        widget.themeController.menuButtonsEnabled)
+                      PromptMenuStrip(
+                        key: ValueKey('prompt-menu-${activeSession.host.id}'),
+                        session: activeSession,
+                        palette: palette,
+                        brightness: brightness,
+                        onSent: _focusNode.requestFocus,
+                      ),
                     if (activeFileTab != null || activeSession == null)
                       const SizedBox.shrink()
                     else if (_composeMode)

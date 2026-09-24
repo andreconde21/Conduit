@@ -146,6 +146,7 @@ class AppBackupService {
       'terminalEnterSequence': _themeController.terminalEnterSequence.name,
       'composeSubmitEnter': _themeController.composeSubmitEnter,
       'terminalToolbarStyle': _themeController.terminalToolbarStyle.name,
+      'menuButtonsEnabled': _themeController.menuButtonsEnabled,
     };
   }
 
@@ -213,6 +214,10 @@ class AppBackupService {
         orElse: () => _themeController.terminalToolbarStyle,
       ),
     );
+    final menuButtonsEnabled = json['menuButtonsEnabled'];
+    if (menuButtonsEnabled is bool) {
+      await _themeController.setMenuButtonsEnabled(menuButtonsEnabled);
+    }
   }
 
   Map<String, Object?> _decodeDocument(Uint8List bytes) {

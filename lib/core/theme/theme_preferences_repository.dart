@@ -20,6 +20,7 @@ class ThemePreferences {
     this.touchModeHintSeen = false,
     this.composeSubmitEnter = false,
     this.terminalToolbarStyle = TerminalToolbarStyle.floatingPill,
+    this.menuButtonsEnabled = true,
   });
 
   final ThemeMode themeMode;
@@ -42,6 +43,10 @@ class ThemePreferences {
   /// Which input toolbar the terminal page shows; the floating pill is the
   /// default, the key rows remain available as the classic layout.
   final TerminalToolbarStyle terminalToolbarStyle;
+
+  /// Whether choice prompts on screen (Claude Code menus, y/n questions)
+  /// are offered as tappable buttons above the keyboard bar.
+  final bool menuButtonsEnabled;
 }
 
 class ThemePreferencesRepository {
@@ -63,6 +68,7 @@ class ThemePreferencesRepository {
   static const _touchModeHintSeenKey = 'conduit.touch_mode_hint_seen.v1';
   static const _composeSubmitEnterKey = 'conduit.compose_submit_enter.v1';
   static const _terminalToolbarStyleKey = 'conduit.terminal_toolbar_style.v1';
+  static const _menuButtonsEnabledKey = 'conduit.menu_buttons_enabled.v1';
 
   final FlutterSecureStorage _storage;
 
@@ -96,6 +102,10 @@ class ThemePreferencesRepository {
     );
     final rawTerminalToolbarStyle = await _storage.read(
       key: _terminalToolbarStyleKey,
+    );
+
+    final rawMenuButtonsEnabled = await _storage.read(
+      key: _menuButtonsEnabledKey,
     );
     final terminalFontSize = double.tryParse(rawTerminalFontSize ?? '');
     final terminalKeyboardRows = _appendUnseenBuiltIns(
@@ -136,6 +146,8 @@ class ThemePreferencesRepository {
         (style) => style.name == rawTerminalToolbarStyle,
         orElse: () => TerminalToolbarStyle.floatingPill,
       ),
+      menuButtonsEnabled:
+          rawMenuButtonsEnabled == null || rawMenuButtonsEnabled == 'true',
     );
   }
 
@@ -197,6 +209,10 @@ class ThemePreferencesRepository {
     await _storage.write(
       key: _terminalToolbarStyleKey,
       value: preferences.terminalToolbarStyle.name,
+    );
+    await _storage.write(
+      key: _menuButtonsEnabledKey,
+      value: preferences.menuButtonsEnabled.toString(),
     );
   }
 
