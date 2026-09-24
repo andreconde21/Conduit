@@ -216,7 +216,9 @@ class LivePreviewController extends ChangeNotifier {
   }
 
   Future<void> _closeForward() async {
-    await _errorSubscription?.cancel();
+    // Not awaited: cancelling takes effect at once, and the returned future
+    // can be a root-zone value that never resolves under a fake clock.
+    unawaited(_errorSubscription?.cancel());
     _errorSubscription = null;
     final forward = _forward;
     _forward = null;
