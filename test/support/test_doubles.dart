@@ -287,6 +287,23 @@ class ImmediateTerminalRepository implements SshTerminalRepository {
   }
 }
 
+/// Hands out a fresh [TrackableTerminalSession] per connect, so a session
+/// can disconnect and reconnect.
+class FreshTerminalRepository implements SshTerminalRepository {
+  final List<TrackableTerminalSession> sessions = [];
+
+  @override
+  Future<SshTerminalSession> connect(
+    SavedHost host, {
+    required int columns,
+    required int rows,
+  }) async {
+    final session = TrackableTerminalSession();
+    sessions.add(session);
+    return session;
+  }
+}
+
 class FakeRoamingTerminalSession
     implements SshTerminalSession, RoamingTerminalSession {
   final Completer<void> _done = Completer<void>();
