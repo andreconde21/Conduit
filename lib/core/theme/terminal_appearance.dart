@@ -382,6 +382,6 @@ extension TerminalKeyboardActionDetails on TerminalKeyboardAction {
     TerminalKeyboardAction.tmuxScrollback => 'Scroll',
     TerminalKeyboardAction.tmuxMenu => 'Tmux+',
     TerminalKeyboardAction.snippets => 'Snip',
-    TerminalKeyboardAction.compose => 'Compose',
+    TerminalKeyboardAction.compose => 'Chat',
   };
 }

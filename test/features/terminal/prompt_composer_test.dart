@@ -195,12 +195,12 @@ void main() {
     }
 
     Future<void> openComposerSheet(WidgetTester tester) async {
-      await tester.tap(find.byTooltip('Expand composer'));
+      await tester.tap(find.byTooltip('Open chat mode'));
       await settle(tester);
     }
 
     Future<void> enterComposeMode(WidgetTester tester) async {
-      await tester.tap(find.text('Compose'));
+      await tester.tap(find.text('Chat'));
       await tester.pump();
     }
 

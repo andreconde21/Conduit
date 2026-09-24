@@ -218,7 +218,7 @@ class _PromptComposerSheetState extends State<PromptComposerSheet> {
             children: [
               Row(
                 children: [
-                  Text('Compose prompt', style: theme.textTheme.titleMedium),
+                  Text('Chat mode', style: theme.textTheme.titleMedium),
                   const Spacer(),
                   IconButton(
                     tooltip: 'Paste clipboard',

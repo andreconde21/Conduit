@@ -497,7 +497,7 @@ class _ComposeInputBarState extends State<_ComposeInputBar> {
                 ],
                 decoration: const InputDecoration(
                   isDense: true,
-                  hintText: 'Compose a line, Enter to send …',
+                  hintText: 'Chat: type a line, Enter to send …',
                   border: OutlineInputBorder(),
                   contentPadding: EdgeInsets.symmetric(
                     horizontal: 10,
@@ -509,12 +509,12 @@ class _ComposeInputBarState extends State<_ComposeInputBar> {
             if (widget.onExpand != null)
               IconButton(
                 icon: const Icon(Icons.open_in_full_rounded),
-                tooltip: 'Expand composer',
+                tooltip: 'Open chat mode',
                 onPressed: widget.onExpand,
               ),
             IconButton(
               icon: const Icon(Icons.close_rounded),
-              tooltip: 'Close compose',
+              tooltip: 'Close chat mode',
               onPressed: () => widget.onClose(_controller.text),
             ),
           ],
