@@ -77,8 +77,10 @@ enum TerminalKeyboardAction {
   tmuxPrefix,
   tmuxScrollback,
   tmuxMenu,
+  herdrMenu,
   snippets,
   compose,
+  touchMode,
 }
 
 enum TerminalKeyboardItemKind { builtIn, customText, customControl }
@@ -169,7 +171,9 @@ const defaultTerminalKeyboardActions = [
   TerminalKeyboardAction.tmuxPrefix,
   TerminalKeyboardAction.tmuxScrollback,
   TerminalKeyboardAction.tmuxMenu,
+  TerminalKeyboardAction.herdrMenu,
   TerminalKeyboardAction.snippets,
+  TerminalKeyboardAction.touchMode,
   TerminalKeyboardAction.fullscreen,
 ];
 
@@ -261,7 +265,9 @@ const defaultTerminalKeyboardItems = [
   TerminalKeyboardItem.builtIn(TerminalKeyboardAction.tmuxPrefix),
   TerminalKeyboardItem.builtIn(TerminalKeyboardAction.tmuxScrollback),
   TerminalKeyboardItem.builtIn(TerminalKeyboardAction.tmuxMenu),
+  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.herdrMenu),
   TerminalKeyboardItem.builtIn(TerminalKeyboardAction.snippets),
+  TerminalKeyboardItem.builtIn(TerminalKeyboardAction.touchMode),
   TerminalKeyboardItem.builtIn(TerminalKeyboardAction.fullscreen),
 ];
 
@@ -381,7 +387,9 @@ extension TerminalKeyboardActionDetails on TerminalKeyboardAction {
     TerminalKeyboardAction.tmuxPrefix => 'Tmux',
     TerminalKeyboardAction.tmuxScrollback => 'Scroll',
     TerminalKeyboardAction.tmuxMenu => 'Tmux+',
+    TerminalKeyboardAction.herdrMenu => 'Herdr',
     TerminalKeyboardAction.snippets => 'Snip',
     TerminalKeyboardAction.compose => 'Compose',
+    TerminalKeyboardAction.touchMode => 'Touch',
   };
 }

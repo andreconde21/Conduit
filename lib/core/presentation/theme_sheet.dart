@@ -1076,8 +1076,10 @@ IconData _keyboardActionIcon(TerminalKeyboardAction action) {
     TerminalKeyboardAction.tmuxPrefix => Icons.keyboard_command_key_rounded,
     TerminalKeyboardAction.tmuxScrollback => Icons.swap_vert_rounded,
     TerminalKeyboardAction.tmuxMenu => Icons.view_quilt_rounded,
+    TerminalKeyboardAction.herdrMenu => Icons.hub_rounded,
     TerminalKeyboardAction.snippets => Icons.snippet_folder_rounded,
     TerminalKeyboardAction.compose => Icons.edit_note_rounded,
+    TerminalKeyboardAction.touchMode => Icons.touch_app_rounded,
   };
 }
 

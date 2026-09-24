@@ -27,6 +27,9 @@ class TerminalKeyboardBar extends StatelessWidget {
     required this.onExitTmuxScrollMode,
     required this.tmuxPrefixKey,
     required this.tmuxScrollMode,
+    this.terminalMouseInput = false,
+    this.onTerminalMouseInputChanged,
+    this.onRemoteMouseTrackingActivated,
     super.key,
   });
 
@@ -44,6 +47,17 @@ class TerminalKeyboardBar extends StatelessWidget {
   final VoidCallback onExitTmuxScrollMode;
   final TmuxPrefixKey tmuxPrefixKey;
   final bool tmuxScrollMode;
+
+  /// The app-wide "Send mouse taps" preference, mirrored from Appearance.
+  final bool terminalMouseInput;
+
+  /// Called when the touch-mode menu toggles the "Send mouse taps"
+  /// preference; must update the same setting the Appearance sheet edits.
+  final ValueChanged<bool>? onTerminalMouseInputChanged;
+
+  /// Called once each time the remote application turns mouse tracking on,
+  /// so the page can surface a one-time discoverability hint.
+  final VoidCallback? onRemoteMouseTrackingActivated;
 
   @override
   Widget build(BuildContext context) {
@@ -224,6 +238,26 @@ class TerminalKeyboardBar extends StatelessWidget {
             ),
         ],
       ),
+      TerminalKeyboardAction.herdrMenu => _MenuKey<_HerdrAction>(
+        label: 'Herdr',
+        tooltip: 'Herdr actions',
+        palette: palette,
+        brightness: brightness,
+        onSelected: _triggerHerdrAction,
+        items: [
+          for (final action in _HerdrAction.values)
+            PopupMenuItem(
+              value: action,
+              child: Row(
+                children: [
+                  Icon(action.icon, size: 18),
+                  const SizedBox(width: 10),
+                  Text(action.label),
+                ],
+              ),
+            ),
+        ],
+      ),
       TerminalKeyboardAction.snippets => _MenuKey<_SnippetMenuItem>(
         label: action.label,
         tooltip: 'Snippets',
@@ -231,6 +265,16 @@ class TerminalKeyboardBar extends StatelessWidget {
         brightness: brightness,
         onSelected: _triggerSnippetMenuItem,
         items: _snippetMenuItems(),
+      ),
+      TerminalKeyboardAction.touchMode => _TouchModeKey(
+        controller: controller,
+        palette: palette,
+        brightness: brightness,
+        mouseInputEnabled: terminalMouseInput,
+        tmuxScrollMode: tmuxScrollMode,
+        onMouseInputChanged: onTerminalMouseInputChanged,
+        onToggleScrollMode: _toggleTmuxScrollMode,
+        onRemoteMouseTrackingActivated: onRemoteMouseTrackingActivated,
       ),
       _ => _Key(
         label: action.label,
@@ -284,8 +328,10 @@ class TerminalKeyboardBar extends StatelessWidget {
       case TerminalKeyboardAction.tmuxPrefix:
       case TerminalKeyboardAction.tmuxScrollback:
       case TerminalKeyboardAction.tmuxMenu:
+      case TerminalKeyboardAction.herdrMenu:
       case TerminalKeyboardAction.snippets:
       case TerminalKeyboardAction.compose:
+      case TerminalKeyboardAction.touchMode:
         break;
     }
   }
@@ -367,6 +413,16 @@ class TerminalKeyboardBar extends StatelessWidget {
     } else if (action.text != null) {
       controller.sendText(action.text!);
     }
+    if (action.entersScrollMode) {
+      onEnterTmuxScrollMode();
+    }
+    _focusTerminal();
+  }
+
+  void _triggerHerdrAction(_HerdrAction action) {
+    // Herdr's default prefix is ctrl+b regardless of the host's tmux prefix.
+    controller.sendControl(TerminalKey.keyB);
+    controller.sendText(action.text);
     if (action.entersScrollMode) {
       onEnterTmuxScrollMode();
     }
@@ -560,6 +616,46 @@ enum _TmuxAction {
   final IconData icon;
   final String? text;
   final TerminalKey? key;
+  final bool entersScrollMode;
+}
+
+/// Herdr's documented default bindings (prefix ctrl+b), from
+/// https://herdr.dev/docs/keyboard/ — uppercase text means shift+key.
+enum _HerdrAction {
+  newTab('New tab', Icons.add_box_rounded, 'c'),
+  previousTab('Previous tab', Icons.skip_previous_rounded, 'p'),
+  nextTab('Next tab', Icons.skip_next_rounded, 'n'),
+  renameTab('Rename tab', Icons.drive_file_rename_outline_rounded, 'T'),
+  closeTab('Close tab', Icons.disabled_by_default_rounded, 'X'),
+  splitRight('Split right', Icons.vertical_split_rounded, 'v'),
+  splitDown('Split down', Icons.splitscreen_rounded, '-'),
+  paneLeft('Pane left', Icons.keyboard_arrow_left_rounded, 'h'),
+  paneDown('Pane down', Icons.keyboard_arrow_down_rounded, 'j'),
+  paneUp('Pane up', Icons.keyboard_arrow_up_rounded, 'k'),
+  paneRight('Pane right', Icons.keyboard_arrow_right_rounded, 'l'),
+  zoomPane('Zoom pane', Icons.zoom_out_map_rounded, 'z'),
+  resizeMode('Resize mode', Icons.open_in_full_rounded, 'r'),
+  closePane('Close pane', Icons.close_fullscreen_rounded, 'x'),
+  copyMode('Scrollback', Icons.swap_vert_rounded, '[', entersScrollMode: true),
+  newWorkspace('New workspace', Icons.create_new_folder_rounded, 'N'),
+  workspacePicker('Workspaces', Icons.view_list_rounded, 'w'),
+  renameWorkspace('Rename workspace', Icons.edit_note_rounded, 'W'),
+  closeWorkspace('Close workspace', Icons.folder_delete_rounded, 'D'),
+  gotoPicker('Goto picker', Icons.explore_rounded, 'g'),
+  toggleSidebar('Toggle sidebar', Icons.view_sidebar_rounded, 'b'),
+  help('Help', Icons.help_outline_rounded, '?'),
+  detach('Detach', Icons.logout_rounded, 'q');
+
+  const _HerdrAction(
+    this.label,
+    this.icon,
+    this.text, {
+    this.entersScrollMode = false,
+  });
+
+  final String label;
+  final IconData icon;
+  final String text;
   final bool entersScrollMode;
 }
 
@@ -888,6 +984,279 @@ class _ToggleKey extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+enum _TouchModeMenuAction { toggleMouseInput, toggleScrollMode }
+
+/// The effective touch behavior the terminal has right now, in priority
+/// order: scrollback overrides everything, then forwarded mouse taps (only
+/// when the remote app actually tracks the mouse), then plain selection.
+enum _TouchModeState { selection, mouseArmed, mouseActive, scrollback }
+
+/// Compact indicator + quick menu for the terminal's touch behavior.
+///
+/// Distinguishes the app-wide "Send mouse taps" preference from what taps do
+/// in this session right now: the preference only takes effect while the
+/// remote application has mouse tracking enabled, which this key observes
+/// live from the terminal state.
+class _TouchModeKey extends StatefulWidget {
+  const _TouchModeKey({
+    required this.controller,
+    required this.palette,
+    required this.brightness,
+    required this.mouseInputEnabled,
+    required this.tmuxScrollMode,
+    required this.onMouseInputChanged,
+    required this.onToggleScrollMode,
+    required this.onRemoteMouseTrackingActivated,
+  });
+
+  final TerminalSessionController controller;
+  final AppPalette palette;
+  final Brightness brightness;
+  final bool mouseInputEnabled;
+  final bool tmuxScrollMode;
+  final ValueChanged<bool>? onMouseInputChanged;
+  final VoidCallback onToggleScrollMode;
+  final VoidCallback? onRemoteMouseTrackingActivated;
+
+  @override
+  State<_TouchModeKey> createState() => _TouchModeKeyState();
+}
+
+class _TouchModeKeyState extends State<_TouchModeKey> {
+  late bool _remoteTracking;
+
+  @override
+  void initState() {
+    super.initState();
+    _remoteTracking = widget.controller.remoteMouseTrackingActive;
+    widget.controller.terminal.addListener(_handleTerminalChanged);
+    if (_remoteTracking) {
+      // Tracking can already be on when the key first appears (e.g.
+      // reconnecting into a TUI with the mouse armed); the discoverability
+      // hint should fire then too, not only on a live transition.
+      _reportActivationAfterFrame();
+    }
+  }
+
+  /// Reports an activation once the current frame is done. [initState] and
+  /// [didUpdateWidget] run during build, and the page reacts by notifying
+  /// the theme controller and showing a SnackBar, both of which rebuild
+  /// ancestors and are not allowed while the tree is being built.
+  void _reportActivationAfterFrame() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _remoteTracking) {
+        widget.onRemoteMouseTrackingActivated?.call();
+      }
+    });
+  }
+
+  @override
+  void didUpdateWidget(_TouchModeKey oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.terminal.removeListener(_handleTerminalChanged);
+      widget.controller.terminal.addListener(_handleTerminalChanged);
+      _remoteTracking = widget.controller.remoteMouseTrackingActive;
+      if (_remoteTracking) {
+        _reportActivationAfterFrame();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.controller.terminal.removeListener(_handleTerminalChanged);
+    super.dispose();
+  }
+
+  void _handleTerminalChanged() {
+    final tracking = widget.controller.remoteMouseTrackingActive;
+    if (tracking == _remoteTracking) {
+      return;
+    }
+    if (!mounted) {
+      _remoteTracking = tracking;
+      return;
+    }
+    setState(() => _remoteTracking = tracking);
+    if (tracking) {
+      widget.onRemoteMouseTrackingActivated?.call();
+    }
+  }
+
+  _TouchModeState get _state {
+    if (widget.tmuxScrollMode) {
+      return _TouchModeState.scrollback;
+    }
+    if (widget.mouseInputEnabled) {
+      return _remoteTracking
+          ? _TouchModeState.mouseActive
+          : _TouchModeState.mouseArmed;
+    }
+    return _TouchModeState.selection;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final state = _state;
+    final selected =
+        state == _TouchModeState.mouseActive ||
+        state == _TouchModeState.scrollback;
+    final icon = switch (state) {
+      _TouchModeState.selection => Icons.touch_app_outlined,
+      _TouchModeState.mouseArmed => Icons.mouse_outlined,
+      _TouchModeState.mouseActive => Icons.mouse_rounded,
+      _TouchModeState.scrollback => Icons.swap_vert_rounded,
+    };
+    final semanticsLabel = switch (state) {
+      _TouchModeState.selection =>
+        'Touch mode: selection. Drag or long press selects terminal text.',
+      _TouchModeState.mouseArmed =>
+        'Touch mode: mouse taps enabled, but the remote app is not tracking '
+            'the mouse, so taps still select text.',
+      _TouchModeState.mouseActive =>
+        'Touch mode: mouse taps active. Taps are forwarded to the remote '
+            'app as mouse clicks.',
+      _TouchModeState.scrollback =>
+        'Touch mode: scrollback. Gestures scroll terminal history.',
+    };
+    final foreground = selected
+        ? widget.palette.accent
+        : widget.palette.foregroundFor(widget.brightness);
+    final background = selected
+        ? Color.alphaBlend(
+            widget.palette.accent.withValues(alpha: 0.22),
+            widget.palette.panelFor(widget.brightness),
+          )
+        : widget.palette.panelFor(widget.brightness);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      child: MergeSemantics(
+        child: Semantics(
+          label: semanticsLabel,
+          button: true,
+          child: PopupMenuButton<_TouchModeMenuAction>(
+            tooltip: 'Touch mode',
+            onSelected: _handleMenuAction,
+            itemBuilder: _buildMenuItems,
+            child: Container(
+              height: _keyHeight,
+              constraints: const BoxConstraints(minWidth: _iconKeyMinWidth),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: background,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: selected
+                      ? widget.palette.accent.withValues(alpha: 0.7)
+                      : widget.palette.hairlineFor(widget.brightness),
+                  width: selected ? 1.3 : 1,
+                ),
+              ),
+              child: Icon(icon, color: foreground, size: 20),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _handleMenuAction(_TouchModeMenuAction action) {
+    switch (action) {
+      case _TouchModeMenuAction.toggleMouseInput:
+        widget.onMouseInputChanged?.call(!widget.mouseInputEnabled);
+      case _TouchModeMenuAction.toggleScrollMode:
+        widget.onToggleScrollMode();
+    }
+  }
+
+  List<PopupMenuEntry<_TouchModeMenuAction>> _buildMenuItems(
+    BuildContext context,
+  ) {
+    final theme = Theme.of(context);
+    final subtitleStyle = theme.textTheme.bodySmall;
+    PopupMenuItem<_TouchModeMenuAction> toggleItem({
+      required _TouchModeMenuAction value,
+      required bool checked,
+      required String title,
+      required String subtitle,
+    }) {
+      return PopupMenuItem(
+        value: value,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              checked
+                  ? Icons.check_box_rounded
+                  : Icons.check_box_outline_blank_rounded,
+              size: 18,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(title),
+                  Text(subtitle, style: subtitleStyle),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return [
+      PopupMenuItem(
+        enabled: false,
+        child: Row(
+          children: [
+            Icon(
+              _remoteTracking ? Icons.mouse_rounded : Icons.mouse_outlined,
+              size: 18,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                _remoteTracking
+                    ? 'Remote app is tracking the mouse'
+                    : 'Remote app is not tracking the mouse',
+              ),
+            ),
+          ],
+        ),
+      ),
+      const PopupMenuDivider(height: 8),
+      toggleItem(
+        value: _TouchModeMenuAction.toggleMouseInput,
+        checked: widget.mouseInputEnabled,
+        title: 'Send mouse taps',
+        subtitle:
+            'Taps become terminal mouse clicks when the remote app tracks '
+            'the mouse. Applies to all sessions.',
+      ),
+      toggleItem(
+        value: _TouchModeMenuAction.toggleScrollMode,
+        checked: widget.tmuxScrollMode,
+        title: 'Scrollback mode',
+        subtitle:
+            'Drag gestures scroll tmux or terminal history. This session '
+            'only.',
+      ),
+      const PopupMenuDivider(height: 8),
+      PopupMenuItem(
+        enabled: false,
+        child: Text(
+          'Drag or long press always selects terminal text.',
+          style: subtitleStyle,
+        ),
+      ),
+    ];
   }
 }
 
