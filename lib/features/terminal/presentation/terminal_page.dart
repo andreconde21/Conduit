@@ -27,7 +27,6 @@ import 'package:conduit/features/terminal/presentation/terminal_workspace_contro
 import 'package:conduit/features/terminal/presentation/widgets/empty_terminal_state.dart';
 import 'package:conduit/features/terminal/presentation/widgets/floating_toolbar.dart';
 import 'package:conduit/features/terminal/presentation/widgets/prompt_composer_sheet.dart';
-import 'package:conduit/features/terminal/presentation/widgets/session_tabs.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_header.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_surface.dart';
 import 'package:conduit/features/voice/data/platform_speech_recognizer.dart';
@@ -324,6 +323,12 @@ class _TerminalPageState extends State<TerminalPage> {
     _showTerminal();
   }
 
+  Future<void> _openNewSession(SessionConnectFlow connectFlow) async {
+    await connectFlow.pickHostAndConnect(context);
+    if (!mounted) return;
+    _showTerminal();
+  }
+
   /// Gesture hook: swipe in from the right edge opens the agent attention
   /// sheet when monitoring is available, otherwise the gesture is off.
   VoidCallback? _agentPanelOpener() {
@@ -376,46 +381,51 @@ class _TerminalPageState extends State<TerminalPage> {
                 right: !_fullscreen && (!landscape || !gestureNavigation),
                 child: Column(
                   children: [
-                    if (!_fullscreen) ...[
-                      if (activeSession != null)
-                        ListenableBuilder(
-                          listenable: widget.agentAttention ?? _inertListenable,
-                          builder: (context, _) {
-                            final attention = widget.agentAttention;
-                            final showAgents =
-                                attention != null &&
-                                (attention.monitoredHosts.isNotEmpty ||
-                                    activeSession.host.agentAttentionEnabled);
-                            return TerminalHeader(
-                              session: activeSession,
-                              palette: palette,
-                              brightness: brightness,
-                              onBack: () => Navigator.of(context).pop(),
-                              onReconnect: () async {
-                                await activeSession.disconnect();
-                                await activeSession.connect();
-                                _focusNode.requestFocus();
-                              },
-                              attentionCount: attention?.attentionCount ?? 0,
-                              onOpenAgentAttention: showAgents
-                                  ? () => _openAgentAttention(attention)
-                                  : null,
-                              onOpenSessionGrid: _openSessionGrid,
-                            );
-                          },
-                        ),
-                      SessionTabs(
-                        workspace: widget.workspace,
-                        activeSession: activeSession,
-                        palette: palette,
-                        brightness: brightness,
-                        onChanged: _showTerminal,
-                        fileTabs: fileTabs,
-                        activeFileTab: activeFileTab,
-                        onFileTabSelected: _fileTabs.activate,
-                        onFileTabClosed: _closeFileTab,
+                    if (!_fullscreen)
+                      ListenableBuilder(
+                        listenable: widget.agentAttention ?? _inertListenable,
+                        builder: (context, _) {
+                          final attention = widget.agentAttention;
+                          final showAgents =
+                              attention != null &&
+                              (attention.monitoredHosts.isNotEmpty ||
+                                  (activeSession?.host.agentAttentionEnabled ??
+                                      false));
+                          final connectFlow = widget.connectFlow;
+                          return TerminalHeader(
+                            workspace: widget.workspace,
+                            activeSession: activeSession,
+                            palette: palette,
+                            brightness: brightness,
+                            onBack: () => Navigator.of(context).pop(),
+                            onTabsChanged: _showTerminal,
+                            fileTabs: fileTabs,
+                            activeFileTab: activeFileTab,
+                            onFileTabSelected: _fileTabs.activate,
+                            onFileTabClosed: _closeFileTab,
+                            onReconnect: activeSession == null
+                                ? null
+                                : () async {
+                                    await activeSession.disconnect();
+                                    await activeSession.connect();
+                                    _focusNode.requestFocus();
+                                  },
+                            onToggleFullscreen: _toggleFullscreen,
+                            onNewSession: connectFlow == null
+                                ? null
+                                : () => _openNewSession(connectFlow),
+                            attentionCount: attention?.attentionCount ?? 0,
+                            onOpenAgentAttention: showAgents
+                                ? () => _openAgentAttention(attention)
+                                : null,
+                            onOpenSessionGrid: _openSessionGrid,
+                            swipeDownOpensSessionGrid: widget
+                                .themeController
+                                .terminalGestures
+                                .headerSwipeOpensSessions,
+                          );
+                        },
                       ),
-                    ],
                     Expanded(
                       child: Container(
                         color: palette.terminalBackgroundFor(brightness),

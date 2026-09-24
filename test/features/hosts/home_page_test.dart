@@ -221,7 +221,7 @@ void main() {
     await pumpHome(
       tester,
       hosts: [
-        host('a', lastConnectedAt: DateTime.utc(2026, 9, 1)),
+        host('a', lastConnectedAt: DateTime.utc(2026, 9, 2)),
         host('b', lastConnectedAt: DateTime.utc(2026, 9, 20)),
         host('c'),
       ],
