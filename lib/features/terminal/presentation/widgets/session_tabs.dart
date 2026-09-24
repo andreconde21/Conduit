@@ -82,6 +82,8 @@ class SessionTabs extends StatelessWidget {
   }
 }
 
+final Listenable _inertListenable = ChangeNotifier();
+
 class _FileTab extends StatelessWidget {
   const _FileTab({
     required this.tab,
@@ -129,7 +131,7 @@ class _FileTab extends StatelessWidget {
           child: Row(
             children: [
               Icon(
-                Icons.description_rounded,
+                tab.icon,
                 size: 13,
                 color: selected
                     ? accent
@@ -137,14 +139,17 @@ class _FileTab extends StatelessWidget {
               ),
               const SizedBox(width: 7),
               Expanded(
-                child: Text(
-                  tab.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: palette.foregroundFor(brightness),
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
+                child: ListenableBuilder(
+                  listenable: tab.listenable ?? _inertListenable,
+                  builder: (context, _) => Text(
+                    tab.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: palette.foregroundFor(brightness),
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
               ),

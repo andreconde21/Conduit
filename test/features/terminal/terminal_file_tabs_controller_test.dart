@@ -46,6 +46,8 @@ void main() {
 
   tearDown(() => controller.dispose());
 
+  group('tool tabs', toolTabTests);
+
   test('open adds a tab once per host and path and activates it', () {
     var notifications = 0;
     controller.addListener(() => notifications++);
@@ -157,5 +159,59 @@ void main() {
     // tearDown disposes again; ChangeNotifier tolerates it only once, so
     // swap in a fresh controller.
     controller = TerminalFileTabsController(repository);
+  });
+}
+
+class ToolTab extends TerminalFileTab {
+  ToolTab({required super.host}) : super(path: 'tool');
+
+  int disposeCount = 0;
+
+  @override
+  bool matches(TerminalFileTab other) =>
+      other is ToolTab && other.host.id == host.id;
+
+  @override
+  void dispose() => disposeCount++;
+}
+
+void toolTabTests() {
+  final hostA = buildHost('a');
+  final hostB = buildHost('b');
+
+  test('add de-duplicates through matches and disposes the redundant tab', () {
+    final controller = TerminalFileTabsController(
+      FakeSftpRepository(FakeSftpSession(home: '/home/user', tree: {})),
+    );
+    addTearDown(controller.dispose);
+    final first = ToolTab(host: hostA);
+    final duplicate = ToolTab(host: hostA);
+    final other = ToolTab(host: hostB);
+    expect(identical(controller.add(first), first), isTrue);
+    expect(identical(controller.add(duplicate), first), isTrue);
+    expect(duplicate.disposeCount, 1);
+    expect(first.disposeCount, 0);
+    controller.add(other);
+    expect(controller.tabs, [first, other]);
+    expect(controller.active, other);
+    // A plain file tab on the same host is a different tab.
+    final file = controller.open(hostA, '/etc/hosts');
+    expect(controller.tabs, [first, other, file]);
+  });
+
+  test('close and dispose release tool tabs', () {
+    final controller = TerminalFileTabsController(
+      FakeSftpRepository(FakeSftpSession(home: '/home/user', tree: {})),
+    );
+    final closed = ToolTab(host: hostA);
+    final kept = ToolTab(host: hostB);
+    controller
+      ..add(closed)
+      ..add(kept);
+    controller.close(closed);
+    expect(closed.disposeCount, 1);
+    expect(kept.disposeCount, 0);
+    controller.dispose();
+    expect(kept.disposeCount, 1);
   });
 }
