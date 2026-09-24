@@ -28,7 +28,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.gwitko.conduit"
+        applicationId = "com.outsmartis.conductore"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
