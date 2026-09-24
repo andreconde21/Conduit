@@ -264,6 +264,100 @@ void main() {
     final agent = controller.statusFor('h')!.agents.single;
     await controller.focusAgent('h', agent);
 
-    expect(runner.commands.last, 'herdr agent focus builder');
+    expect(
+      runner.commands.last,
+      HerdrAttentionProvider.remoteCommand('agent focus builder'),
+    );
   });
+
+  test('lists hardware-key hosts without ever polling them', () async {
+    final hardwareKeyHost = monitoredHost('hk').copyWith(
+      authMethod: SshAuthMethod.hardwareKey,
+      hardwareKeys: const [HardwareKeyEntry(id: 'k', privateKey: 'stub')],
+    );
+    final (workspace, controller, runner, _) = build([agents(blocked)]);
+    await workspace.open(hardwareKeyHost).connect();
+    await pumpEventQueue();
+
+    expect(controller.isMonitoring('hk'), isTrue);
+    expect(
+      controller.statusFor('hk')?.unavailableReason,
+      AgentAttentionController.hardwareKeyUnavailableReason,
+    );
+    expect(runner.commands, isEmpty);
+
+    await controller.refresh('hk');
+    controller.setAppActive(false);
+    controller.setAppActive(true);
+    await pumpEventQueue();
+    expect(runner.commands, isEmpty);
+    expect(controller.attentionCount, 0);
+  });
+
+  test('backs off after consecutive failures and recovers', () async {
+    final (workspace, controller, runner, _) = build([
+      agents(working),
+      StateError('reset 1'),
+      StateError('reset 2'),
+      agents(working),
+    ]);
+    await workspace.open(monitoredHost('h')).connect();
+    await pumpEventQueue();
+    expect(runner.commands, hasLength(1));
+
+    await controller.tickNow('h'); // fails: skip one tick
+    expect(runner.commands, hasLength(2));
+    await controller.tickNow('h');
+    expect(runner.commands, hasLength(2));
+    await controller.tickNow('h'); // fails again: skip two ticks
+    expect(runner.commands, hasLength(3));
+    await controller.tickNow('h');
+    await controller.tickNow('h');
+    expect(runner.commands, hasLength(3));
+    await controller.tickNow('h'); // succeeds: backoff cleared
+    expect(runner.commands, hasLength(4));
+    expect(controller.statusFor('h')?.error, isNull);
+    await controller.tickNow('h');
+    expect(runner.commands, hasLength(5));
+  });
+
+  test('a manual refresh ignores the failure backoff', () async {
+    final (workspace, controller, runner, _) = build([
+      agents(working),
+      StateError('reset'),
+      agents(working),
+    ]);
+    await workspace.open(monitoredHost('h')).connect();
+    await pumpEventQueue();
+
+    await controller.tickNow('h');
+    expect(controller.statusFor('h')?.error, contains('reset'));
+    await controller.refresh('h');
+    expect(runner.commands, hasLength(3));
+    expect(controller.statusFor('h')?.error, isNull);
+  });
+
+  test(
+    're-notifies when the same state is reached again between polls',
+    () async {
+      String blockedSeq(int seq) =>
+          '[{"name": "builder", "state": "blocked", "state_change_seq": $seq}]';
+      final (workspace, controller, _, notifier) = build([
+        agents(working),
+        agents(blockedSeq(10)),
+        agents(blockedSeq(10)),
+        agents(blockedSeq(12)),
+      ]);
+      await workspace.open(monitoredHost('h')).connect();
+      await pumpEventQueue();
+
+      await controller.pollNow('h');
+      expect(notifier.shown, hasLength(1));
+      await controller.pollNow('h');
+      expect(notifier.shown, hasLength(1));
+      // Answered and blocked again within one interval: the sequence moved.
+      await controller.pollNow('h');
+      expect(notifier.shown, hasLength(2));
+    },
+  );
 }

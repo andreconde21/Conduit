@@ -40,13 +40,18 @@ class AgentHostStatus {
 /// Watches enabled, connected hosts for agent state changes.
 ///
 /// Polling is deliberately conservative: one in-flight fetch per host
-/// (ticks are skipped while a fetch runs), a fixed interval, paused while
-/// the app is backgrounded, stopped when the session disconnects or closes,
-/// and stopped entirely for a host whose provider tooling is missing.
+/// (ticks are skipped while a fetch runs), a fixed interval that backs off
+/// after consecutive failures, paused while the app is backgrounded,
+/// stopped when the session disconnects or closes, and stopped entirely for
+/// a host whose provider tooling is missing. Hosts that log in with a
+/// hardware key are listed but never polled: every poll would open a new
+/// SSH connection and ask for a key touch.
 ///
 /// Notifications are edge-triggered on state *transitions* by stable agent
 /// identity — the first snapshot after monitoring starts never notifies,
-/// and an unchanged state is never re-notified.
+/// and an unchanged state is never re-notified. A provider-reported state
+/// sequence counts as a transition too, so an agent that was answered and
+/// blocked again between two polls still notifies.
 class AgentAttentionController extends ChangeNotifier {
   AgentAttentionController({
     required TerminalWorkspaceController workspace,
@@ -72,6 +77,16 @@ class AgentAttentionController extends ChangeNotifier {
   final Map<String, _HostMonitor> _monitors = {};
   bool _appActive = true;
   bool _disposed = false;
+
+  /// Longest run of skipped ticks after repeated failures (with the default
+  /// interval: a poll every 75 s instead of every 15 s).
+  static const _maxBackoffTicks = 4;
+
+  @visibleForTesting
+  static const hardwareKeyUnavailableReason =
+      'Agent monitoring is off for hardware-key logins: each poll would '
+      'open a new connection and ask for a key touch. Use a password or '
+      'private key for this machine to monitor its agents.';
 
   AgentAttentionProvider get provider => _provider;
 
@@ -123,13 +138,18 @@ class AgentAttentionController extends ChangeNotifier {
 
   Future<void> refresh(String hostId) async {
     final monitor = _monitors[hostId];
-    if (monitor == null) {
+    if (monitor == null || !monitor.pollable) {
       return;
     }
-    // A manual refresh gives an unavailable provider another chance.
+    // A manual refresh gives an unavailable provider another chance and
+    // skips any failure backoff.
+    monitor.consecutiveFailures = 0;
+    monitor.skipTicks = 0;
     if (monitor.status.unavailableReason != null) {
       monitor.status = const AgentHostStatus(loading: true);
-      _startTimer(monitor);
+      if (_appActive) {
+        _startTimer(monitor);
+      }
     }
     await _poll(monitor);
   }
@@ -183,6 +203,14 @@ class AgentAttentionController extends ChangeNotifier {
     // React to this session disconnecting even when the workspace itself
     // does not notify.
     session.addListener(_syncMonitors);
+    if (session.host.authMethod == SshAuthMethod.hardwareKey) {
+      monitor.pollable = false;
+      monitor.status = AgentHostStatus(
+        unavailableReason: hardwareKeyUnavailableReason,
+        updatedAt: DateTime.now(),
+      );
+      return;
+    }
     if (_appActive) {
       _startTimer(monitor);
       unawaited(_poll(monitor));
@@ -202,11 +230,18 @@ class AgentAttentionController extends ChangeNotifier {
 
   void _startTimer(_HostMonitor monitor) {
     monitor.timer?.cancel();
-    monitor.timer = Timer.periodic(_pollInterval, (_) {
-      unawaited(_poll(monitor));
-    });
+    monitor.timer = Timer.periodic(_pollInterval, (_) => _onTick(monitor));
   }
 
+  void _onTick(_HostMonitor monitor) {
+    if (monitor.skipTicks > 0) {
+      monitor.skipTicks -= 1;
+      return;
+    }
+    unawaited(_poll(monitor));
+  }
+
+  /// Polls [hostId] immediately, ignoring any failure backoff.
   @visibleForTesting
   Future<void> pollNow(String hostId) async {
     final monitor = _monitors[hostId];
@@ -215,9 +250,24 @@ class AgentAttentionController extends ChangeNotifier {
     }
   }
 
+  /// Simulates one periodic tick for [hostId], honoring the failure backoff.
+  @visibleForTesting
+  Future<void> tickNow(String hostId) async {
+    final monitor = _monitors[hostId];
+    if (monitor == null) {
+      return;
+    }
+    if (monitor.skipTicks > 0) {
+      monitor.skipTicks -= 1;
+      return;
+    }
+    await _poll(monitor);
+  }
+
   Future<void> _poll(_HostMonitor monitor) async {
     if (_disposed ||
         monitor.fetching ||
+        !monitor.pollable ||
         !_monitors.containsKey(monitor.host.id)) {
       return;
     }
@@ -232,6 +282,8 @@ class AgentAttentionController extends ChangeNotifier {
         return;
       }
       await _applySnapshot(monitor, snapshot);
+      monitor.consecutiveFailures = 0;
+      monitor.skipTicks = 0;
     } on AgentProviderUnavailable catch (unavailable) {
       monitor.status = AgentHostStatus(
         unavailableReason: unavailable.message,
@@ -246,6 +298,13 @@ class AgentAttentionController extends ChangeNotifier {
         agents: monitor.status.agents,
         error: error.toString(),
         updatedAt: DateTime.now(),
+      );
+      // Each failure typically means a reconnect attempt on the next poll;
+      // stretch the interval so a flaky link is not hammered.
+      monitor.consecutiveFailures += 1;
+      monitor.skipTicks = monitor.consecutiveFailures.clamp(
+        0,
+        _maxBackoffTicks,
       );
     } finally {
       monitor.fetching = false;
@@ -264,7 +323,8 @@ class AgentAttentionController extends ChangeNotifier {
     // Commit the new states before notifying so a throwing notifier can
     // never cause the same transition to notify twice on the next poll.
     monitor.lastStates = {
-      for (final agent in snapshot.agents) agent.id: agent.state,
+      for (final agent in snapshot.agents)
+        agent.id: (state: agent.state, sequence: agent.stateSequence),
     };
     monitor.sawInitialSnapshot = true;
     monitor.status = AgentHostStatus(
@@ -279,7 +339,7 @@ class AgentAttentionController extends ChangeNotifier {
   Future<void> _notifyTransitions(
     _HostMonitor monitor,
     AgentAttentionSnapshot snapshot,
-    Map<String, AgentAttentionState> previousStates,
+    Map<String, _AgentMark> previousStates,
   ) async {
     final notifier = _notifier;
     if (notifier == null) {
@@ -288,7 +348,7 @@ class AgentAttentionController extends ChangeNotifier {
     final host = monitor.host;
     for (final agent in snapshot.agents) {
       final previous = previousStates[agent.id];
-      if (previous == agent.state) {
+      if (previous != null && !_isTransition(previous, agent)) {
         continue;
       }
       final needsInput = agent.state.needsAttention && host.agentNotifyInput;
@@ -305,6 +365,19 @@ class AgentAttentionController extends ChangeNotifier {
         body: '${agent.name} on ${host.name}',
       );
     }
+  }
+
+  /// A state change, or the same state reached again (the provider bumped
+  /// its sequence, e.g. blocked → answered → blocked again within one poll
+  /// interval).
+  static bool _isTransition(_AgentMark previous, AgentInfo agent) {
+    if (previous.state != agent.state) {
+      return true;
+    }
+    final sequence = agent.stateSequence;
+    return sequence != null &&
+        previous.sequence != null &&
+        sequence != previous.sequence;
   }
 
   @override
@@ -331,7 +404,14 @@ class _HostMonitor {
 
   Timer? timer;
   bool fetching = false;
+
+  /// False for hosts that are listed but must never be polled.
+  bool pollable = true;
   bool sawInitialSnapshot = false;
-  Map<String, AgentAttentionState> lastStates = const {};
+  int consecutiveFailures = 0;
+  int skipTicks = 0;
+  Map<String, _AgentMark> lastStates = const {};
   AgentHostStatus status = const AgentHostStatus(loading: true);
 }
+
+typedef _AgentMark = ({AgentAttentionState state, int? sequence});
