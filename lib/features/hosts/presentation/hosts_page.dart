@@ -22,6 +22,8 @@ import 'package:conduit/features/local_shell/presentation/local_shell_controller
 import 'package:conduit/features/local_shell/presentation/local_shell_instance_page.dart';
 import 'package:conduit/features/local_shell/presentation/local_shell_setup_page.dart';
 import 'package:conduit/features/local_shell/presentation/widgets/local_shell_section.dart';
+import 'package:conduit/features/sessions/domain/connect_target.dart';
+import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
 import 'package:conduit/features/sftp/domain/file_export.dart';
 import 'package:conduit/features/sftp/domain/sftp_bookmarks_repository.dart';
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
@@ -53,6 +55,7 @@ class HostsPage extends StatefulWidget {
     required this.agentAttention,
     required this.backupService,
     required this.fileExport,
+    this.connectFlow,
     super.key,
   });
 
@@ -69,6 +72,10 @@ class HostsPage extends StatefulWidget {
   final AgentAttentionController agentAttention;
   final AppBackupService backupService;
   final FileExport fileExport;
+
+  /// Connect picker (tmux / Herdr / recent / skip); null connects to a plain
+  /// shell like before.
+  final SessionConnectFlow? connectFlow;
 
   @override
   State<HostsPage> createState() => _HostsPageState();
@@ -364,7 +371,7 @@ class _HostsPageState extends State<HostsPage> {
     return HostCard(
       host: host,
       active: widget.workspaceController.sessions.any(
-        (session) => session.host.id == host.id,
+        (session) => baseHostId(session.host.id) == host.id,
       ),
       selectedTag: _selectedTag,
       onConnect: () => _connect(host),
@@ -448,6 +455,7 @@ class _HostsPageState extends State<HostsPage> {
           themeController: widget.themeController,
           sftpRepository: widget.sftpRepository,
           agentAttention: widget.agentAttention,
+          connectFlow: widget.connectFlow,
         ),
       ),
     );
@@ -559,9 +567,20 @@ class _HostsPageState extends State<HostsPage> {
     );
   }
 
-  Future<void> _connect(SavedHost host) async {
-    await widget.hostsController.markConnected(host);
-    widget.workspaceController.open(host);
+  Future<void> _connect(SavedHost host, {bool forcePicker = false}) async {
+    final flow = widget.connectFlow;
+    if (flow == null) {
+      await widget.hostsController.markConnected(host);
+      widget.workspaceController.open(host);
+    } else {
+      final session = await flow.connect(
+        context,
+        host,
+        forcePicker: forcePicker,
+      );
+      if (session == null) return;
+    }
+    if (!mounted) return;
     await _openTerminalWorkspace();
   }
 
@@ -584,6 +603,8 @@ class _HostsPageState extends State<HostsPage> {
 
   Future<void> _handleHostAction(HostAction action, SavedHost host) async {
     switch (action) {
+      case HostAction.connectTo:
+        await _connect(host, forcePicker: true);
       case HostAction.files:
         await _openFiles(host);
       case HostAction.edit:

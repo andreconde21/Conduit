@@ -1,0 +1,666 @@
+import 'dart:async';
+
+import 'package:conduit/core/presentation/system_navigation_insets.dart';
+import 'package:conduit/core/theme/app_theme.dart';
+import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
+import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/sessions/data/remote_session_lister.dart';
+import 'package:conduit/features/sessions/domain/connect_preferences.dart';
+import 'package:conduit/features/sessions/domain/connect_target.dart';
+import 'package:conduit/features/sessions/domain/remote_session_listing.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+/// What the user picked in the connect picker.
+class ConnectPickerResult {
+  const ConnectPickerResult({required this.target, required this.remember});
+
+  final ConnectTarget target;
+
+  /// Whether to skip the picker next time and reuse [target].
+  final bool remember;
+}
+
+enum ConnectPickerTab { tmux, herdr, recent }
+
+/// Shows the Moshi-style picker (Tmux / Herdr / Recent / Skip) for [host].
+///
+/// Listing runs over [runner], a dedicated exec channel that is closed when
+/// the sheet goes away. Returns null when dismissed.
+Future<ConnectPickerResult?> showConnectPicker({
+  required BuildContext context,
+  required SavedHost host,
+  required AgentCommandRunner runner,
+  ConnectPreferences preferences = const ConnectPreferences(),
+  Set<String> activeTargetKeys = const {},
+  ConnectPickerTab initialTab = ConnectPickerTab.tmux,
+}) {
+  return showModalBottomSheet<ConnectPickerResult>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    builder: (context) => AnnotatedRegion<SystemUiOverlayStyle>(
+      value: AppTheme.systemUiOverlayStyle(Theme.of(context).brightness),
+      child: DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.62,
+        minChildSize: 0.35,
+        maxChildSize: 0.92,
+        builder: (context, scrollController) => ConnectPickerSheet(
+          host: host,
+          runner: runner,
+          preferences: preferences,
+          activeTargetKeys: activeTargetKeys,
+          initialTab: initialTab,
+          scrollController: scrollController,
+          onPicked: (result) => Navigator.of(context).pop(result),
+        ),
+      ),
+    ),
+  );
+}
+
+class ConnectPickerSheet extends StatefulWidget {
+  const ConnectPickerSheet({
+    required this.host,
+    required this.runner,
+    required this.onPicked,
+    this.preferences = const ConnectPreferences(),
+    this.activeTargetKeys = const {},
+    this.initialTab = ConnectPickerTab.tmux,
+    this.scrollController,
+    super.key,
+  });
+
+  final SavedHost host;
+  final AgentCommandRunner runner;
+  final ValueChanged<ConnectPickerResult> onPicked;
+  final ConnectPreferences preferences;
+
+  /// Target keys that already have an open session in this app; shown with
+  /// an "Active" badge.
+  final Set<String> activeTargetKeys;
+  final ConnectPickerTab initialTab;
+  final ScrollController? scrollController;
+
+  @override
+  State<ConnectPickerSheet> createState() => _ConnectPickerSheetState();
+}
+
+class _ConnectPickerSheetState extends State<ConnectPickerSheet> {
+  late ConnectPickerTab _tab = widget.initialTab;
+  late bool _remember = widget.preferences.rememberChoice;
+  late final RemoteSessionLister _lister = RemoteSessionLister(widget.runner);
+
+  Future<RemoteListing<TmuxSessionInfo>>? _tmux;
+  Future<RemoteListing<HerdrWorkspaceInfo>>? _herdr;
+
+  /// Hardware-key logins ask for a key touch per connection; the listing
+  /// would be a second one, so it only runs on request.
+  bool get _autoLoad => widget.host.authMethod != SshAuthMethod.hardwareKey;
+
+  @override
+  void initState() {
+    super.initState();
+    if (_autoLoad) {
+      _load();
+    }
+  }
+
+  void _load() {
+    setState(() {
+      _tmux = _lister.listTmux();
+      _herdr = _lister.listHerdr();
+    });
+  }
+
+  void _pick(ConnectTarget target) {
+    widget.onPicked(ConnectPickerResult(target: target, remember: _remember));
+  }
+
+  Future<void> _newTmuxSession() async {
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => const _TmuxSessionNameDialog(),
+    );
+    if (name == null || !mounted) {
+      return;
+    }
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) {
+      return;
+    }
+    _pick(ConnectTarget.tmux(trimmed));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final bottomInset = shouldApplyBottomSafeArea(context)
+        ? MediaQuery.viewPaddingOf(context).bottom
+        : 0.0;
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 12, 4),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.host.name,
+                      style: theme.textTheme.titleMedium,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      'Choose what to attach to',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+              Tooltip(
+                message: 'Skip the picker next time and reuse this choice',
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('Remember', style: theme.textTheme.labelMedium),
+                    Switch(
+                      value: _remember,
+                      onChanged: (value) => setState(() => _remember = value),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: SegmentedButton<ConnectPickerTab>(
+                  showSelectedIcon: false,
+                  segments: const [
+                    ButtonSegment(
+                      value: ConnectPickerTab.tmux,
+                      icon: Icon(Icons.terminal_rounded, size: 18),
+                      label: Text('Tmux'),
+                    ),
+                    ButtonSegment(
+                      value: ConnectPickerTab.herdr,
+                      icon: Icon(Icons.pets_rounded, size: 18),
+                      label: Text('Herdr'),
+                    ),
+                    ButtonSegment(
+                      value: ConnectPickerTab.recent,
+                      icon: Icon(Icons.history_rounded, size: 18),
+                      label: Text('Recent'),
+                    ),
+                  ],
+                  selected: {_tab},
+                  onSelectionChanged: (selection) =>
+                      setState(() => _tab = selection.first),
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.tonalIcon(
+                onPressed: () => _pick(const ConnectTarget.shell()),
+                icon: const Icon(Icons.skip_next_rounded, size: 18),
+                label: const Text('Skip'),
+              ),
+            ],
+          ),
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: ListView(
+            controller: widget.scrollController,
+            padding: EdgeInsets.fromLTRB(12, 8, 12, 16 + bottomInset),
+            children: switch (_tab) {
+              ConnectPickerTab.tmux => _buildTmux(),
+              ConnectPickerTab.herdr => _buildHerdr(),
+              ConnectPickerTab.recent => _buildRecent(),
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  List<Widget> _buildTmux() {
+    final pending = _tmux;
+    return [
+      ListTile(
+        leading: const Icon(Icons.add_circle_outline_rounded),
+        title: const Text('New session'),
+        subtitle: const Text('Create a named tmux session'),
+        onTap: _newTmuxSession,
+      ),
+      if (pending == null)
+        _LoadOnRequest(onLoad: _load)
+      else
+        FutureBuilder<RemoteListing<TmuxSessionInfo>>(
+          future: pending,
+          builder: (context, snapshot) {
+            final listing = snapshot.data;
+            if (listing == null) {
+              return const _Loading();
+            }
+            return switch (listing) {
+              RemoteListingNotInstalled() => const _Message(
+                icon: Icons.extension_off_outlined,
+                message: 'tmux is not installed on this machine.',
+              ),
+              RemoteListingNotRunning(:final message) => _Message(
+                icon: Icons.power_settings_new_rounded,
+                message: message,
+              ),
+              RemoteListingFailed(:final message) => _Message(
+                icon: Icons.error_outline_rounded,
+                message: 'Could not list tmux sessions. $message',
+                onRetry: _load,
+              ),
+              RemoteListingAvailable(:final items) =>
+                items.isEmpty
+                    ? const _Message(
+                        icon: Icons.inbox_outlined,
+                        message: 'No tmux sessions are running.',
+                      )
+                    : Column(
+                        children: [
+                          for (final session in items)
+                            _TargetTile(
+                              title: session.name,
+                              subtitle: _tmuxSubtitle(session),
+                              active: widget.activeTargetKeys.contains(
+                                ConnectTarget.tmux(session.name).key,
+                              ),
+                              trailingLabel: session.isAttached
+                                  ? 'Attached'
+                                  : null,
+                              onTap: () =>
+                                  _pick(ConnectTarget.tmux(session.name)),
+                            ),
+                        ],
+                      ),
+            };
+          },
+        ),
+    ];
+  }
+
+  static String _tmuxSubtitle(TmuxSessionInfo session) {
+    final windows = session.windows == 1
+        ? '1 window'
+        : '${session.windows} windows';
+    final activity = session.lastActivity;
+    if (activity == null) {
+      return windows;
+    }
+    return '$windows · active ${_relative(activity)}';
+  }
+
+  List<Widget> _buildHerdr() {
+    final pending = _herdr;
+    if (pending == null) {
+      return [_LoadOnRequest(onLoad: _load)];
+    }
+    return [
+      FutureBuilder<RemoteListing<HerdrWorkspaceInfo>>(
+        future: pending,
+        builder: (context, snapshot) {
+          final listing = snapshot.data;
+          if (listing == null) {
+            return const _Loading();
+          }
+          return switch (listing) {
+            RemoteListingNotInstalled() => const _Message(
+              icon: Icons.extension_off_outlined,
+              message: 'Herdr is not installed on this machine.',
+            ),
+            RemoteListingNotRunning(:final message) => _Message(
+              icon: Icons.power_settings_new_rounded,
+              message: '$message Start it from a plain shell with "herdr".',
+              actionLabel: 'Start Herdr',
+              onAction: () => _pick(const ConnectTarget.herdr(workspaceId: '')),
+            ),
+            RemoteListingFailed(:final message) => _Message(
+              icon: Icons.error_outline_rounded,
+              message: 'Could not list Herdr workspaces. $message',
+              onRetry: _load,
+            ),
+            RemoteListingAvailable(:final items) =>
+              items.isEmpty
+                  ? const _Message(
+                      icon: Icons.inbox_outlined,
+                      message: 'Herdr has no workspaces yet.',
+                    )
+                  : Column(
+                      children: [
+                        for (final workspace in items) ...[
+                          _TargetTile(
+                            title: workspace.label,
+                            subtitle: _herdrSubtitle(workspace),
+                            active: widget.activeTargetKeys.contains(
+                              ConnectTarget.herdr(
+                                workspaceId: workspace.id,
+                              ).key,
+                            ),
+                            trailingLabel: _agentStatusLabel(
+                              workspace.agentStatus,
+                            ),
+                            onTap: () => _pick(
+                              ConnectTarget.herdr(
+                                workspaceId: workspace.id,
+                                label: workspace.label,
+                              ),
+                            ),
+                          ),
+                          if (workspace.tabs.length > 1)
+                            for (final tab in workspace.tabs)
+                              _TargetTile(
+                                title: tab.label.isEmpty
+                                    ? 'Tab ${tab.number ?? tab.id}'
+                                    : tab.label,
+                                subtitle: 'tab ${tab.id}',
+                                indented: true,
+                                active: widget.activeTargetKeys.contains(
+                                  ConnectTarget.herdr(
+                                    workspaceId: workspace.id,
+                                    tabId: tab.id,
+                                  ).key,
+                                ),
+                                trailingLabel: _agentStatusLabel(
+                                  tab.agentStatus,
+                                ),
+                                onTap: () => _pick(
+                                  ConnectTarget.herdr(
+                                    workspaceId: workspace.id,
+                                    label: tab.label.isEmpty
+                                        ? workspace.label
+                                        : '${workspace.label} / ${tab.label}',
+                                    tabId: tab.id,
+                                  ),
+                                ),
+                              ),
+                        ],
+                      ],
+                    ),
+          };
+        },
+      ),
+    ];
+  }
+
+  static String _herdrSubtitle(HerdrWorkspaceInfo workspace) {
+    final tabs = workspace.tabCount == 1
+        ? '1 tab'
+        : '${workspace.tabCount} tabs';
+    return workspace.focused ? 'default · $tabs · focused' : 'default · $tabs';
+  }
+
+  static String? _agentStatusLabel(String status) => switch (status) {
+    'working' => 'Working',
+    'blocked' => 'Needs input',
+    'done' => 'Done',
+    _ => null,
+  };
+
+  List<Widget> _buildRecent() {
+    final recents = widget.preferences.recents;
+    if (recents.isEmpty) {
+      return const [
+        _Message(
+          icon: Icons.history_rounded,
+          message:
+              'Nothing picked for this machine yet. Choices from the Tmux '
+              'and Herdr tabs show up here.',
+        ),
+      ];
+    }
+    return [
+      for (final target in recents)
+        _TargetTile(
+          title: target.title,
+          subtitle: switch (target.kind) {
+            ConnectTargetKind.tmux => 'tmux session',
+            ConnectTargetKind.herdr =>
+              target.tabId.isEmpty
+                  ? 'Herdr workspace ${target.name}'
+                  : 'Herdr tab ${target.tabId}',
+            ConnectTargetKind.shell => 'Plain shell',
+          },
+          active: widget.activeTargetKeys.contains(target.key),
+          onTap: () => _pick(target),
+        ),
+    ];
+  }
+
+  static String _relative(DateTime time) {
+    final diff = DateTime.now().toUtc().difference(time.toUtc());
+    if (diff.inMinutes < 1) return 'just now';
+    if (diff.inHours < 1) return '${diff.inMinutes}m ago';
+    if (diff.inDays < 1) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
+  }
+}
+
+class _TargetTile extends StatelessWidget {
+  const _TargetTile({
+    required this.title,
+    required this.onTap,
+    this.subtitle,
+    this.active = false,
+    this.indented = false,
+    this.trailingLabel,
+  });
+
+  final String title;
+  final String? subtitle;
+  final bool active;
+  final bool indented;
+  final String? trailingLabel;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ListTile(
+      contentPadding: EdgeInsets.only(left: indented ? 40 : 16, right: 16),
+      title: Row(
+        children: [
+          Flexible(
+            child: Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          if (active) ...[
+            const SizedBox(width: 8),
+            const _Badge(label: 'Active', tone: _BadgeTone.success),
+          ],
+        ],
+      ),
+      subtitle: subtitle == null ? null : Text(subtitle!),
+      trailing: trailingLabel == null
+          ? null
+          : _Badge(
+              label: trailingLabel!,
+              tone: trailingLabel == 'Needs input'
+                  ? _BadgeTone.danger
+                  : _BadgeTone.neutral,
+            ),
+      onTap: onTap,
+    );
+  }
+}
+
+enum _BadgeTone { success, danger, neutral }
+
+class _Badge extends StatelessWidget {
+  const _Badge({required this.label, required this.tone});
+
+  final String label;
+  final _BadgeTone tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final (background, foreground) = switch (tone) {
+      _BadgeTone.success => (
+        const Color(0xFF22C55E).withValues(alpha: 0.18),
+        const Color(0xFF16A34A),
+      ),
+      _BadgeTone.danger => (
+        colorScheme.error.withValues(alpha: 0.16),
+        colorScheme.error,
+      ),
+      _BadgeTone.neutral => (
+        colorScheme.surfaceContainerHigh,
+        colorScheme.onSurfaceVariant,
+      ),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: foreground,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
+class _Loading extends StatelessWidget {
+  const _Loading();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.symmetric(vertical: 28),
+      child: Center(child: CircularProgressIndicator()),
+    );
+  }
+}
+
+class _LoadOnRequest extends StatelessWidget {
+  const _LoadOnRequest({required this.onLoad});
+
+  final VoidCallback onLoad;
+
+  @override
+  Widget build(BuildContext context) {
+    return _Message(
+      icon: Icons.usb_rounded,
+      message:
+          'Listing sessions opens a second connection, which asks for a '
+          'hardware key touch.',
+      actionLabel: 'Load sessions',
+      onAction: onLoad,
+    );
+  }
+}
+
+class _Message extends StatelessWidget {
+  const _Message({
+    required this.icon,
+    required this.message,
+    this.onRetry,
+    this.actionLabel,
+    this.onAction,
+  });
+
+  final IconData icon;
+  final String message;
+  final VoidCallback? onRetry;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
+      child: Column(
+        children: [
+          Icon(icon, size: 28, color: theme.colorScheme.onSurfaceVariant),
+          const SizedBox(height: 10),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          if (onRetry != null) ...[
+            const SizedBox(height: 8),
+            TextButton(onPressed: onRetry, child: const Text('Retry')),
+          ],
+          if (onAction != null && actionLabel != null) ...[
+            const SizedBox(height: 8),
+            FilledButton.tonal(onPressed: onAction, child: Text(actionLabel!)),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _TmuxSessionNameDialog extends StatefulWidget {
+  const _TmuxSessionNameDialog();
+
+  @override
+  State<_TmuxSessionNameDialog> createState() => _TmuxSessionNameDialogState();
+}
+
+class _TmuxSessionNameDialogState extends State<_TmuxSessionNameDialog> {
+  final _controller = TextEditingController(text: defaultTmuxSessionName);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() => Navigator.of(context).pop(_controller.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('New tmux session'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        textInputAction: TextInputAction.done,
+        onSubmitted: (_) => _submit(),
+        decoration: const InputDecoration(
+          labelText: 'Session name',
+          helperText: 'Attaches to it if it already exists.',
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(onPressed: _submit, child: const Text('Connect')),
+      ],
+    );
+  }
+}

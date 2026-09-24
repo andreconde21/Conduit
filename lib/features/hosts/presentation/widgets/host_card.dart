@@ -1,7 +1,7 @@
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:flutter/material.dart';
 
-enum HostAction { files, edit, duplicate, copyAddress, delete }
+enum HostAction { connectTo, files, edit, duplicate, copyAddress, delete }
 
 class HostCard extends StatelessWidget {
   const HostCard({
@@ -148,6 +148,15 @@ class HostCard extends StatelessWidget {
                         color: colorScheme.onSurfaceVariant,
                       ),
                       itemBuilder: (context) => const [
+                        PopupMenuItem(
+                          value: HostAction.connectTo,
+                          child: ListTile(
+                            leading: Icon(Icons.login_rounded),
+                            title: Text('Connect to…'),
+                            contentPadding: EdgeInsets.zero,
+                            minLeadingWidth: 24,
+                          ),
+                        ),
                         PopupMenuItem(
                           value: HostAction.files,
                           child: ListTile(

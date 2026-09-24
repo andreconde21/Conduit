@@ -18,6 +18,8 @@ import 'package:conduit/features/hosts/presentation/hosts_page.dart';
 import 'package:conduit/features/local_shell/data/local_terminal_repository.dart';
 import 'package:conduit/features/local_shell/local_shell_licenses.dart';
 import 'package:conduit/features/local_shell/presentation/local_shell_controller.dart';
+import 'package:conduit/features/sessions/data/secure_connect_preferences_repository.dart';
+import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
 import 'package:conduit/features/sftp/data/dart_ssh_sftp_repository.dart';
 import 'package:conduit/features/sftp/data/file_picker_file_export.dart';
 import 'package:conduit/features/sftp/data/secure_sftp_bookmarks_repository.dart';
@@ -77,6 +79,12 @@ void main() {
     provider: const HerdrAttentionProvider(),
     notifier: const PlatformAgentAttentionNotifier(),
   );
+  final connectFlow = SessionConnectFlow(
+    hostsController: hostsController,
+    workspace: workspaceController,
+    runnerFactory: (host) => SshAgentCommandRunner(hostKeyVerifier, host),
+    preferences: const SecureConnectPreferencesRepository(secureStorage),
+  );
   final backupService = AppBackupService(
     hostsController: hostsController,
     themeController: themeController,
@@ -101,6 +109,7 @@ void main() {
       agentAttention: agentAttention,
       backupService: backupService,
       fileExport: fileExport,
+      connectFlow: connectFlow,
     ),
   );
 }
@@ -120,6 +129,7 @@ class ConduitApp extends StatefulWidget {
     required this.agentAttention,
     required this.backupService,
     required this.fileExport,
+    this.connectFlow,
     super.key,
   });
 
@@ -136,6 +146,7 @@ class ConduitApp extends StatefulWidget {
   final AgentAttentionController agentAttention;
   final AppBackupService backupService;
   final FileExport fileExport;
+  final SessionConnectFlow? connectFlow;
 
   @override
   State<ConduitApp> createState() => _ConduitAppState();
@@ -294,6 +305,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
                 agentAttention: widget.agentAttention,
                 backupService: widget.backupService,
                 fileExport: widget.fileExport,
+                connectFlow: widget.connectFlow,
               );
             },
           ),
