@@ -402,5 +402,85 @@ void main() {
       // Flush the terminal's debounced resize timer so no timers leak.
       await tester.pump(const Duration(milliseconds: 300));
     });
+
+    testWidgets('sending while disconnected keeps the draft and shows the '
+        'error inside the sheet', (tester) async {
+      await pumpWithComposeKey(tester);
+      final session = workspace.sessions.first;
+      await enterComposeMode(tester);
+      await openComposerSheet(tester);
+      await tester.enterText(
+        find.descendant(
+          of: find.byType(PromptComposerSheet),
+          matching: find.byType(TextField),
+        ),
+        'still here',
+      );
+      await tester.pump();
+      await tester.runAsync(session.disconnect);
+      await tester.pump();
+
+      await tester.tap(find.text('Insert'));
+      await settle(tester);
+
+      expect(find.byType(PromptComposerSheet), findsOneWidget);
+      expect(find.textContaining('Not connected'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(PromptComposerSheet),
+          matching: find.text('still here'),
+        ),
+        findsOneWidget,
+      );
+      expect(sessionA.sent, isEmpty);
+    });
+
+    testWidgets('warns about line-by-line delivery only for multiline text '
+        'without bracketed paste', (tester) async {
+      await pumpWithComposeKey(tester);
+      final session = workspace.sessions.first;
+      await enterComposeMode(tester);
+      await openComposerSheet(tester);
+      final field = find.descendant(
+        of: find.byType(PromptComposerSheet),
+        matching: find.byType(TextField),
+      );
+
+      await tester.enterText(field, 'single line');
+      await tester.pump();
+      expect(find.textContaining('bracketed paste'), findsNothing);
+
+      await tester.enterText(field, 'two\nlines');
+      await tester.pump();
+      expect(find.textContaining('bracketed paste'), findsOneWidget);
+
+      session.terminal.write('\x1b[?2004h');
+      await tester.enterText(field, 'two\nlines!');
+      await tester.pump();
+      expect(find.textContaining('bracketed paste'), findsNothing);
+    });
+
+    testWidgets('sheet keeps its buttons above the system navigation bar', (
+      tester,
+    ) async {
+      await pumpWithComposeKey(tester);
+      await enterComposeMode(tester);
+      await openComposerSheet(tester);
+      final withoutInset = tester.getBottomRight(find.text('Cancel')).dy;
+
+      // Simulate a three-button Android navigation bar with the keyboard
+      // hidden: the platform reports it as bottom view padding.
+      tester.view.viewPadding = const FakeViewPadding(bottom: 96);
+      addTearDown(tester.view.resetViewPadding);
+      tester.view.padding = const FakeViewPadding(bottom: 96);
+      addTearDown(tester.view.resetPadding);
+      await tester.pump();
+
+      final withInset = tester.getBottomRight(find.text('Cancel')).dy;
+      expect(withInset, lessThanOrEqualTo(withoutInset - 32));
+
+      // Flush the terminal's debounced resize timer so no timers leak.
+      await tester.pump(const Duration(milliseconds: 300));
+    });
   });
 }

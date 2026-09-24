@@ -17,6 +17,11 @@ typedef PromptComposerSend =
 /// The composer edits a per-session draft: [onDraftChanged] fires on every
 /// edit so the caller always holds the latest text, no matter how the sheet
 /// closes. Sending clears the draft; Cancel and dismissal keep it.
+///
+/// [bracketedPasteSupported] is polled at build time so the sheet can warn
+/// when a multiline prompt would be delivered line by line (each newline
+/// acting as Enter) because the remote application has not switched
+/// bracketed paste on.
 Future<void> showPromptComposerSheet({
   required BuildContext context,
   required String initialText,
@@ -25,6 +30,7 @@ Future<void> showPromptComposerSheet({
   required bool submitEnter,
   required ValueChanged<bool> onSubmitEnterChanged,
   required bool Function() isConnected,
+  bool Function()? bracketedPasteSupported,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -37,6 +43,7 @@ Future<void> showPromptComposerSheet({
       submitEnter: submitEnter,
       onSubmitEnterChanged: onSubmitEnterChanged,
       isConnected: isConnected,
+      bracketedPasteSupported: bracketedPasteSupported,
     ),
   );
 }
@@ -49,6 +56,7 @@ class PromptComposerSheet extends StatefulWidget {
     required this.submitEnter,
     required this.onSubmitEnterChanged,
     required this.isConnected,
+    this.bracketedPasteSupported,
     super.key,
   });
 
@@ -58,6 +66,7 @@ class PromptComposerSheet extends StatefulWidget {
   final bool submitEnter;
   final ValueChanged<bool> onSubmitEnterChanged;
   final bool Function() isConnected;
+  final bool Function()? bracketedPasteSupported;
 
   @override
   State<PromptComposerSheet> createState() => _PromptComposerSheetState();
@@ -68,6 +77,7 @@ class _PromptComposerSheetState extends State<PromptComposerSheet> {
   final _focusNode = FocusNode();
   late bool _submitEnter;
   bool _sending = false;
+  String? _error;
 
   @override
   void initState() {
@@ -90,11 +100,14 @@ class _PromptComposerSheetState extends State<PromptComposerSheet> {
 
   void _handleTextChanged() {
     widget.onDraftChanged(_controller.text);
-    // Rebuild for the character count and the oversize/empty send guard.
-    setState(() {});
+    // Rebuild for the character count, the oversize/empty send guard, and to
+    // clear a stale send error once the user edits again.
+    setState(() => _error = null);
   }
 
   bool get _oversized => _controller.text.length > promptComposerMaxChars;
+
+  bool get _multiline => _controller.text.contains('\n');
 
   Future<void> _send() async {
     final text = _controller.text;
@@ -105,7 +118,10 @@ class _PromptComposerSheetState extends State<PromptComposerSheet> {
       _showError('Not connected. The prompt was kept as a draft.');
       return;
     }
-    setState(() => _sending = true);
+    setState(() {
+      _sending = true;
+      _error = null;
+    });
     try {
       await widget.onSend(text, submit: _submitEnter);
     } catch (error) {
@@ -121,14 +137,17 @@ class _PromptComposerSheetState extends State<PromptComposerSheet> {
     }
   }
 
+  // Errors are shown inside the sheet: a SnackBar would be drawn on the
+  // Scaffold underneath and hidden behind the modal.
   void _showError(String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    setState(() => _error = message);
   }
 
   Future<void> _pasteFromClipboard() async {
     final data = await Clipboard.getData(Clipboard.kTextPlain);
+    if (!mounted) {
+      return;
+    }
     final text = data?.text;
     if (text == null || text.isEmpty) {
       return;
@@ -164,116 +183,146 @@ class _PromptComposerSheetState extends State<PromptComposerSheet> {
     final colorScheme = theme.colorScheme;
     final length = _controller.text.length;
     final canSend = !_sending && length > 0 && !_oversized;
+    final bracketedPaste = widget.bracketedPasteSupported?.call() ?? true;
+    final String? notice;
+    if (_oversized) {
+      notice =
+          'Too large to send safely. Trim or split the prompt; '
+          'it stays saved as a draft.';
+    } else if (_error != null) {
+      notice = _error;
+    } else if (_multiline && !bracketedPaste) {
+      notice =
+          'The remote app has not enabled bracketed paste, so each line '
+          'will be sent as if you pressed Enter after it.';
+    } else {
+      notice = null;
+    }
+    final noticeColor = _oversized || _error != null
+        ? colorScheme.error
+        : colorScheme.onSurfaceVariant;
+    // The keyboard inset comes first so the sheet rises above the IME; the
+    // SafeArea then keeps the button row clear of the Android navigation bar
+    // whenever the keyboard is hidden (MediaQuery.padding is already zero
+    // while the keyboard covers the bar). The column scrolls so a short
+    // landscape viewport cannot overflow.
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Text('Compose prompt', style: theme.textTheme.titleMedium),
-                const Spacer(),
-                IconButton(
-                  tooltip: 'Paste clipboard',
-                  icon: const Icon(Icons.content_paste_rounded),
-                  onPressed: _sending ? null : _pasteFromClipboard,
-                ),
-                IconButton(
-                  tooltip: 'Select all',
-                  icon: const Icon(Icons.select_all_rounded),
-                  onPressed: _sending || length == 0 ? null : _selectAll,
-                ),
-                IconButton(
-                  tooltip: 'Clear draft',
-                  icon: const Icon(Icons.backspace_outlined),
-                  onPressed: _sending || length == 0 ? null : _clear,
-                ),
-              ],
-            ),
-            TextField(
-              controller: _controller,
-              focusNode: _focusNode,
-              enabled: !_sending,
-              minLines: 5,
-              maxLines: 10,
-              keyboardType: TextInputType.multiline,
-              textInputAction: TextInputAction.newline,
-              decoration: const InputDecoration(
-                hintText: 'Type, dictate, or paste a prompt…',
-                border: OutlineInputBorder(),
+      child: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Text('Compose prompt', style: theme.textTheme.titleMedium),
+                  const Spacer(),
+                  IconButton(
+                    tooltip: 'Paste clipboard',
+                    icon: const Icon(Icons.content_paste_rounded),
+                    onPressed: _sending ? null : _pasteFromClipboard,
+                  ),
+                  IconButton(
+                    tooltip: 'Select all',
+                    icon: const Icon(Icons.select_all_rounded),
+                    onPressed: _sending || length == 0 ? null : _selectAll,
+                  ),
+                  IconButton(
+                    tooltip: 'Clear draft',
+                    icon: const Icon(Icons.backspace_outlined),
+                    onPressed: _sending || length == 0 ? null : _clear,
+                  ),
+                ],
               ),
-            ),
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                if (_oversized)
-                  Expanded(
-                    child: Semantics(
-                      liveRegion: true,
-                      child: Text(
-                        'Too large to send safely. Trim or split the prompt; '
-                        'it stays saved as a draft.',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: colorScheme.error,
+              TextField(
+                controller: _controller,
+                focusNode: _focusNode,
+                // readOnly (not enabled: false) keeps focus and the keyboard
+                // through a send, so a failed send leaves the user editing.
+                readOnly: _sending,
+                minLines: 4,
+                maxLines: 8,
+                keyboardType: TextInputType.multiline,
+                textInputAction: TextInputAction.newline,
+                decoration: const InputDecoration(
+                  hintText: 'Type, dictate, or paste a prompt…',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (notice != null)
+                    Expanded(
+                      child: Semantics(
+                        liveRegion: true,
+                        child: Text(
+                          notice,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: noticeColor,
+                          ),
                         ),
                       ),
-                    ),
-                  )
-                else
-                  const Spacer(),
-                Text(
-                  '$length / $promptComposerMaxChars',
+                    )
+                  else
+                    const Spacer(),
+                  const SizedBox(width: 8),
+                  Text(
+                    '$length / $promptComposerMaxChars',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ],
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                title: const Text('Press Enter after inserting'),
+                subtitle: Text(
+                  _submitEnter
+                      ? 'The prompt is submitted immediately.'
+                      : 'The prompt is left in the terminal for review.',
                   style: theme.textTheme.bodySmall,
                 ),
-              ],
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Press Enter after inserting'),
-              subtitle: Text(
-                _submitEnter
-                    ? 'The prompt is submitted immediately.'
-                    : 'The prompt is left in the terminal for review.',
-                style: theme.textTheme.bodySmall,
+                value: _submitEnter,
+                onChanged: _sending
+                    ? null
+                    : (value) {
+                        setState(() => _submitEnter = value);
+                        widget.onSubmitEnterChanged(value);
+                      },
               ),
-              value: _submitEnter,
-              onChanged: _sending
-                  ? null
-                  : (value) {
-                      setState(() => _submitEnter = value);
-                      widget.onSubmitEnterChanged(value);
-                    },
-            ),
-            Row(
-              children: [
-                TextButton(
-                  onPressed: _sending
-                      ? null
-                      : () => Navigator.of(context).pop(),
-                  child: const Text('Cancel'),
-                ),
-                const Spacer(),
-                FilledButton.icon(
-                  onPressed: canSend ? _send : null,
-                  icon: _sending
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : Icon(
-                          _submitEnter
-                              ? Icons.send_rounded
-                              : Icons.keyboard_return_rounded,
-                        ),
-                  label: Text(_submitEnter ? 'Insert & Send' : 'Insert'),
-                ),
-              ],
-            ),
-          ],
+              Row(
+                children: [
+                  TextButton(
+                    onPressed: _sending
+                        ? null
+                        : () => Navigator.of(context).pop(),
+                    child: const Text('Cancel'),
+                  ),
+                  const Spacer(),
+                  FilledButton.icon(
+                    onPressed: canSend ? _send : null,
+                    icon: _sending
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Icon(
+                            _submitEnter
+                                ? Icons.send_rounded
+                                : Icons.keyboard_return_rounded,
+                          ),
+                    label: Text(_submitEnter ? 'Insert & Send' : 'Insert'),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );

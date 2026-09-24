@@ -126,6 +126,7 @@ class _TerminalPageState extends State<TerminalPage> {
       onSubmitEnterChanged: (enabled) =>
           unawaited(widget.themeController.setComposeSubmitEnter(enabled)),
       isConnected: () => session.isConnected,
+      bracketedPasteSupported: () => session.bracketedPasteSupported,
     );
     if (!mounted) {
       return;
