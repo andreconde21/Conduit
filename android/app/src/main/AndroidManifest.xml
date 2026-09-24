@@ -92,6 +92,11 @@
                 android:value="false" />
         </service>
         <!-- End agent status widget/tile -->
+
+        <!-- Allow / Deny / Always buttons on permission notifications (feat/host-approvals) -->
+        <receiver
+            android:name=".AgentPermissionActionReceiver"
+            android:exported="false" />
     </application>
     <queries>
         <intent>
