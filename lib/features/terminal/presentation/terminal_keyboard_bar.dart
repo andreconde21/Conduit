@@ -45,7 +45,9 @@ class TerminalKeyboardBar extends StatelessWidget {
   final VoidCallback? onToggleCompose;
   final VoidCallback onEnterTmuxScrollMode;
   final VoidCallback onExitTmuxScrollMode;
-  final TmuxPrefixKey tmuxPrefixKey;
+  /// The host's multiplexer prefix, sent by the Tmux key and before every
+  /// Tmux+ and Herdr binding.
+  final MultiplexerPrefixKey tmuxPrefixKey;
   final bool tmuxScrollMode;
 
   /// The app-wide "Send mouse taps" preference, mirrored from Appearance.
@@ -420,8 +422,7 @@ class TerminalKeyboardBar extends StatelessWidget {
   }
 
   void _triggerHerdrAction(_HerdrAction action) {
-    // Herdr's default prefix is ctrl+b regardless of the host's tmux prefix.
-    controller.sendControl(TerminalKey.keyB);
+    controller.sendPrefix(tmuxPrefixKey);
     controller.sendText(action.text);
     if (action.entersScrollMode) {
       onEnterTmuxScrollMode();
@@ -474,10 +475,7 @@ class TerminalKeyboardBar extends StatelessWidget {
   }
 
   void _sendTmuxPrefix() {
-    controller.sendControl(switch (tmuxPrefixKey) {
-      TmuxPrefixKey.controlB => TerminalKey.keyB,
-      TmuxPrefixKey.controlA => TerminalKey.keyA,
-    });
+    controller.sendPrefix(tmuxPrefixKey);
     _focusTerminal();
   }
 
@@ -619,7 +617,7 @@ enum _TmuxAction {
   final bool entersScrollMode;
 }
 
-/// Herdr's documented default bindings (prefix ctrl+b), from
+/// Herdr's documented default bindings (after the prefix), from
 /// https://herdr.dev/docs/keyboard/ — uppercase text means shift+key.
 enum _HerdrAction {
   newTab('New tab', Icons.add_box_rounded, 'c'),

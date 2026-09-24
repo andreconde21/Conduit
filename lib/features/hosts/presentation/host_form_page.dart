@@ -64,7 +64,7 @@ class _HostFormPageState extends State<HostFormPage> {
   bool _externalAuthOfferKey = true;
   bool _forwardAgent = false;
   bool _startTmuxOnConnect = false;
-  TmuxPrefixKey _tmuxPrefixKey = defaultTmuxPrefixKey;
+  MultiplexerPrefixKey _tmuxPrefixKey = defaultTmuxPrefixKey;
   List<String> _tags = const [];
   List<HardwareKeyEntry> _hardwareKeys = const [];
   List<TerminalSnippet> _snippets = const [];

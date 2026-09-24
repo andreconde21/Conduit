@@ -300,6 +300,20 @@ class TerminalSessionController extends ChangeNotifier {
     keyboard.clearModifiers();
   }
 
+  /// Sends a multiplexer prefix (the host's tmux/Herdr prefix, usually).
+  ///
+  /// A plain Ctrl+letter or Ctrl+Space goes through [sendControl] so the
+  /// terminal encodes it like any other control key; every other
+  /// combination is written as its raw byte sequence.
+  void sendPrefix(MultiplexerPrefixKey prefix) {
+    final controlKey = prefix.controlKey;
+    if (controlKey != null) {
+      sendControl(controlKey);
+      return;
+    }
+    sendText(prefix.sequence);
+  }
+
   void paste(String text) {
     terminal.paste(text);
     keyboard.clearModifiers();
@@ -445,13 +459,7 @@ class TerminalSessionController extends ChangeNotifier {
     }
   }
 
-  List<int> _tmuxDetachBytes() {
-    final prefix = switch (host.tmuxPrefixKey) {
-      TmuxPrefixKey.controlA => 0x01,
-      TmuxPrefixKey.controlB => 0x02,
-    };
-    return [prefix, 0x64];
-  }
+  List<int> _tmuxDetachBytes() => [...host.tmuxPrefixKey.bytes, 0x64];
 
   @visibleForTesting
   String? buildTmuxCommandForTesting() => _buildTmuxCommand();

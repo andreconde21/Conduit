@@ -53,8 +53,9 @@ class TerminalGesturesSettings extends StatelessWidget {
                     children: [
                       Text('Swipe target', style: theme.textTheme.bodyLarge),
                       Text(
-                        'tmux uses the host prefix; Herdr always uses Ctrl-B. '
-                        'Scrollback swipes use the same prefix.',
+                        'Both use the host\'s multiplexer prefix (Ctrl+B '
+                        'unless changed on the machine). Scrollback swipes '
+                        'use the same prefix.',
                         style: captionStyle,
                       ),
                     ],

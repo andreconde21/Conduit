@@ -1,10 +1,13 @@
+import 'package:conduit/features/hosts/domain/multiplexer_prefix_key.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
+
+export 'package:conduit/features/hosts/domain/multiplexer_prefix_key.dart';
 
 enum SshAuthMethod { password, privateKey, hardwareKey, external }
 
-enum TmuxPrefixKey { controlB, controlA }
-
-const defaultTmuxPrefixKey = TmuxPrefixKey.controlB;
+/// The prefix a host's multiplexer (tmux or Herdr) is driven with unless the
+/// host says otherwise.
+const defaultTmuxPrefixKey = MultiplexerPrefixKey.defaultKey;
 const defaultTmuxSessionName = 'conduit';
 
 bool _parseStartTmuxOnConnect(Map<String, Object?> json) {
@@ -115,13 +118,6 @@ String _parseMoshPorts(Map<String, Object?> json) {
   return MoshPortRange.tryParse(raw) == null ? '' : raw;
 }
 
-extension TmuxPrefixKeyDetails on TmuxPrefixKey {
-  String get label => switch (this) {
-    TmuxPrefixKey.controlB => 'Ctrl-B',
-    TmuxPrefixKey.controlA => 'Ctrl-A',
-  };
-}
-
 class SavedHost {
   const SavedHost({
     required this.id,
@@ -187,7 +183,8 @@ class SavedHost {
   final String moshPorts;
   final bool predictiveEchoEnabled;
   final bool startTmuxOnConnect;
-  final TmuxPrefixKey tmuxPrefixKey;
+  /// Prefix sent before tmux and Herdr bindings on this host.
+  final MultiplexerPrefixKey tmuxPrefixKey;
   final String tmuxSessionName;
   final String tmuxStartDirectory;
   final List<TerminalSnippet> snippets;
@@ -274,7 +271,7 @@ class SavedHost {
     String? moshPorts,
     bool? predictiveEchoEnabled,
     bool? startTmuxOnConnect,
-    TmuxPrefixKey? tmuxPrefixKey,
+    MultiplexerPrefixKey? tmuxPrefixKey,
     String? tmuxSessionName,
     String? tmuxStartDirectory,
     List<TerminalSnippet>? snippets,
@@ -354,7 +351,7 @@ class SavedHost {
       'moshPorts': moshPorts,
       'predictiveEchoEnabled': predictiveEchoEnabled,
       'startTmuxOnConnect': startTmuxOnConnect,
-      'tmuxPrefixKey': tmuxPrefixKey.name,
+      'tmuxPrefixKey': tmuxPrefixKey.encode(),
       'tmuxSessionName': tmuxSessionName,
       'tmuxStartDirectory': tmuxStartDirectory,
       'snippets': [for (final snippet in snippets) snippet.toJson()],
@@ -403,9 +400,8 @@ class SavedHost {
       moshPorts: _parseMoshPorts(json),
       predictiveEchoEnabled: json['predictiveEchoEnabled'] as bool? ?? false,
       startTmuxOnConnect: _parseStartTmuxOnConnect(json),
-      tmuxPrefixKey: TmuxPrefixKey.values.firstWhere(
-        (key) => key.name == json['tmuxPrefixKey'],
-        orElse: () => defaultTmuxPrefixKey,
+      tmuxPrefixKey: MultiplexerPrefixKey.decode(
+        json['tmuxPrefixKey'] as String?,
       ),
       tmuxSessionName:
           (json['tmuxSessionName'] as String?)?.trim().isNotEmpty == true

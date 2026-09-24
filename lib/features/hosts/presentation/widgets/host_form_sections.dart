@@ -4,6 +4,7 @@ import 'package:conduit/features/hosts/presentation/widgets/auth_method_picker.d
 import 'package:conduit/features/hosts/presentation/widgets/hardware_key_list.dart';
 import 'package:conduit/features/hosts/presentation/widgets/host_form_chrome.dart';
 import 'package:conduit/features/hosts/presentation/widgets/key_source_actions.dart';
+import 'package:conduit/features/hosts/presentation/widgets/multiplexer_prefix_picker.dart';
 import 'package:conduit/features/hosts/presentation/widgets/ssh_key_summary.dart';
 import 'package:conduit/features/hosts/presentation/widgets/tag_editor.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
@@ -337,7 +338,7 @@ class HostAdvancedSection extends StatelessWidget {
   final bool useMosh;
   final bool predictiveEchoEnabled;
   final bool startTmuxOnConnect;
-  final TmuxPrefixKey tmuxPrefixKey;
+  final MultiplexerPrefixKey tmuxPrefixKey;
   final bool agentAttentionEnabled;
   final bool agentNotifyInput;
   final bool agentNotifyFinished;
@@ -350,7 +351,7 @@ class HostAdvancedSection extends StatelessWidget {
   final ValueChanged<bool> onUseMoshChanged;
   final ValueChanged<bool> onPredictiveEchoChanged;
   final ValueChanged<bool> onStartTmuxOnConnectChanged;
-  final ValueChanged<TmuxPrefixKey> onTmuxPrefixKeyChanged;
+  final ValueChanged<MultiplexerPrefixKey> onTmuxPrefixKeyChanged;
   final ValueChanged<bool> onAgentAttentionEnabledChanged;
   final ValueChanged<bool> onAgentNotifyInputChanged;
   final ValueChanged<bool> onAgentNotifyFinishedChanged;
@@ -490,23 +491,9 @@ class HostAdvancedSection extends StatelessWidget {
           ),
         ],
         const SizedBox(height: 12),
-        DropdownButtonFormField<TmuxPrefixKey>(
-          initialValue: tmuxPrefixKey,
-          decoration: const InputDecoration(
-            labelText: 'Tmux prefix',
-            helperText: 'Used by the Tmux and Tmux+ key-row buttons.',
-            helperMaxLines: 2,
-            prefixIcon: Icon(Icons.keyboard_command_key_rounded),
-          ),
-          items: [
-            for (final key in TmuxPrefixKey.values)
-              DropdownMenuItem(value: key, child: Text(key.label)),
-          ],
-          onChanged: (value) {
-            if (value != null) {
-              onTmuxPrefixKeyChanged(value);
-            }
-          },
+        MultiplexerPrefixField(
+          value: tmuxPrefixKey,
+          onChanged: onTmuxPrefixKeyChanged,
         ),
         const SizedBox(height: 16),
         Material(
