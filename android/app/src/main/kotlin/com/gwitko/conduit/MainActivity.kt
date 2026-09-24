@@ -17,14 +17,37 @@ import android.os.IBinder
 import android.provider.Settings
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterFragmentActivity() {
     private lateinit var fidoUsbCtapTransport: FidoUsbCtapTransport
+    private var speechRecognition: SpeechRecognitionBridge? = null
+    private var shareTarget: ShareTargetBridge? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         fidoUsbCtapTransport = FidoUsbCtapTransport(this)
+        val speech = SpeechRecognitionBridge(this)
+        speechRecognition = speech
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            SpeechRecognitionBridge.METHOD_CHANNEL,
+        ).setMethodCallHandler { call, result -> speech.handle(call, result) }
+        EventChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            SpeechRecognitionBridge.EVENT_CHANNEL,
+        ).setStreamHandler(speech)
+        val share = ShareTargetBridge(this)
+        shareTarget = share
+        val shareChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            ShareTargetBridge.CHANNEL,
+        )
+        shareChannel.setMethodCallHandler { call, result -> share.handle(call, result) }
+        share.attach(shareChannel)
+        // A cold start from the share sheet: the launching intent is the share.
+        share.consume(intent)
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             BACKGROUND_KEEPALIVE_CHANNEL,
@@ -89,6 +112,31 @@ class MainActivity : FlutterFragmentActivity() {
                 else -> result.notImplemented()
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        shareTarget?.consume(intent)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        if (speechRecognition?.onRequestPermissionsResult(requestCode, grantResults) == true) {
+            return
+        }
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+    }
+
+    override fun onDestroy() {
+        speechRecognition?.dispose()
+        speechRecognition = null
+        shareTarget?.dispose()
+        shareTarget = null
+        super.onDestroy()
     }
 
     private fun hasSharedStorageAccess(): Boolean {

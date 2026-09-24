@@ -13,6 +13,9 @@ import 'package:conduit/features/sessions/presentation/session_grid_page.dart';
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/discard_changes_dialog.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/sftp_file_viewer.dart';
+import 'package:conduit/features/share_target/domain/share_inbox.dart';
+import 'package:conduit/features/share_target/presentation/share_target_controller.dart';
+import 'package:conduit/features/share_target/presentation/share_target_scope.dart';
 import 'package:conduit/features/terminal/domain/security_key_interaction.dart';
 import 'package:conduit/features/terminal/presentation/gestures/terminal_gesture_layer.dart';
 import 'package:conduit/features/terminal/presentation/security_key_picker_dialog.dart';
@@ -27,7 +30,12 @@ import 'package:conduit/features/terminal/presentation/widgets/prompt_composer_s
 import 'package:conduit/features/terminal/presentation/widgets/session_tabs.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_header.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_surface.dart';
+import 'package:conduit/features/voice/data/platform_speech_recognizer.dart';
+import 'package:conduit/features/voice/domain/speech_recognizer.dart';
+import 'package:conduit/features/voice/presentation/dictation_button.dart';
+import 'package:conduit/features/voice/presentation/dictation_controller.dart';
 import 'package:conduit_vt/conduit_vt.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -39,6 +47,7 @@ class TerminalPage extends StatefulWidget {
     required this.sftpRepository,
     this.agentAttention,
     this.connectFlow,
+    this.speechRecognizer,
     super.key,
   });
 
@@ -51,6 +60,10 @@ class TerminalPage extends StatefulWidget {
 
   /// Optional connect flow for the session grid's "+" tile.
   final SessionConnectFlow? connectFlow;
+
+  /// Voice input for Chat mode. Null means the platform default (Android's
+  /// on-device recognizer; no mic elsewhere).
+  final SpeechRecognizer? speechRecognizer;
 
   @override
   State<TerminalPage> createState() => _TerminalPageState();
@@ -75,11 +88,25 @@ class _TerminalPageState extends State<TerminalPage> {
   // Bumped whenever a draft is edited outside the inline bar (the composer
   // sheet), forcing the bar to rebuild with the updated text.
   int _composeRevision = 0;
+  DictationController? _dictation;
+  ShareTargetController? _shareTarget;
 
   @override
   void initState() {
     super.initState();
     _fileTabs = TerminalFileTabsController(widget.sftpRepository);
+    final recognizer =
+        widget.speechRecognizer ??
+        (defaultTargetPlatform == TargetPlatform.android
+            ? PlatformSpeechRecognizer()
+            : null);
+    if (recognizer != null) {
+      _dictation = DictationController(
+        recognizer,
+        language: () => widget.themeController.speechLanguage,
+      );
+      unawaited(_dictation!.checkAvailability());
+    }
     unawaited(WakelockPlus.enable());
     SecurityKeyInteraction.instance.registerPinPrompt(_promptSecurityKeyPin);
     SecurityKeyInteraction.instance.registerSelectionPrompt(
@@ -93,9 +120,56 @@ class _TerminalPageState extends State<TerminalPage> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final shareTarget = ShareTargetScope.maybeOf(context);
+    if (shareTarget == _shareTarget) {
+      return;
+    }
+    _shareTarget?.removeListener(_consumeSharedDraft);
+    _shareTarget?.detachTerminalPage();
+    _shareTarget = shareTarget;
+    shareTarget?.attachTerminalPage();
+    shareTarget?.addListener(_consumeSharedDraft);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _consumeSharedDraft());
+  }
+
+  /// Moves a delivered share (uploaded file paths and/or shared text) into
+  /// the active session's Chat draft and opens the composer so the user can
+  /// add instructions before sending.
+  void _consumeSharedDraft() {
+    final shareTarget = _shareTarget;
+    final session = widget.workspace.activeSession;
+    if (!mounted || shareTarget == null || session == null) {
+      return;
+    }
+    final hostId = session.host.id;
+    if (!shareTarget.hasDraft(hostId)) {
+      return;
+    }
+    final draft = shareTarget.takeDraft(hostId)!;
+    setState(() {
+      _composeDrafts[hostId] = mergeShareDraft(
+        _composeDrafts[hostId] ?? '',
+        draft,
+      );
+      _composeMode = true;
+      _composeRevision += 1;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.workspace.activeSession == session) {
+        unawaited(_openPromptComposer(session));
+      }
+    });
+  }
+
+  @override
   void dispose() {
     unawaited(WakelockPlus.disable());
     _setSystemUiFullscreen(false);
+    _shareTarget?.removeListener(_consumeSharedDraft);
+    _shareTarget?.detachTerminalPage();
+    _dictation?.dispose();
     SecurityKeyInteraction.instance.unregisterPinPrompt(_promptSecurityKeyPin);
     SecurityKeyInteraction.instance.unregisterSelectionPrompt(
       _promptSecurityKeySelection,
@@ -204,6 +278,7 @@ class _TerminalPageState extends State<TerminalPage> {
           unawaited(widget.themeController.setComposeSubmitEnter(enabled)),
       isConnected: () => session.isConnected,
       bracketedPasteSupported: () => session.bracketedPasteSupported,
+      dictation: _dictation,
     );
     if (!mounted) {
       return;
@@ -462,6 +537,7 @@ class _TerminalPageState extends State<TerminalPage> {
                         history: _composeHistory,
                         initialText:
                             _composeDrafts[activeSession.host.id] ?? '',
+                        dictation: _dictation,
                         onChanged: (draft) {
                           _composeDrafts[activeSession.host.id] = draft;
                         },
@@ -579,6 +655,7 @@ class _ComposeInputBar extends StatefulWidget {
     this.onExpand,
     this.history = const <String>[],
     this.initialText = '',
+    this.dictation,
     super.key,
   });
 
@@ -604,6 +681,9 @@ class _ComposeInputBar extends StatefulWidget {
 
   /// Draft text to restore into the field when compose reopens.
   final String initialText;
+
+  /// Voice input; null hides the mic.
+  final DictationController? dictation;
 
   @override
   State<_ComposeInputBar> createState() => _ComposeInputBarState();
@@ -733,6 +813,17 @@ class _ComposeInputBarState extends State<_ComposeInputBar> {
                 ),
               ),
             ),
+            if (widget.dictation != null)
+              DictationButton(
+                controller: widget.dictation!,
+                textController: _controller,
+                focusNode: _focusNode,
+                onMessage: (message) {
+                  ScaffoldMessenger.of(context)
+                    ..hideCurrentSnackBar()
+                    ..showSnackBar(SnackBar(content: Text(message)));
+                },
+              ),
             if (widget.onExpand != null)
               IconButton(
                 icon: const Icon(Icons.open_in_full_rounded),

@@ -1,3 +1,5 @@
+import 'package:conduit/features/voice/presentation/dictation_button.dart';
+import 'package:conduit/features/voice/presentation/dictation_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -31,6 +33,7 @@ Future<void> showPromptComposerSheet({
   required ValueChanged<bool> onSubmitEnterChanged,
   required bool Function() isConnected,
   bool Function()? bracketedPasteSupported,
+  DictationController? dictation,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -44,6 +47,7 @@ Future<void> showPromptComposerSheet({
       onSubmitEnterChanged: onSubmitEnterChanged,
       isConnected: isConnected,
       bracketedPasteSupported: bracketedPasteSupported,
+      dictation: dictation,
     ),
   );
 }
@@ -57,6 +61,7 @@ class PromptComposerSheet extends StatefulWidget {
     required this.onSubmitEnterChanged,
     required this.isConnected,
     this.bracketedPasteSupported,
+    this.dictation,
     super.key,
   });
 
@@ -67,6 +72,9 @@ class PromptComposerSheet extends StatefulWidget {
   final ValueChanged<bool> onSubmitEnterChanged;
   final bool Function() isConnected;
   final bool Function()? bracketedPasteSupported;
+
+  /// Voice input; null hides the mic (no recognizer on this platform).
+  final DictationController? dictation;
 
   @override
   State<PromptComposerSheet> createState() => _PromptComposerSheetState();
@@ -220,6 +228,14 @@ class _PromptComposerSheetState extends State<PromptComposerSheet> {
                 children: [
                   Text('Chat mode', style: theme.textTheme.titleMedium),
                   const Spacer(),
+                  if (widget.dictation != null)
+                    DictationButton(
+                      controller: widget.dictation!,
+                      textController: _controller,
+                      focusNode: _focusNode,
+                      enabled: !_sending,
+                      onMessage: _showError,
+                    ),
                   IconButton(
                     tooltip: 'Paste clipboard',
                     icon: const Icon(Icons.content_paste_rounded),

@@ -51,6 +51,7 @@ class _HostFormPageState extends State<HostFormPage> {
     text: defaultTmuxSessionName,
   );
   final _tmuxStartDirectoryController = TextEditingController();
+  final _shareInboxDirectoryController = TextEditingController();
   final FocusNode _tagFocusNode = FocusNode();
   SshAuthMethod _authMethod = SshAuthMethod.password;
   bool _showPassword = false;
@@ -117,6 +118,7 @@ class _HostFormPageState extends State<HostFormPage> {
       _tmuxPrefixKey = host.tmuxPrefixKey;
       _tmuxSessionNameController.text = host.tmuxSessionName;
       _tmuxStartDirectoryController.text = host.tmuxStartDirectory;
+      _shareInboxDirectoryController.text = host.shareInboxDirectory;
       _snippets = List<TerminalSnippet>.from(host.snippets);
       _connectSnippetId = host.connectSnippetId;
       _agentAttentionEnabled = host.agentAttentionEnabled;
@@ -202,6 +204,7 @@ class _HostFormPageState extends State<HostFormPage> {
     _moshPortsController.dispose();
     _tmuxSessionNameController.dispose();
     _tmuxStartDirectoryController.dispose();
+    _shareInboxDirectoryController.dispose();
     super.dispose();
   }
 
@@ -296,6 +299,7 @@ class _HostFormPageState extends State<HostFormPage> {
               moshPortsController: _moshPortsController,
               tmuxSessionNameController: _tmuxSessionNameController,
               tmuxStartDirectoryController: _tmuxStartDirectoryController,
+              shareInboxDirectoryController: _shareInboxDirectoryController,
               useMosh: _useMosh,
               predictiveEchoEnabled: _predictiveEchoEnabled,
               startTmuxOnConnect: _startTmuxOnConnect,
@@ -735,6 +739,7 @@ class _HostFormPageState extends State<HostFormPage> {
       agentAttentionEnabled: _agentAttentionEnabled,
       agentNotifyInput: _agentNotifyInput,
       agentNotifyFinished: _agentNotifyFinished,
+      shareInboxDirectory: _shareInboxDirectoryController.text.trim(),
       snippets: List<TerminalSnippet>.unmodifiable(_snippets),
       connectSnippetId:
           _snippets.any((snippet) => snippet.id == _connectSnippetId)

@@ -23,6 +23,7 @@ class ThemePreferences {
     this.terminalToolbarStyle = TerminalToolbarStyle.floatingPill,
     this.menuButtonsEnabled = true,
     this.terminalGestures = TerminalGesturePreferences.defaults,
+    this.speechLanguage = '',
   });
 
   final ThemeMode themeMode;
@@ -52,6 +53,9 @@ class ThemePreferences {
 
   /// Per-gesture switches for the terminal touch gestures.
   final TerminalGesturePreferences terminalGestures;
+
+  /// BCP-47 tag dictation listens in; empty means the device locale.
+  final String speechLanguage;
 }
 
 class ThemePreferencesRepository {
@@ -75,6 +79,7 @@ class ThemePreferencesRepository {
   static const _terminalToolbarStyleKey = 'conduit.terminal_toolbar_style.v1';
   static const _menuButtonsEnabledKey = 'conduit.menu_buttons_enabled.v1';
   static const _terminalGesturesKey = 'conduit.terminal_gestures.v1';
+  static const _speechLanguageKey = 'conduit.speech_language.v1';
 
   final FlutterSecureStorage _storage;
 
@@ -114,6 +119,7 @@ class ThemePreferencesRepository {
       key: _menuButtonsEnabledKey,
     );
     final rawTerminalGestures = await _storage.read(key: _terminalGesturesKey);
+    final rawSpeechLanguage = await _storage.read(key: _speechLanguageKey);
     final terminalFontSize = double.tryParse(rawTerminalFontSize ?? '');
     final terminalKeyboardRows = _appendUnseenBuiltIns(
       _parseTerminalKeyboardRows(
@@ -156,6 +162,7 @@ class ThemePreferencesRepository {
       menuButtonsEnabled:
           rawMenuButtonsEnabled == null || rawMenuButtonsEnabled == 'true',
       terminalGestures: TerminalGesturePreferences.decode(rawTerminalGestures),
+      speechLanguage: rawSpeechLanguage?.trim() ?? '',
     );
   }
 
@@ -225,6 +232,10 @@ class ThemePreferencesRepository {
     await _storage.write(
       key: _terminalGesturesKey,
       value: preferences.terminalGestures.encode(),
+    );
+    await _storage.write(
+      key: _speechLanguageKey,
+      value: preferences.speechLanguage,
     );
   }
 

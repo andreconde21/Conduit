@@ -8,6 +8,7 @@ import 'package:conduit/features/backup/data/app_backup_service.dart';
 import 'package:conduit/features/backup/presentation/backup_sheet.dart';
 import 'package:conduit/features/snippets/presentation/snippet_editor.dart';
 import 'package:conduit/features/terminal/presentation/gestures/terminal_gestures_settings.dart';
+import 'package:conduit/features/voice/presentation/speech_settings_controls.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -82,6 +83,10 @@ class _ThemeSheet extends StatelessWidget {
                     const ConduitSectionLabel('Home'),
                     const SizedBox(height: 10),
                     _HomeAppearanceControls(controller: controller),
+                    const SizedBox(height: 22),
+                    const ConduitSectionLabel('Speech'),
+                    const SizedBox(height: 10),
+                    SpeechSettingsControls(controller: controller),
                   ],
                   if (backupService != null) ...[
                     const SizedBox(height: 22),

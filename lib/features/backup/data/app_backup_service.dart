@@ -149,6 +149,7 @@ class AppBackupService {
       'terminalToolbarStyle': _themeController.terminalToolbarStyle.name,
       'menuButtonsEnabled': _themeController.menuButtonsEnabled,
       'terminalGestures': _themeController.terminalGestures.toJson(),
+      'speechLanguage': _themeController.speechLanguage,
     };
   }
 
@@ -226,6 +227,11 @@ class AppBackupService {
       await _themeController.setTerminalGestures(
         TerminalGesturePreferences.fromJson(terminalGestures),
       );
+    }
+
+    final speechLanguage = json['speechLanguage'];
+    if (speechLanguage is String) {
+      await _themeController.setSpeechLanguage(speechLanguage);
     }
   }
 

@@ -26,6 +26,7 @@ class ThemeController extends ChangeNotifier {
   bool _menuButtonsEnabled = true;
   TerminalGesturePreferences _terminalGestures =
       TerminalGesturePreferences.defaults;
+  String _speechLanguage = '';
 
   ThemeMode get themeMode => _themeMode;
   AppPalette get palette => _palette;
@@ -44,6 +45,9 @@ class ThemeController extends ChangeNotifier {
   bool get menuButtonsEnabled => _menuButtonsEnabled;
   TerminalGesturePreferences get terminalGestures => _terminalGestures;
 
+  /// BCP-47 tag dictation listens in; empty means the device locale.
+  String get speechLanguage => _speechLanguage;
+
   Future<void> load() async {
     final preferences = await _repository.load();
     _themeMode = preferences.themeMode;
@@ -60,6 +64,7 @@ class ThemeController extends ChangeNotifier {
     _terminalToolbarStyle = preferences.terminalToolbarStyle;
     _menuButtonsEnabled = preferences.menuButtonsEnabled;
     _terminalGestures = preferences.terminalGestures;
+    _speechLanguage = preferences.speechLanguage;
     notifyListeners();
   }
 
@@ -227,6 +232,16 @@ class ThemeController extends ChangeNotifier {
     await _save();
   }
 
+  Future<void> setSpeechLanguage(String tag) async {
+    final normalized = tag.trim();
+    if (_speechLanguage == normalized) {
+      return;
+    }
+    _speechLanguage = normalized;
+    notifyListeners();
+    await _save();
+  }
+
   Future<void> _save() {
     return _repository.save(
       ThemePreferences(
@@ -244,6 +259,7 @@ class ThemeController extends ChangeNotifier {
         terminalToolbarStyle: _terminalToolbarStyle,
         menuButtonsEnabled: _menuButtonsEnabled,
         terminalGestures: _terminalGestures,
+        speechLanguage: _speechLanguage,
       ),
     );
   }
