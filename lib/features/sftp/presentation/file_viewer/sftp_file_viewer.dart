@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/features/sftp/domain/remote_file_kind.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/code_file_editor.dart';
+import 'package:conduit/features/sftp/presentation/file_viewer/discard_changes_dialog.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/file_viewer_toolbar.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/media_file_views.dart';
 import 'package:conduit/features/sftp/presentation/widgets/center_message.dart';
@@ -52,6 +53,7 @@ class SftpFileViewerState extends State<SftpFileViewer> {
   bool _htmlPreview = true;
   bool _saving = false;
   bool _dirty = false;
+  bool _hasSaved = false;
   String _loadedText = '';
   CodeLineEditingController? _editor;
 
@@ -59,6 +61,9 @@ class SftpFileViewerState extends State<SftpFileViewer> {
   String get _fileName => remoteFileName(widget.path);
 
   bool get isDirty => _dirty;
+
+  /// True once an edit has been written back to the server.
+  bool get hasSaved => _hasSaved;
 
   bool get _editable =>
       widget.write != null && _bytes.length <= remoteFileEditorMaxBytes;
@@ -108,8 +113,19 @@ class SftpFileViewerState extends State<SftpFileViewer> {
       _binary = _kind == RemoteFileKind.text && !remoteFileLooksTextual(bytes);
       if ((_kind == RemoteFileKind.text || _kind == RemoteFileKind.html) &&
           !_binary) {
-        _loadedText = utf8.decode(bytes, allowMalformed: true);
-        final editor = CodeLineEditingController.fromText(_loadedText);
+        final text = utf8.decode(bytes, allowMalformed: true);
+        // The editor stores lines and re-joins them with its configured line
+        // break, so keep the file's own ending and compare dirtiness against
+        // the editor's rendition rather than the raw bytes.
+        final editor = CodeLineEditingController.fromText(
+          text,
+          CodeLineOptions(
+            lineBreak: remoteFileUsesCrlf(text)
+                ? TextLineBreak.crlf
+                : TextLineBreak.lf,
+          ),
+        );
+        _loadedText = editor.text;
         editor.addListener(_handleEdited);
         _editor = editor;
       }
@@ -143,6 +159,7 @@ class SftpFileViewerState extends State<SftpFileViewer> {
       setState(() {
         _dirty = false;
         _saving = false;
+        _hasSaved = true;
       });
       _showSnack('Saved $_fileName');
     } catch (error) {
@@ -150,6 +167,14 @@ class SftpFileViewerState extends State<SftpFileViewer> {
       setState(() => _saving = false);
       _showSnack('$error');
     }
+  }
+
+  Future<void> _reload() async {
+    if (_dirty) {
+      final discard = await confirmDiscardChanges(context, fileName: _fileName);
+      if (!discard || !mounted) return;
+    }
+    await _load();
   }
 
   void _showSnack(String message) {
@@ -193,7 +218,7 @@ class SftpFileViewerState extends State<SftpFileViewer> {
       showSave:
           _editor != null && (!_htmlPreview || _kind != RemoteFileKind.html),
       onSave: _dirty && _editable && !_saving ? _save : null,
-      onReload: _status == _ViewerStatus.loading ? null : _load,
+      onReload: _status == _ViewerStatus.loading ? null : _reload,
     );
   }
 

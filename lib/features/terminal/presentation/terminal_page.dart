@@ -6,6 +6,7 @@ import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
+import 'package:conduit/features/sftp/presentation/file_viewer/discard_changes_dialog.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/sftp_file_viewer.dart';
 import 'package:conduit/features/terminal/domain/security_key_interaction.dart';
 import 'package:conduit/features/terminal/presentation/security_key_picker_dialog.dart';
@@ -137,24 +138,8 @@ class _TerminalPageState extends State<TerminalPage> {
 
   Future<void> _closeFileTab(TerminalFileTab tab) async {
     if (tab.viewerKey.currentState?.isDirty ?? false) {
-      final discard = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Discard changes?'),
-          content: Text('Unsaved edits to ${tab.title} will be lost.'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Keep editing'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Discard'),
-            ),
-          ],
-        ),
-      );
-      if (discard != true) return;
+      final discard = await confirmDiscardChanges(context, fileName: tab.title);
+      if (!discard || !mounted) return;
     }
     _fileTabs.close(tab);
   }

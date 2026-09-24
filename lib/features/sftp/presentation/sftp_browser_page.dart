@@ -234,8 +234,8 @@ class _SftpBrowserPageState extends State<SftpBrowserPage> {
       await _showEntrySheet(entry);
       return;
     }
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
+    final saved = await Navigator.of(context).push(
+      MaterialPageRoute<bool>(
         builder: (_) => SftpFileViewerPage(
           path: entry.path,
           themeController: widget.themeController,
@@ -245,6 +245,10 @@ class _SftpBrowserPageState extends State<SftpBrowserPage> {
         ),
       ),
     );
+    if (saved == true && mounted) {
+      // Size and modification time changed on the server.
+      await _controller.refresh();
+    }
   }
 
   Future<void> _onEntryAction(EntryAction action, SftpEntry entry) async {

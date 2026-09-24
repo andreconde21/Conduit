@@ -32,6 +32,17 @@ void main() {
     });
   });
 
+  group('remoteFileUsesCrlf', () {
+    test('detects the line ending from the first break', () {
+      expect(remoteFileUsesCrlf('a\r\nb\r\n'), isTrue);
+      expect(remoteFileUsesCrlf('a\nb\n'), isFalse);
+      expect(remoteFileUsesCrlf('a\nb\r\n'), isFalse);
+      expect(remoteFileUsesCrlf('no breaks'), isFalse);
+      expect(remoteFileUsesCrlf(''), isFalse);
+      expect(remoteFileUsesCrlf('\n'), isFalse);
+    });
+  });
+
   group('remoteFileLooksTextual', () {
     test('NUL byte marks binary; plain text passes', () {
       expect(remoteFileLooksTextual('hello\nworld'.codeUnits), isTrue);

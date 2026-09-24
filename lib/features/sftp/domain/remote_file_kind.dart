@@ -40,6 +40,13 @@ String remoteFileName(String path) {
   return slash == -1 ? trimmed : trimmed.substring(slash + 1);
 }
 
+/// True when the first line break in [text] is Windows-style (`\r\n`), so
+/// an editor can write the file back with the line endings it came with.
+bool remoteFileUsesCrlf(String text) {
+  final lf = text.indexOf('\n');
+  return lf > 0 && text.codeUnitAt(lf - 1) == 0x0D;
+}
+
 /// True when [bytes] look like text rather than a binary blob.
 ///
 /// A NUL byte in the sampled prefix is the classic binary marker; everything
