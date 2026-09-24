@@ -20,7 +20,8 @@ class ThemeController extends ChangeNotifier {
   TerminalEnterSequence _terminalEnterSequence = TerminalEnterSequence.cr;
   bool _touchModeHintSeen = false;
   bool _composeSubmitEnter = false;
-  TerminalToolbarStyle _terminalToolbarStyle = TerminalToolbarStyle.floatingPill;
+  TerminalToolbarStyle _terminalToolbarStyle =
+      TerminalToolbarStyle.floatingPill;
 
   ThemeMode get themeMode => _themeMode;
   AppPalette get palette => _palette;

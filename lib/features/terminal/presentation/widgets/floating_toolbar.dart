@@ -1,0 +1,526 @@
+import 'dart:async';
+
+import 'package:conduit/core/presentation/system_navigation_insets.dart';
+import 'package:conduit/core/theme/app_palette.dart';
+import 'package:conduit/core/theme/terminal_appearance.dart';
+import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
+import 'package:conduit/features/terminal/presentation/terminal_keyboard_bar.dart';
+import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
+import 'package:conduit/features/terminal/presentation/widgets/toolbar_arrow_pad.dart';
+import 'package:conduit/features/terminal/presentation/widgets/toolbar_snippet_palette.dart';
+import 'package:conduit_vt/conduit_vt.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+/// Minimum upward travel of a drag on the pill before it opens the palette.
+const floatingToolbarSwipeThreshold = 32.0;
+
+/// Delay between a quick prompt's text and its Enter, kept as a separate
+/// write so TUIs do not classify the line as a paste (see the compose bar).
+const floatingToolbarSubmitDelay = Duration(milliseconds: 120);
+
+/// Moshi-style floating input toolbar: a rounded pill of the keys that drive
+/// an agent session from a phone, sitting above the soft keyboard and clear
+/// of the Android navigation bar.
+///
+/// The pill wraps the classic [TerminalKeyboardBar] ([keyRows]) rather than
+/// replacing it: the ⋯ button expands the configured key rows inline above
+/// the pill, so custom keys and the Herdr, Tmux, Touch and Snip menus stay
+/// one tap away. Session, focus and palette come from [keyRows] too, so the
+/// page passes a single, already configured bar.
+///
+/// Gestures:
+/// * Ctrl: tap arms ctrl for the next key; long-press latches it until the
+///   next tap on Ctrl.
+/// * Esc: tap sends Escape; long-press sends Ctrl+C.
+/// * Tab: tap sends Tab; long-press sends Shift+Tab (Claude Code cycles its
+///   permission mode with it).
+/// * ↻: tap redraws the screen (Ctrl+L); long-press reconnects the session.
+/// * Swipe up anywhere on the pill: opens the quick prompt / snippet palette.
+class FloatingTerminalToolbar extends StatefulWidget {
+  const FloatingTerminalToolbar({
+    required this.keyRows,
+    this.onReconnect,
+    super.key,
+  });
+
+  /// The classic key-row bar for this session, shown behind the ⋯ button.
+  final TerminalKeyboardBar keyRows;
+
+  /// Long-press on the ↻ button. When null the button only redraws.
+  final Future<void> Function()? onReconnect;
+
+  @override
+  State<FloatingTerminalToolbar> createState() =>
+      _FloatingTerminalToolbarState();
+}
+
+class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
+    with WidgetsBindingObserver {
+  bool _rowsExpanded = false;
+
+  /// Set when the user hid the soft keyboard from the pill: key presses then
+  /// stop re-requesting focus, which would pop the keyboard straight back.
+  bool _keyboardHidden = false;
+  double _swipeDistance = 0;
+
+  TerminalSessionController get _controller => widget.keyRows.controller;
+  FocusNode get _focusNode => widget.keyRows.focusNode;
+  AppPalette get _palette => widget.keyRows.palette;
+  Brightness get _brightness => widget.keyRows.brightness;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeMetrics() {
+    // The soft keyboard changes the view insets; the Scaffold strips those
+    // from the body's MediaQuery, so watch the raw view instead.
+    setState(() {});
+  }
+
+  bool get _keyboardVisible => View.of(context).viewInsets.bottom > 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final keyboardVisible = _keyboardVisible;
+    if (keyboardVisible && _keyboardHidden) {
+      // The keyboard came back by other means (a tap on the terminal), so
+      // the pill no longer needs to keep it away.
+      _keyboardHidden = false;
+    }
+    return ListenableBuilder(
+      listenable: _controller.keyboard,
+      builder: (context, _) {
+        return DecoratedBox(
+          decoration: BoxDecoration(color: _palette.canvasFor(_brightness)),
+          child: SafeArea(
+            top: false,
+            bottom: shouldApplyBottomSafeArea(context),
+            left: false,
+            right: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (_rowsExpanded)
+                  MediaQuery.removePadding(
+                    context: context,
+                    removeBottom: true,
+                    child: widget.keyRows,
+                  ),
+                GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onVerticalDragStart: (_) => _swipeDistance = 0,
+                  onVerticalDragUpdate: (details) =>
+                      _swipeDistance += details.delta.dy,
+                  onVerticalDragEnd: _handleSwipeEnd,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
+                    child: _buildPill(context, keyboardVisible),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildPill(BuildContext context, bool keyboardVisible) {
+    final keyboard = _controller.keyboard;
+    final buttons = <Widget>[
+      _PillButton(
+        key: const ValueKey('toolbar-ctrl'),
+        label: 'Ctrl',
+        tooltip: 'Ctrl. Long-press to latch',
+        palette: _palette,
+        brightness: _brightness,
+        selected: keyboard.ctrl,
+        emphasized: keyboard.ctrlLatched,
+        onTap: _tapCtrl,
+        onLongPress: _latchCtrl,
+      ),
+      _PillButton(
+        key: const ValueKey('toolbar-esc'),
+        label: 'Esc',
+        tooltip: 'Escape. Long-press for Ctrl+C',
+        palette: _palette,
+        brightness: _brightness,
+        onTap: () => _sendKey(TerminalKey.escape),
+        onLongPress: () => _sendControl(TerminalKey.keyC),
+      ),
+      _PillButton(
+        key: const ValueKey('toolbar-tab'),
+        label: 'Tab',
+        tooltip: 'Tab. Long-press for Shift+Tab',
+        palette: _palette,
+        brightness: _brightness,
+        onTap: () => _sendKey(TerminalKey.tab),
+        onLongPress: () => _sendKey(TerminalKey.backtab),
+      ),
+      ToolbarArrowPad(
+        key: const ValueKey('toolbar-arrows'),
+        palette: _palette,
+        brightness: _brightness,
+        onArrow: _sendKey,
+      ),
+      _PillButton(
+        key: const ValueKey('toolbar-redraw'),
+        icon: Icons.refresh_rounded,
+        tooltip: widget.onReconnect == null
+            ? 'Redraw screen (Ctrl+L)'
+            : 'Redraw screen (Ctrl+L). Long-press to reconnect',
+        palette: _palette,
+        brightness: _brightness,
+        onTap: () => _sendControl(TerminalKey.keyL),
+        onLongPress: widget.onReconnect == null ? null : _reconnect,
+      ),
+      _PillButton(
+        key: const ValueKey('toolbar-paste'),
+        icon: Icons.content_paste_rounded,
+        tooltip: 'Paste',
+        palette: _palette,
+        brightness: _brightness,
+        onTap: _paste,
+      ),
+      _PillButton(
+        key: const ValueKey('toolbar-chat'),
+        icon: Icons.chat_bubble_outline_rounded,
+        tooltip: 'Chat mode',
+        palette: _palette,
+        brightness: _brightness,
+        selected: widget.keyRows.composeActive,
+        onTap: widget.keyRows.onToggleCompose,
+      ),
+      _PillButton(
+        key: const ValueKey('toolbar-keyboard'),
+        icon: keyboardVisible
+            ? Icons.keyboard_hide_rounded
+            : Icons.keyboard_rounded,
+        tooltip: keyboardVisible ? 'Hide keyboard' : 'Show keyboard',
+        palette: _palette,
+        brightness: _brightness,
+        onTap: () => _toggleKeyboard(keyboardVisible),
+      ),
+      _PillButton(
+        key: const ValueKey('toolbar-more'),
+        icon: Icons.more_horiz_rounded,
+        tooltip: _rowsExpanded ? 'Hide key rows' : 'Show key rows',
+        palette: _palette,
+        brightness: _brightness,
+        selected: _rowsExpanded,
+        onTap: () => setState(() => _rowsExpanded = !_rowsExpanded),
+      ),
+    ];
+    return Material(
+      key: const ValueKey('floating-toolbar-pill'),
+      color: _palette.panelFor(_brightness),
+      elevation: 3,
+      shadowColor: Colors.black.withValues(alpha: 0.35),
+      shape: StadiumBorder(
+        side: BorderSide(color: _palette.hairlineFor(_brightness)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // Narrow phones and landscape with system insets: scroll the pill
+          // sideways instead of squeezing the buttons below a finger's width.
+          return SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                minWidth: (constraints.maxWidth - 12).clamp(0, double.infinity),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  for (final (index, button) in buttons.indexed) ...[
+                    if (index > 0) const SizedBox(width: 4),
+                    button,
+                  ],
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  void _handleSwipeEnd(DragEndDetails details) {
+    final flungUp = (details.primaryVelocity ?? 0) < -600;
+    if (_swipeDistance <= -floatingToolbarSwipeThreshold || flungUp) {
+      unawaited(_openPalette());
+    }
+    _swipeDistance = 0;
+  }
+
+  Future<void> _openPalette() async {
+    await showToolbarSnippetPalette(
+      context: context,
+      palette: _palette,
+      brightness: _brightness,
+      hostSnippets: _controller.host.snippets,
+      globalSnippets: widget.keyRows.globalSnippets,
+      hostPassword: _controller.host.password,
+      onQuickPrompt: _runQuickPrompt,
+      onSnippet: _sendSnippet,
+      onPassword: _sendText,
+    );
+    if (mounted) {
+      _focusTerminal();
+    }
+  }
+
+  void _runQuickPrompt(ToolbarQuickPrompt prompt) {
+    final text = prompt.text;
+    if (text != null) {
+      _submitLine(text);
+      return;
+    }
+    switch (prompt) {
+      case ToolbarQuickPrompt.escapeTwice:
+        _controller.sendKey(TerminalKey.escape);
+        _controller.sendKey(TerminalKey.escape);
+      case ToolbarQuickPrompt.interrupt:
+        _controller.sendControl(TerminalKey.keyC);
+      case ToolbarQuickPrompt.clear:
+      case ToolbarQuickPrompt.compact:
+      case ToolbarQuickPrompt.help:
+      case ToolbarQuickPrompt.continuePrompt:
+      case ToolbarQuickPrompt.yes:
+        break;
+    }
+    _focusTerminal();
+  }
+
+  void _sendSnippet(TerminalSnippet snippet) {
+    if (snippet.text.isEmpty) {
+      _focusTerminal();
+      return;
+    }
+    if (snippet.submit) {
+      _submitLine(snippet.text);
+    } else {
+      _sendText(snippet.text);
+    }
+  }
+
+  /// Types [line] and presses Enter in a separate write shortly after, the
+  /// same trick the chat bar uses so readline-style TUIs treat the Enter as
+  /// a keypress instead of the tail of a paste.
+  void _submitLine(String line) {
+    _controller.sendText(line);
+    Future.delayed(floatingToolbarSubmitDelay, () {
+      _controller.sendKey(TerminalKey.enter);
+    });
+    _focusTerminal();
+  }
+
+  void _tapCtrl() {
+    final keyboard = _controller.keyboard;
+    if (keyboard.ctrlLatched) {
+      keyboard.ctrlLatched = false;
+    } else {
+      keyboard.ctrl = !keyboard.ctrl;
+    }
+    _focusTerminal();
+  }
+
+  void _latchCtrl() {
+    final keyboard = _controller.keyboard;
+    keyboard.ctrlLatched = !keyboard.ctrlLatched;
+    _focusTerminal();
+  }
+
+  Future<void> _reconnect() async {
+    final reconnect = widget.onReconnect;
+    if (reconnect == null) {
+      return;
+    }
+    await reconnect();
+    if (mounted) {
+      _focusTerminal();
+    }
+  }
+
+  void _toggleKeyboard(bool keyboardVisible) {
+    if (keyboardVisible) {
+      _keyboardHidden = true;
+      unawaited(SystemChannels.textInput.invokeMethod<void>('TextInput.hide'));
+      return;
+    }
+    _keyboardHidden = false;
+    if (_focusNode.canRequestFocus) {
+      _focusNode.requestFocus();
+    }
+    unawaited(SystemChannels.textInput.invokeMethod<void>('TextInput.show'));
+  }
+
+  void _sendKey(TerminalKey key) {
+    _controller.sendKey(key);
+    _focusTerminal();
+  }
+
+  void _sendControl(TerminalKey key) {
+    _controller.sendControl(key);
+    _focusTerminal();
+  }
+
+  void _sendText(String text) {
+    _controller.sendText(text);
+    _focusTerminal();
+  }
+
+  Future<void> _paste() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text;
+    if (text != null && text.isNotEmpty) {
+      _controller.paste(text);
+    }
+    _focusTerminal();
+  }
+
+  void _focusTerminal() {
+    if (_keyboardHidden) {
+      return;
+    }
+    if (_focusNode.canRequestFocus) {
+      _focusNode.requestFocus();
+    }
+  }
+}
+
+/// Lets the terminal page keep its fully configured [TerminalKeyboardBar]
+/// expression untouched and only append the style decision.
+extension FloatingToolbarStyle on TerminalKeyboardBar {
+  /// This bar as the user's chosen toolbar: itself for
+  /// [TerminalToolbarStyle.keyRows], otherwise wrapped in the floating pill
+  /// with the key rows behind the ⋯ button.
+  Widget withToolbarStyle(
+    TerminalToolbarStyle style, {
+    Future<void> Function()? onReconnect,
+  }) {
+    if (style == TerminalToolbarStyle.keyRows) {
+      return this;
+    }
+    return FloatingTerminalToolbar(keyRows: this, onReconnect: onReconnect);
+  }
+}
+
+/// One rounded-square key inside the pill. Long-press, when wired, gives
+/// haptic feedback so the alternate action is felt before it is seen.
+class _PillButton extends StatelessWidget {
+  const _PillButton({
+    required this.palette,
+    required this.brightness,
+    required this.tooltip,
+    this.label,
+    this.icon,
+    this.onTap,
+    this.onLongPress,
+    this.selected = false,
+    this.emphasized = false,
+    super.key,
+  });
+
+  final AppPalette palette;
+  final Brightness brightness;
+  final String tooltip;
+  final String? label;
+  final IconData? icon;
+  final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
+  final bool selected;
+
+  /// Stronger highlight than [selected], used for the latched Ctrl.
+  final bool emphasized;
+
+  static const _height = 40.0;
+  static const _iconWidth = 40.0;
+  static const _labelMinWidth = 46.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = palette.accent;
+    final enabled = onTap != null || onLongPress != null;
+    final baseForeground = enabled
+        ? palette.foregroundFor(brightness)
+        : palette.mutedForegroundFor(brightness);
+    final foreground = emphasized
+        ? palette.canvasFor(brightness)
+        : selected
+        ? accent
+        : baseForeground;
+    final background = emphasized
+        ? accent
+        : selected
+        ? Color.alphaBlend(
+            accent.withValues(alpha: 0.22),
+            palette.panelElevatedFor(brightness),
+          )
+        : palette.panelElevatedFor(brightness);
+    final isIcon = icon != null;
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: background,
+        borderRadius: BorderRadius.circular(12),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          // One deliberate haptic per long-press, below, instead of the
+          // platform default that fires on top of it.
+          enableFeedback: false,
+          onTap: onTap,
+          onLongPress: onLongPress == null
+              ? null
+              : () {
+                  unawaited(HapticFeedback.mediumImpact());
+                  onLongPress!();
+                },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            height: _height,
+            constraints: BoxConstraints(
+              minWidth: isIcon ? _iconWidth : _labelMinWidth,
+            ),
+            padding: EdgeInsets.symmetric(horizontal: isIcon ? 0 : 8),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: selected && !emphasized
+                  ? Border.all(color: accent.withValues(alpha: 0.7), width: 1.2)
+                  : null,
+            ),
+            child: isIcon
+                ? Icon(icon, color: foreground, size: 21)
+                : Text(
+                    label ?? '',
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.visible,
+                    style: TextStyle(
+                      color: foreground,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.2,
+                    ),
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
+}

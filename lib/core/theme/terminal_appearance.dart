@@ -15,8 +15,7 @@ extension TerminalToolbarStyleDetails on TerminalToolbarStyle {
     TerminalToolbarStyle.floatingPill =>
       'Compact pill with Ctrl, Esc, Tab, an arrow pad and quick actions. '
           'The key rows stay one tap away behind the ⋯ button.',
-    TerminalToolbarStyle.keyRows =>
-      'Full-width rows of every configured key.',
+    TerminalToolbarStyle.keyRows => 'Full-width rows of every configured key.',
   };
 }
 
