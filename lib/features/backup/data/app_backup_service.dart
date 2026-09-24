@@ -11,6 +11,7 @@ import 'package:conduit/features/hosts/domain/saved_hosts_repository.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
+import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:pinenacl/x25519.dart';
@@ -145,6 +146,7 @@ class AppBackupService {
       'terminalMouseInput': _themeController.terminalMouseInput,
       'terminalEnterSequence': _themeController.terminalEnterSequence.name,
       'composeSubmitEnter': _themeController.composeSubmitEnter,
+      'terminalGestures': _themeController.terminalGestures.toJson(),
     };
   }
 
@@ -205,6 +207,12 @@ class AppBackupService {
     final composeSubmitEnter = json['composeSubmitEnter'];
     if (composeSubmitEnter is bool) {
       await _themeController.setComposeSubmitEnter(composeSubmitEnter);
+    }
+    final terminalGestures = json['terminalGestures'];
+    if (terminalGestures is Map) {
+      await _themeController.setTerminalGestures(
+        TerminalGesturePreferences.fromJson(terminalGestures),
+      );
     }
   }
 

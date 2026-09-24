@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
+import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -19,6 +20,7 @@ class ThemePreferences {
     this.terminalEnterSequence = TerminalEnterSequence.cr,
     this.touchModeHintSeen = false,
     this.composeSubmitEnter = false,
+    this.terminalGestures = TerminalGesturePreferences.defaults,
   });
 
   final ThemeMode themeMode;
@@ -37,6 +39,9 @@ class ThemePreferences {
   /// Whether the prompt composer presses Enter after inserting a prompt.
   /// Off by default so composed text lands in the TUI for review.
   final bool composeSubmitEnter;
+
+  /// Per-gesture switches for the terminal touch gestures.
+  final TerminalGesturePreferences terminalGestures;
 }
 
 class ThemePreferencesRepository {
@@ -57,6 +62,7 @@ class ThemePreferencesRepository {
   static const _terminalEnterSequenceKey = 'conduit.terminal_enter_sequence.v1';
   static const _touchModeHintSeenKey = 'conduit.touch_mode_hint_seen.v1';
   static const _composeSubmitEnterKey = 'conduit.compose_submit_enter.v1';
+  static const _terminalGesturesKey = 'conduit.terminal_gestures.v1';
 
   final FlutterSecureStorage _storage;
 
@@ -88,6 +94,7 @@ class ThemePreferencesRepository {
     final rawComposeSubmitEnter = await _storage.read(
       key: _composeSubmitEnterKey,
     );
+    final rawTerminalGestures = await _storage.read(key: _terminalGesturesKey);
     final terminalFontSize = double.tryParse(rawTerminalFontSize ?? '');
     final terminalKeyboardRows = _appendUnseenBuiltIns(
       _parseTerminalKeyboardRows(
@@ -123,6 +130,7 @@ class ThemePreferencesRepository {
       ),
       touchModeHintSeen: rawTouchModeHintSeen == 'true',
       composeSubmitEnter: rawComposeSubmitEnter == 'true',
+      terminalGestures: TerminalGesturePreferences.decode(rawTerminalGestures),
     );
   }
 
@@ -180,6 +188,10 @@ class ThemePreferencesRepository {
     await _storage.write(
       key: _composeSubmitEnterKey,
       value: preferences.composeSubmitEnter.toString(),
+    );
+    await _storage.write(
+      key: _terminalGesturesKey,
+      value: preferences.terminalGestures.encode(),
     );
   }
 
