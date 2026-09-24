@@ -245,6 +245,25 @@ void main() {
       expect(preferences.touchModeHintSeen, isFalse);
     });
 
+    test('defaults menu buttons to on and persists turning them off', () async {
+      final storage = InMemorySecureStorage();
+      final repository = ThemePreferencesRepository(storage);
+
+      final defaults = await repository.load();
+      expect(defaults.menuButtonsEnabled, isTrue);
+
+      await repository.save(
+        const ThemePreferences(
+          themeMode: ThemeMode.dark,
+          palette: AppPalette.synthwave,
+          menuButtonsEnabled: false,
+        ),
+      );
+
+      final preferences = await repository.load();
+      expect(preferences.menuButtonsEnabled, isFalse);
+    });
+
     test('persists and loads global snippets', () async {
       final storage = InMemorySecureStorage();
       final repository = ThemePreferencesRepository(storage);

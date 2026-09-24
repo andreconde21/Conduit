@@ -91,6 +91,47 @@ void main() {
     expect(controller.terminalMouseInput, isTrue);
   });
 
+  testWidgets('appearance sheet toggles menu buttons', (tester) async {
+    final controller = ThemeController(InMemoryThemePreferences());
+    await controller.load();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) {
+            return Scaffold(
+              body: Center(
+                child: FilledButton(
+                  onPressed: () {
+                    showThemeSheet(context: context, controller: controller);
+                  },
+                  child: const Text('Appearance'),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Appearance'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Menu buttons'),
+      120,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Menu buttons'), findsOneWidget);
+    expect(controller.menuButtonsEnabled, isTrue);
+
+    await tester.tap(find.text('Menu buttons'));
+    await tester.pumpAndSettle();
+
+    expect(controller.menuButtonsEnabled, isFalse);
+  });
+
   testWidgets('appearance sheet changes terminal enter sequence', (
     tester,
   ) async {

@@ -401,6 +401,28 @@ class _TerminalAppearanceControls extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 14),
+        Material(
+          color: colorScheme.surface,
+          shape: RoundedRectangleBorder(
+            side: BorderSide(color: colorScheme.outlineVariant),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: SwitchListTile(
+            secondary: const Icon(Icons.smart_button_rounded),
+            title: const Text('Menu buttons'),
+            subtitle: Text(
+              'Answer numbered menus and y/n prompts (Claude Code, installers) '
+              'with buttons above the keyboard bar.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+            value: controller.menuButtonsEnabled,
+            onChanged: controller.setMenuButtonsEnabled,
+          ),
+        ),
+        const SizedBox(height: 14),
         Container(
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
           decoration: BoxDecoration(
