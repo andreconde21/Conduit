@@ -87,6 +87,60 @@ void main() {
       expect(agents.single.stateSequence, 7);
     });
 
+    test('parses real Herdr 0.9.1 output', () {
+      // Captured from `herdr agent list` on Herdr 0.9.1: an unnamed agent
+      // and a named one, inside the CLI envelope.
+      final agents = HerdrAttentionProvider.parseAgentList('''
+        {"id":"cli:agent:list","result":{"agents":[
+          {"agent":"claude","agent_session":{"agent":"claude","kind":"id",
+           "source":"herdr:claude","value":"fedc75e1"},"agent_status":"idle",
+           "cwd":"/root","focused":false,"foreground_cwd":"/root",
+           "pane_id":"w4:p4","revision":1,"state_change_seq":101,
+           "tab_id":"w4:t4","terminal_id":"term_65c2cc308a9ca2",
+           "terminal_title":"\\u2733 Tailscale audit",
+           "terminal_title_stripped":"Tailscale audit","workspace_id":"w4"},
+          {"agent":"claude","agent_status":"working","cwd":"/root/Projects",
+           "focused":true,"interactive_ready":true,"name":"conductore",
+           "pane_id":"wX:p1","revision":2,"state_change_seq":154,
+           "tab_id":"wX:t1","terminal_id":"term_65c3e513abe0ae",
+           "terminal_title":"\\u25d1 Conductore handoff",
+           "terminal_title_stripped":"Conductore handoff","workspace_id":"wX"}
+        ],"type":"agent_list"}}
+      ''');
+
+      expect(agents, hasLength(2));
+      final unnamed = agents[0];
+      expect(unnamed.id, 'w4:p4');
+      // `agent` is the kind, not the name; the title labels unnamed agents.
+      expect(unnamed.kind, 'claude');
+      expect(unnamed.name, 'Tailscale audit');
+      expect(unnamed.state, AgentAttentionState.idle);
+      expect(unnamed.stateSequence, 101);
+      expect(unnamed.workspace, 'w4');
+      expect(unnamed.tab, 'w4:t4');
+      final named = agents[1];
+      expect(named.name, 'conductore');
+      expect(named.kind, 'claude');
+      expect(named.state, AgentAttentionState.working);
+      expect(named.stateSequence, 154);
+    });
+
+    test('surfaces a JSON error envelope on stdout as a failure', () {
+      expect(
+        () => HerdrAttentionProvider.parseAgentList(
+          '{"id":"cli:agent:list","error":{"code":"internal",'
+          '"message":"socket gone"}}',
+        ),
+        throwsA(
+          isA<AppFailure>().having(
+            (failure) => failure.toString(),
+            'message',
+            contains('socket gone'),
+          ),
+        ),
+      );
+    });
+
     test('throws AppFailure on non-JSON output', () {
       expect(
         () => HerdrAttentionProvider.parseAgentList('herdr: segfault'),
@@ -151,60 +205,101 @@ void main() {
       );
     });
 
+    test('explains a stopped Herdr server without a socket path', () async {
+      final runner = ScriptedAgentCommandRunner([
+        const AgentCommandResult(
+          stdout: '',
+          stderr:
+              '{"id":"cli:agent:list","error":{"code":"server_not_running",'
+              '"message":"no herdr server is running at /root/.config/herdr/'
+              'herdr.sock; run `herdr` to start or attach it"}}',
+          exitCode: 1,
+        ),
+      ]);
+      await expectLater(
+        () => provider.fetchAgents(runner),
+        throwsA(
+          isA<AppFailure>()
+              .having(
+                (failure) => failure.toString(),
+                'message',
+                contains('Herdr is not running'),
+              )
+              .having(
+                (failure) => failure.toString(),
+                'no socket path',
+                isNot(contains('.sock')),
+              ),
+        ),
+      );
+    });
+
     test('runs the documented list command and parses agents', () async {
       final runner = ScriptedAgentCommandRunner([
         ok('[{"name": "builder", "state": "working"}]'),
       ]);
       final snapshot = await provider.fetchAgents(runner);
-      expect(runner.commands, ['herdr agent list']);
+      expect(runner.commands, [
+        HerdrAttentionProvider.remoteCommand('agent list'),
+      ]);
       expect(snapshot.agents.single.name, 'builder');
     });
   });
 
-  group('HerdrAttentionProvider.focusCommand', () {
-    test('targets the agent name, quoting when needed', () {
-      const provider = HerdrAttentionProvider();
-      expect(
-        provider.focusCommand(
-          const AgentInfo(
-            id: 'w1:p1',
-            name: 'builder',
-            state: AgentAttentionState.idle,
-          ),
-        ),
-        'herdr agent focus builder',
-      );
-      expect(
-        provider.focusCommand(
-          const AgentInfo(
-            id: 'w1:p1',
-            name: r"my agent's \$run",
-            state: AgentAttentionState.idle,
-          ),
-        ),
-        r"herdr agent focus 'my agent'\''s \$run'",
-      );
+  group('HerdrAttentionProvider.remoteCommand', () {
+    test('runs herdr under sh with user-local install dirs on PATH', () {
+      final command = HerdrAttentionProvider.remoteCommand('agent list');
+      expect(command, startsWith("sh -c 'PATH=\""));
+      expect(command, contains(r'$HOME/.local/bin'));
+      expect(command, contains(r'$HOME/.local/share/mise/shims'));
+      expect(command, contains('/opt/homebrew/bin'));
+      expect(command, contains(r':$PATH" exec herdr agent list'));
+      expect(command, endsWith("'"));
     });
 
-    test('falls back to the pane id and hides when neither exists', () {
-      const provider = HerdrAttentionProvider();
+    test('escapes single quotes inside the wrapped command', () {
+      final command = HerdrAttentionProvider.remoteCommand("agent focus 'a b'");
+      expect(command, endsWith(r"exec herdr agent focus '\''a b'\'''"));
+    });
+  });
+
+  group('HerdrAttentionProvider.focusCommand', () {
+    test('prefers the pane id over any name', () {
+      // Unnamed agents are labelled by their terminal title, which is not a
+      // valid focus target; the pane id always is.
       expect(
         provider.focusCommand(
           const AgentInfo(
             id: 'w1:p9',
-            name: '',
+            name: 'Tailscale audit for coolify URLs',
             pane: 'w1:p9',
             state: AgentAttentionState.idle,
           ),
         ),
-        'herdr agent focus w1:p9',
+        HerdrAttentionProvider.remoteCommand('agent focus w1:p9'),
       );
+    });
+
+    test('falls back to a live agent name only when it is one', () {
       expect(
         provider.focusCommand(
-          const AgentInfo(id: 'x', name: '', state: AgentAttentionState.idle),
+          const AgentInfo(
+            id: 'builder',
+            name: 'builder',
+            state: AgentAttentionState.idle,
+          ),
         ),
-        isNull,
+        HerdrAttentionProvider.remoteCommand('agent focus builder'),
       );
+      for (final name in ['', 'Needs Review', r"my agent's \$run", 'claude ']) {
+        expect(
+          provider.focusCommand(
+            AgentInfo(id: 'x', name: name, state: AgentAttentionState.idle),
+          ),
+          isNull,
+          reason: name,
+        );
+      }
     });
   });
 }

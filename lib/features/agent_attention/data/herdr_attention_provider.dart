@@ -8,10 +8,42 @@ import 'package:conduit/features/agent_attention/domain/agent_command_runner.dar
 /// Reads agent state from Herdr's documented machine-readable CLI
 /// (`herdr agent list` prints JSON; effective agent states are `idle`,
 /// `working`, `blocked`, `done`, and `unknown`).
+///
+/// Verified against Herdr 0.9.1, whose list entries look like
+/// `{"agent": "claude", "name": "reviewer", "agent_status": "working",
+/// "pane_id": "w1:p1", "tab_id": "w1:t1", "workspace_id": "w1",
+/// "terminal_title_stripped": "...", "state_change_seq": 42}` inside a
+/// `{"id": ..., "result": {"agents": [...]}}` envelope; `name` is only
+/// present for agents that were given a live name.
 class HerdrAttentionProvider implements AgentAttentionProvider {
   const HerdrAttentionProvider();
 
   static const _commandTimeout = Duration(seconds: 10);
+
+  /// Directories Herdr's installers use that a non-interactive SSH shell
+  /// does not put on PATH (`~/.bashrc`-only activation for mise, Homebrew,
+  /// Cargo, Nix, and the official `install.sh` default of `~/.local/bin`).
+  static const _extraPathDirs = [
+    r'$HOME/.local/bin',
+    r'$HOME/.local/share/mise/shims',
+    r'$HOME/.cargo/bin',
+    r'$HOME/.nix-profile/bin',
+    '/opt/homebrew/bin',
+    '/home/linuxbrew/.linuxbrew/bin',
+    '/usr/local/bin',
+  ];
+
+  /// Wraps `herdr [args]` so it runs under POSIX `sh` with the usual
+  /// user-local install directories prepended to PATH. SSH exec channels
+  /// get a non-login, non-interactive shell whose PATH rarely includes
+  /// them, which would otherwise read as "Herdr is not installed"; going
+  /// through `sh -c` also keeps the `PATH=... cmd` syntax working when the
+  /// login shell is fish or csh.
+  static String remoteCommand(String herdrArgs) {
+    final inner =
+        'PATH="${_extraPathDirs.join(':')}:\$PATH" exec herdr $herdrArgs';
+    return "sh -c '${inner.replaceAll("'", "'\\''")}'";
+  }
 
   @override
   String get id => 'herdr';
@@ -22,7 +54,7 @@ class HerdrAttentionProvider implements AgentAttentionProvider {
   @override
   Future<AgentAttentionSnapshot> fetchAgents(AgentCommandRunner runner) async {
     final result = await runner.run(
-      'herdr agent list',
+      remoteCommand('agent list'),
       timeout: _commandTimeout,
     );
     final stderr = result.stderr.trim();
@@ -41,19 +73,31 @@ class HerdrAttentionProvider implements AgentAttentionProvider {
       );
     }
     if (result.exitCode != null && result.exitCode != 0) {
-      throw AppFailure('Herdr reported an error.', _errorDetail(stderr));
+      throw _serverFailure(stderr);
     }
     return AgentAttentionSnapshot(agents: parseAgentList(result.stdout));
   }
 
+  /// Herdr focus targets are a pane id or a unique live agent name — never
+  /// a bare agent kind or a terminal title, which is what the display name
+  /// falls back to for unnamed agents. Prefer the pane id (always reported
+  /// and stable), and only trust the name when it fits Herdr's live-name
+  /// grammar.
   @override
   String? focusCommand(AgentInfo agent) {
-    final target = agent.name.isNotEmpty ? agent.name : agent.pane;
-    if (target == null || target.isEmpty) {
+    final pane = agent.pane;
+    final target = pane != null && pane.isNotEmpty
+        ? pane
+        : _liveAgentName.hasMatch(agent.name)
+        ? agent.name
+        : null;
+    if (target == null) {
       return null;
     }
-    return 'herdr agent focus ${_shellQuote(target)}';
+    return remoteCommand('agent focus ${_shellQuote(target)}');
   }
+
+  static final _liveAgentName = RegExp(r'^[a-z][a-z0-9_-]{0,31}$');
 
   /// Parses `herdr agent list` output into agent records.
   ///
@@ -72,6 +116,11 @@ class HerdrAttentionProvider implements AgentAttentionProvider {
       decoded = jsonDecode(trimmed);
     } catch (_) {
       throw const AppFailure('Herdr returned output that is not JSON.');
+    }
+    if (decoded is Map && decoded['error'] is Map) {
+      // Herdr normally reports errors on stderr with a non-zero exit, but a
+      // JSON error envelope on stdout is unambiguous too.
+      throw _serverFailure(trimmed);
     }
     final items = _extractAgentItems(decoded);
     if (items == null) {
@@ -118,16 +167,24 @@ class HerdrAttentionProvider implements AgentAttentionProvider {
     if (item is! Map) {
       return null;
     }
-    final name = _string(item, const ['name', 'agent', 'agent_name']) ?? '';
+    // `agent` is the kind (e.g. `claude`); the live name is optional and a
+    // stripped terminal title is the next best human label.
+    final liveName = _string(item, const ['name', 'agent_name']) ?? '';
     final pane = _string(item, const ['pane_id', 'pane']);
-    final id = pane?.isNotEmpty == true ? pane! : name;
+    final id = pane?.isNotEmpty == true ? pane! : liveName;
     if (id.isEmpty) {
       return null;
     }
+    final name = liveName.isNotEmpty
+        ? liveName
+        : _string(item, const ['terminal_title_stripped', 'terminal_title']) ??
+              id;
     return AgentInfo(
       id: id,
-      name: name.isNotEmpty ? name : id,
-      kind: _string(item, const ['kind', 'agent_kind', 'agent_type']) ?? '',
+      name: name,
+      kind:
+          _string(item, const ['kind', 'agent_kind', 'agent_type', 'agent']) ??
+          '',
       state: _parseState(
         _string(item, const ['state', 'agent_status', 'status']),
       ),
@@ -138,7 +195,10 @@ class HerdrAttentionProvider implements AgentAttentionProvider {
         item['state_changed_at'] ?? item['since'] ?? item['updated_at'],
       ),
       stateSequence: _int(
-        item['state_seq'] ?? item['seq'] ?? item['status_seq'],
+        item['state_change_seq'] ??
+            item['state_seq'] ??
+            item['seq'] ??
+            item['status_seq'],
       ),
     );
   }
@@ -194,25 +254,45 @@ class HerdrAttentionProvider implements AgentAttentionProvider {
     return null;
   }
 
-  static String _errorDetail(String stderr) {
-    if (stderr.isEmpty) {
-      return 'no error output';
+  /// Maps Herdr's `{"error": {"code", "message"}}` output to a failure. The
+  /// one code a user can act on from the phone gets its own wording; the
+  /// rest surface Herdr's message.
+  static AppFailure _serverFailure(String raw) {
+    if (raw.isEmpty) {
+      return const AppFailure('Herdr reported an error.', 'no error output');
     }
     try {
-      final decoded = jsonDecode(stderr);
+      final decoded = jsonDecode(raw);
       if (decoded is Map) {
         final error = decoded['error'];
-        if (error is Map && error['message'] is String) {
-          return error['message'] as String;
+        if (error is Map) {
+          if (error['code'] == 'server_not_running') {
+            return const AppFailure(
+              'Herdr is not running on this machine. Start it with "herdr" '
+              'to monitor its agents.',
+            );
+          }
+          if (error['message'] is String) {
+            return AppFailure(
+              'Herdr reported an error.',
+              error['message'] as String,
+            );
+          }
         }
         if (decoded['message'] is String) {
-          return decoded['message'] as String;
+          return AppFailure(
+            'Herdr reported an error.',
+            decoded['message'] as String,
+          );
         }
       }
     } catch (_) {
       // Fall through to the raw text.
     }
-    return stderr.length > 200 ? stderr.substring(0, 200) : stderr;
+    return AppFailure(
+      'Herdr reported an error.',
+      raw.length > 200 ? raw.substring(0, 200) : raw,
+    );
   }
 
   static String _shellQuote(String value) {
