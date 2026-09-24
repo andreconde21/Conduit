@@ -5,11 +5,24 @@ import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
+import 'package:conduit/features/agent_attention/data/ssh_agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
+import 'package:conduit/features/diff_view/data/ssh_git_diff_source.dart';
+import 'package:conduit/features/diff_view/presentation/diff_view.dart';
+import 'package:conduit/features/diff_view/presentation/diff_view_controller.dart';
+import 'package:conduit/features/diff_view/presentation/diff_view_tab.dart';
+import 'package:conduit/features/live_preview/data/secure_live_preview_port_store.dart';
+import 'package:conduit/features/live_preview/data/ssh_port_forwarder.dart';
+import 'package:conduit/features/live_preview/domain/live_preview_port_store.dart';
+import 'package:conduit/features/live_preview/presentation/live_preview_controller.dart';
+import 'package:conduit/features/live_preview/presentation/live_preview_port_dialog.dart';
+import 'package:conduit/features/live_preview/presentation/live_preview_tab.dart';
+import 'package:conduit/features/live_preview/presentation/live_preview_view.dart';
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/discard_changes_dialog.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/sftp_file_viewer.dart';
+import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:conduit/features/terminal/domain/security_key_interaction.dart';
 import 'package:conduit/features/terminal/presentation/security_key_picker_dialog.dart';
 import 'package:conduit/features/terminal/presentation/security_key_pin_dialog.dart';
@@ -20,11 +33,13 @@ import 'package:conduit/features/terminal/presentation/terminal_workspace_contro
 import 'package:conduit/features/terminal/presentation/widgets/empty_terminal_state.dart';
 import 'package:conduit/features/terminal/presentation/widgets/prompt_composer_sheet.dart';
 import 'package:conduit/features/terminal/presentation/widgets/session_tabs.dart';
+import 'package:conduit/features/terminal/presentation/widgets/session_tools_menu.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_header.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_surface.dart';
 import 'package:conduit_vt/conduit_vt.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 class TerminalPage extends StatefulWidget {
@@ -33,6 +48,10 @@ class TerminalPage extends StatefulWidget {
     required this.themeController,
     required this.sftpRepository,
     this.agentAttention,
+    this.hostKeyVerifier,
+    this.livePreviewPortStore = const SecureLivePreviewPortStore(
+      FlutterSecureStorage(),
+    ),
     super.key,
   });
 
@@ -42,6 +61,13 @@ class TerminalPage extends StatefulWidget {
 
   /// Optional Agent Attention monitoring; null hides the dashboard.
   final AgentAttentionController? agentAttention;
+
+  /// Opens the extra SSH connections behind the session tools (git diff,
+  /// live preview); null hides the tools menu.
+  final HostKeyVerifier? hostKeyVerifier;
+
+  /// Remembers the last previewed port per host.
+  final LivePreviewPortStore livePreviewPortStore;
 
   @override
   State<TerminalPage> createState() => _TerminalPageState();
@@ -234,6 +260,126 @@ class _TerminalPageState extends State<TerminalPage> {
     );
   }
 
+  void _openSessionTool(TerminalSessionController session, SessionTool tool) {
+    switch (tool) {
+      case SessionTool.gitDiff:
+        _openGitDiff(session);
+      case SessionTool.livePreview:
+        unawaited(_openLivePreview(session));
+    }
+  }
+
+  void _openGitDiff(TerminalSessionController session) {
+    final verifier = widget.hostKeyVerifier;
+    if (verifier == null) {
+      return;
+    }
+    final host = session.host;
+    final tab = _fileTabs.add(
+      DiffViewTab(
+        host: host,
+        controller: DiffViewController(
+          SshGitDiffSource(SshAgentCommandRunner(verifier, host), host),
+        ),
+      ),
+    );
+    if (tab is DiffViewTab && tab.controller.phase == DiffViewPhase.idle) {
+      unawaited(tab.controller.start());
+    }
+  }
+
+  Future<void> _openLivePreview(TerminalSessionController session) async {
+    final verifier = widget.hostKeyVerifier;
+    if (verifier == null) {
+      return;
+    }
+    final host = session.host;
+    final existing = _fileTabs.tabs
+        .whereType<LivePreviewTab>()
+        .where((tab) => tab.host.id == host.id)
+        .firstOrNull;
+    if (existing != null) {
+      _fileTabs.activate(existing);
+      return;
+    }
+    final controller = LivePreviewController(
+      SshPortForwarder(verifier, host),
+      hostId: host.id,
+      portStore: widget.livePreviewPortStore,
+      commandRunner: SshAgentCommandRunner(verifier, host),
+    );
+    final initialPort = await controller.suggestedPort();
+    if (!mounted) {
+      controller.dispose();
+      return;
+    }
+    final port = await showLivePreviewPortDialog(
+      context,
+      initialPort: initialPort,
+      detectPorts: controller.detectPorts,
+      hostName: host.name,
+    );
+    if (port == null || !mounted) {
+      controller.dispose();
+      return;
+    }
+    controller.attachSession(session, () => session.isConnected);
+    _fileTabs.add(LivePreviewTab(host: host, controller: controller));
+    unawaited(controller.start(port));
+  }
+
+  Future<void> _changePreviewPort(LivePreviewTab tab) async {
+    final controller = tab.controller;
+    final initialPort =
+        controller.remotePort ?? await controller.suggestedPort();
+    if (!mounted) {
+      return;
+    }
+    final port = await showLivePreviewPortDialog(
+      context,
+      initialPort: initialPort,
+      detectPorts: controller.detectPorts,
+      hostName: tab.host.name,
+    );
+    if (port != null && mounted) {
+      unawaited(controller.start(port));
+    }
+  }
+
+  Widget _buildFileTab(
+    TerminalFileTab tab,
+    AppPalette palette,
+    Brightness brightness,
+  ) {
+    final fontFamily = widget.themeController.terminalFont.fontFamily;
+    return switch (tab) {
+      DiffViewTab() => DiffView(
+        key: ValueKey(tab),
+        controller: tab.controller,
+        palette: palette,
+        brightness: brightness,
+        fontFamily: fontFamily,
+        onOpenFile: (path) => _fileTabs.open(tab.host, path),
+      ),
+      LivePreviewTab() => LivePreviewView(
+        key: ValueKey(tab),
+        controller: tab.controller,
+        palette: palette,
+        brightness: brightness,
+        onChangePort: () => unawaited(_changePreviewPort(tab)),
+      ),
+      _ => SftpFileViewer(
+        key: tab.viewerKey,
+        path: tab.path,
+        palette: palette,
+        brightness: brightness,
+        fontFamily: fontFamily,
+        read: (onProgress) => _fileTabs.read(tab, onProgress),
+        write: (bytes) => _fileTabs.write(tab, bytes),
+      ),
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -294,6 +440,15 @@ class _TerminalPageState extends State<TerminalPage> {
                               onOpenAgentAttention: showAgents
                                   ? () => _openAgentAttention(attention)
                                   : null,
+                              actions: [
+                                if (widget.hostKeyVerifier != null &&
+                                    !activeSession.host.isLocal)
+                                  SessionToolsMenu(
+                                    color: palette.foregroundFor(brightness),
+                                    onSelected: (tool) =>
+                                        _openSessionTool(activeSession, tool),
+                                  ),
+                              ],
                             );
                           },
                         ),
@@ -365,20 +520,7 @@ class _TerminalPageState extends State<TerminalPage> {
                                           _handlePathTap(session, path),
                                     ),
                                   for (final tab in fileTabs)
-                                    SftpFileViewer(
-                                      key: tab.viewerKey,
-                                      path: tab.path,
-                                      palette: palette,
-                                      brightness: brightness,
-                                      fontFamily: widget
-                                          .themeController
-                                          .terminalFont
-                                          .fontFamily,
-                                      read: (onProgress) =>
-                                          _fileTabs.read(tab, onProgress),
-                                      write: (bytes) =>
-                                          _fileTabs.write(tab, bytes),
-                                    ),
+                                    _buildFileTab(tab, palette, brightness),
                                 ],
                               ),
                       ),

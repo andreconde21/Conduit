@@ -11,6 +11,7 @@ class TerminalHeader extends StatelessWidget {
     required this.onReconnect,
     this.attentionCount = 0,
     this.onOpenAgentAttention,
+    this.actions = const [],
     super.key,
   });
 
@@ -25,6 +26,9 @@ class TerminalHeader extends StatelessWidget {
 
   /// Opens the Agent Attention dashboard; null hides the button.
   final VoidCallback? onOpenAgentAttention;
+
+  /// Extra buttons shown before Reconnect (e.g. the session tools menu).
+  final List<Widget> actions;
 
   @override
   Widget build(BuildContext context) {
@@ -86,6 +90,7 @@ class TerminalHeader extends StatelessWidget {
               ),
               onPressed: onOpenAgentAttention,
             ),
+          ...actions,
           IconButton(
             tooltip: 'Reconnect',
             color: foreground,

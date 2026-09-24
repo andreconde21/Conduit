@@ -448,6 +448,7 @@ class _HostsPageState extends State<HostsPage> {
           themeController: widget.themeController,
           sftpRepository: widget.sftpRepository,
           agentAttention: widget.agentAttention,
+          hostKeyVerifier: widget.hostKeyVerifier,
         ),
       ),
     );
