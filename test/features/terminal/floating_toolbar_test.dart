@@ -62,7 +62,7 @@ void main() {
               onToggleCompose: onToggleCompose,
               onEnterTmuxScrollMode: () {},
               onExitTmuxScrollMode: () {},
-              tmuxPrefixKey: TmuxPrefixKey.controlB,
+              tmuxPrefixKey: MultiplexerPrefixKey.controlB,
               tmuxScrollMode: false,
             ).withToolbarStyle(style, onReconnect: onReconnect),
           ],
