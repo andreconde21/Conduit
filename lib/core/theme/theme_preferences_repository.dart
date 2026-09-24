@@ -19,6 +19,7 @@ class ThemePreferences {
     this.terminalEnterSequence = TerminalEnterSequence.cr,
     this.touchModeHintSeen = false,
     this.composeSubmitEnter = false,
+    this.terminalToolbarStyle = TerminalToolbarStyle.floatingPill,
   });
 
   final ThemeMode themeMode;
@@ -37,6 +38,10 @@ class ThemePreferences {
   /// Whether the prompt composer presses Enter after inserting a prompt.
   /// Off by default so composed text lands in the TUI for review.
   final bool composeSubmitEnter;
+
+  /// Which input toolbar the terminal page shows; the floating pill is the
+  /// default, the key rows remain available as the classic layout.
+  final TerminalToolbarStyle terminalToolbarStyle;
 }
 
 class ThemePreferencesRepository {
@@ -57,6 +62,7 @@ class ThemePreferencesRepository {
   static const _terminalEnterSequenceKey = 'conduit.terminal_enter_sequence.v1';
   static const _touchModeHintSeenKey = 'conduit.touch_mode_hint_seen.v1';
   static const _composeSubmitEnterKey = 'conduit.compose_submit_enter.v1';
+  static const _terminalToolbarStyleKey = 'conduit.terminal_toolbar_style.v1';
 
   final FlutterSecureStorage _storage;
 
@@ -87,6 +93,9 @@ class ThemePreferencesRepository {
     );
     final rawComposeSubmitEnter = await _storage.read(
       key: _composeSubmitEnterKey,
+    );
+    final rawTerminalToolbarStyle = await _storage.read(
+      key: _terminalToolbarStyleKey,
     );
     final terminalFontSize = double.tryParse(rawTerminalFontSize ?? '');
     final terminalKeyboardRows = _appendUnseenBuiltIns(
@@ -123,6 +132,10 @@ class ThemePreferencesRepository {
       ),
       touchModeHintSeen: rawTouchModeHintSeen == 'true',
       composeSubmitEnter: rawComposeSubmitEnter == 'true',
+      terminalToolbarStyle: TerminalToolbarStyle.values.firstWhere(
+        (style) => style.name == rawTerminalToolbarStyle,
+        orElse: () => TerminalToolbarStyle.floatingPill,
+      ),
     );
   }
 
@@ -180,6 +193,10 @@ class ThemePreferencesRepository {
     await _storage.write(
       key: _composeSubmitEnterKey,
       value: preferences.composeSubmitEnter.toString(),
+    );
+    await _storage.write(
+      key: _terminalToolbarStyleKey,
+      value: preferences.terminalToolbarStyle.name,
     );
   }
 

@@ -145,6 +145,7 @@ class AppBackupService {
       'terminalMouseInput': _themeController.terminalMouseInput,
       'terminalEnterSequence': _themeController.terminalEnterSequence.name,
       'composeSubmitEnter': _themeController.composeSubmitEnter,
+      'terminalToolbarStyle': _themeController.terminalToolbarStyle.name,
     };
   }
 
@@ -206,6 +207,12 @@ class AppBackupService {
     if (composeSubmitEnter is bool) {
       await _themeController.setComposeSubmitEnter(composeSubmitEnter);
     }
+    await _themeController.setTerminalToolbarStyle(
+      TerminalToolbarStyle.values.firstWhere(
+        (style) => style.name == json['terminalToolbarStyle'],
+        orElse: () => _themeController.terminalToolbarStyle,
+      ),
+    );
   }
 
   Map<String, Object?> _decodeDocument(Uint8List bytes) {

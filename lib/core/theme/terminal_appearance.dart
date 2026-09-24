@@ -2,6 +2,24 @@ enum TerminalFontOption { systemMonospace, atkynsonNerdFont }
 
 enum TerminalEnterSequence { cr, lf, crlf }
 
+/// Which input toolbar the terminal page shows above the soft keyboard.
+enum TerminalToolbarStyle { floatingPill, keyRows }
+
+extension TerminalToolbarStyleDetails on TerminalToolbarStyle {
+  String get label => switch (this) {
+    TerminalToolbarStyle.floatingPill => 'Floating pill',
+    TerminalToolbarStyle.keyRows => 'Key rows',
+  };
+
+  String get description => switch (this) {
+    TerminalToolbarStyle.floatingPill =>
+      'Compact pill with Ctrl, Esc, Tab, an arrow pad and quick actions. '
+          'The key rows stay one tap away behind the ⋯ button.',
+    TerminalToolbarStyle.keyRows =>
+      'Full-width rows of every configured key.',
+  };
+}
+
 const terminalFontSizeDefault = 13.5;
 const terminalFontSizeMin = 4.0;
 const terminalFontSizeMax = 30.0;
