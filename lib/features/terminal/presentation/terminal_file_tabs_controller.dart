@@ -6,9 +6,12 @@ import 'package:conduit/features/sftp/domain/sftp_repository.dart';
 import 'package:conduit/features/sftp/domain/sftp_session.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/sftp_file_viewer.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 
 /// A file opened from terminal output, shown as a tab beside session tabs.
+///
+/// Subclasses host other per-host views (a git diff, a live preview) in the
+/// same tab strip; they override [title], [icon] and [dispose].
 class TerminalFileTab {
   TerminalFileTab({required this.host, required this.path});
 
@@ -17,6 +20,24 @@ class TerminalFileTab {
   final GlobalKey<SftpFileViewerState> viewerKey = GlobalKey();
 
   String get title => remoteFileName(path);
+
+  IconData get icon => Icons.description_rounded;
+
+  /// Shown on long-press of the tab: the remote path for files.
+  String get tooltip => path;
+
+  /// Notifies when [title] may have changed; null for a static title.
+  Listenable? get listenable => null;
+
+  /// Whether [other] shows the same thing, so opening it again re-activates
+  /// this tab instead of adding a duplicate.
+  bool matches(TerminalFileTab other) =>
+      other.runtimeType == runtimeType &&
+      other.host.id == host.id &&
+      other.path == path;
+
+  /// Releases resources when the tab is closed or the workspace goes away.
+  void dispose() {}
 }
 
 /// Viewer tabs for the terminal workspace, with one pooled SFTP session per
@@ -33,17 +54,21 @@ class TerminalFileTabsController extends ChangeNotifier {
   List<TerminalFileTab> get tabs => List.unmodifiable(_tabs);
   TerminalFileTab? get active => _active;
 
-  TerminalFileTab open(SavedHost host, String path) {
-    final existing = _tabs
-        .where((tab) => tab.host.id == host.id && tab.path == path)
-        .firstOrNull;
-    final tab = existing ?? TerminalFileTab(host: host, path: path);
-    if (existing == null) {
+  TerminalFileTab open(SavedHost host, String path) =>
+      add(TerminalFileTab(host: host, path: path));
+
+  /// Adds [tab] and activates it, or activates the existing tab it
+  /// [TerminalFileTab.matches] (disposing the redundant [tab]).
+  TerminalFileTab add(TerminalFileTab tab) {
+    final existing = _tabs.where((other) => other.matches(tab)).firstOrNull;
+    if (existing != null) {
+      tab.dispose();
+    } else {
       _tabs.add(tab);
     }
-    _active = tab;
+    _active = existing ?? tab;
     notifyListeners();
-    return tab;
+    return _active!;
   }
 
   void activate(TerminalFileTab? tab) {
@@ -64,6 +89,7 @@ class TerminalFileTabsController extends ChangeNotifier {
     if (_tabs.every((other) => other.host.id != tab.host.id)) {
       _closeSession(tab.host.id);
     }
+    tab.dispose();
     notifyListeners();
   }
 
@@ -140,6 +166,9 @@ class TerminalFileTabsController extends ChangeNotifier {
   void dispose() {
     for (final hostId in List.of(_sessions.keys)) {
       _closeSession(hostId);
+    }
+    for (final tab in _tabs) {
+      tab.dispose();
     }
     _tabs.clear();
     super.dispose();

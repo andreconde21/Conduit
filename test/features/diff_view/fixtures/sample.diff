@@ -1,0 +1,49 @@
+diff --git a/lib/app.dart b/lib/app.dart
+index 3b18e51..a1b2c3d 100644
+--- a/lib/app.dart
++++ b/lib/app.dart
+@@ -1,6 +1,7 @@ class App {
+ import 'a.dart';
+-import 'b.dart';
++import 'b.dart';
++import 'c.dart';
+ 
+ void main() {
+-  runApp(const App(title: 'Old'));
++  runApp(const App(title: 'New'));
+ }
+@@ -20,3 +21,4 @@ class App extends StatelessWidget {
+   final String title;
++  final int count = 0;
+ }
+ 
+diff --git a/README.md b/README.md
+new file mode 100644
+index 0000000..9daeafb
+--- /dev/null
++++ b/README.md
+@@ -0,0 +1,2 @@
++# Title
++text
+\ No newline at end of file
+diff --git a/old.txt b/old.txt
+deleted file mode 100644
+index e69de29..0000000
+--- a/old.txt
++++ /dev/null
+@@ -1 +0,0 @@
+-gone
+diff --git a/docs/a.md b/docs/b.md
+similarity index 100%
+rename from docs/a.md
+rename to docs/b.md
+diff --git a/assets/logo.png b/assets/logo.png
+index 1111111..2222222 100644
+Binary files a/assets/logo.png and b/assets/logo.png differ
+diff --git "a/sp ace/f\303\274.txt" "b/sp ace/f\303\274.txt"
+index 1111111..2222222 100644
+--- "a/sp ace/f\303\274.txt"
++++ "b/sp ace/f\303\274.txt"
+@@ -1 +1 @@
+-x
++y

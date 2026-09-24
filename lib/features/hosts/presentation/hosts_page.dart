@@ -682,6 +682,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
           themeController: widget.themeController,
           sftpRepository: widget.sftpRepository,
           agentAttention: widget.agentAttention,
+          hostKeyVerifier: widget.hostKeyVerifier,
           connectFlow: widget.connectFlow,
         ),
       ),

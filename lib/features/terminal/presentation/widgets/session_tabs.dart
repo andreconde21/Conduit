@@ -114,23 +114,28 @@ class _SessionTabsState extends State<SessionTabs> {
             final tab = fileTabs[index - sessions.length];
             final selected = tab == widget.activeFileTab;
             final dirty = tab.viewerKey.currentState?.isDirty ?? false;
-            return _Tab(
+            // Tool tabs (git diff, live preview) retitle themselves as
+            // their state changes, so the label listens to the tab.
+            return ListenableBuilder(
               key: selected ? _activeKey : ValueKey(tab),
-              label: tab.title,
-              tooltip: tab.path,
-              leading: Icon(
-                Icons.description_rounded,
-                size: 13,
-                color: selected
-                    ? widget.palette.accent
-                    : widget.palette.mutedForegroundFor(widget.brightness),
+              listenable: tab.listenable ?? _inertListenable,
+              builder: (context, _) => _Tab(
+                label: tab.title,
+                tooltip: tab.tooltip,
+                leading: Icon(
+                  tab.icon,
+                  size: 13,
+                  color: selected
+                      ? widget.palette.accent
+                      : widget.palette.mutedForegroundFor(widget.brightness),
+                ),
+                dirty: dirty,
+                selected: selected,
+                palette: widget.palette,
+                brightness: widget.brightness,
+                onTap: () => widget.onFileTabSelected(tab),
+                onClose: () => widget.onFileTabClosed(tab),
               ),
-              dirty: dirty,
-              selected: selected,
-              palette: widget.palette,
-              brightness: widget.brightness,
-              onTap: () => widget.onFileTabSelected(tab),
-              onClose: () => widget.onFileTabClosed(tab),
             );
           }
           final session = sessions[index];
@@ -162,6 +167,8 @@ class _SessionTabsState extends State<SessionTabs> {
     );
   }
 }
+
+final Listenable _inertListenable = ChangeNotifier();
 
 class _Tab extends StatelessWidget {
   const _Tab({

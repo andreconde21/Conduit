@@ -32,6 +32,7 @@ class TerminalHeader extends StatelessWidget {
     this.onNewSession,
     this.attentionCount = 0,
     this.onOpenAgentAttention,
+    this.actions = const [],
     this.onOpenSessionGrid,
     this.swipeDownOpensSessionGrid = true,
     super.key,
@@ -66,6 +67,10 @@ class TerminalHeader extends StatelessWidget {
 
   /// Opens the Agent Attention dashboard; null hides the button.
   final VoidCallback? onOpenAgentAttention;
+
+  /// Extra buttons shown before the overflow menu (e.g. the session tools
+  /// menu).
+  final List<Widget> actions;
 
   /// Opens the session home grid; null hides the button.
   final VoidCallback? onOpenSessionGrid;
@@ -127,6 +132,7 @@ class TerminalHeader extends StatelessWidget {
                 ),
                 onPressed: onOpenAgentAttention!,
               ),
+            ...actions,
             _OverflowMenu(
               session: session,
               color: foreground,
