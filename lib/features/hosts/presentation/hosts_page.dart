@@ -4,6 +4,8 @@ import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/presentation/theme_sheet.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
+import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
+import 'package:conduit/features/agent_attention/data/ssh_agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
@@ -592,12 +594,43 @@ class _HostsPageState extends State<HostsPage> {
   Future<void> _openForm([SavedHost? host]) async {
     final savedHost = await Navigator.of(context).push<SavedHost>(
       MaterialPageRoute(
-        builder: (_) =>
-            HostFormPage(host: host, themeController: widget.themeController),
+        builder: (_) => HostFormPage(
+          host: host,
+          themeController: widget.themeController,
+          companionDoctor: _companionDoctor,
+        ),
       ),
     );
     if (savedHost != null) {
       await widget.hostsController.upsert(savedHost);
+    }
+  }
+
+  /// Runs `conductore-hostd doctor` over a one-off exec connection to the
+  /// host the form describes (the same auth stack as agent monitoring).
+  Future<String> _companionDoctor(SavedHost draft) async {
+    final runner = SshAgentCommandRunner(widget.hostKeyVerifier, draft);
+    try {
+      final result = await runner.run(
+        ConductoreHostAttentionProvider.doctorCommand,
+        timeout: const Duration(seconds: 20),
+      );
+      if (result.exitCode == 127) {
+        return 'conductore-hostd is not installed on ${draft.name}.\n\n'
+            'Install it there (see the Conductore host companion docs), '
+            'run "conductore-hostd install" to set up the Claude Code hooks, '
+            'then check again.';
+      }
+      final output = [
+        result.stdout.trim(),
+        result.stderr.trim(),
+      ].where((part) => part.isNotEmpty).join('\n');
+      final status = result.exitCode == null || result.exitCode == 0
+          ? 'OK'
+          : 'exit ${result.exitCode}';
+      return 'conductore-hostd doctor: $status\n\n$output';
+    } finally {
+      unawaited(runner.close());
     }
   }
 
