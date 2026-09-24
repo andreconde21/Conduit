@@ -201,7 +201,12 @@ void main() {
     }
 
     Future<void> enterComposeMode(WidgetTester tester) async {
-      await tester.tap(find.text('Chat'));
+      // The floating pill (the default toolbar) has its own chat button; the
+      // key-row style reaches compose mode through the Chat key.
+      final pillChat = find.byKey(const ValueKey('toolbar-chat'));
+      await tester.tap(
+        pillChat.evaluate().isEmpty ? find.text('Chat') : pillChat,
+      );
       await tester.pump();
     }
 
