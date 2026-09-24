@@ -5,6 +5,7 @@ import 'dart:math';
 
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
+import 'package:conduit/core/theme/terminal_pill_items.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/domain/saved_hosts_repository.dart';
@@ -147,6 +148,9 @@ class AppBackupService {
       'terminalEnterSequence': _themeController.terminalEnterSequence.name,
       'composeSubmitEnter': _themeController.composeSubmitEnter,
       'terminalToolbarStyle': _themeController.terminalToolbarStyle.name,
+      'terminalPillItems': TerminalPillItem.encodeList(
+        _themeController.terminalPillItems,
+      ),
       'menuButtonsEnabled': _themeController.menuButtonsEnabled,
       'terminalGestures': _themeController.terminalGestures.toJson(),
       'speechLanguage': _themeController.speechLanguage,
@@ -217,6 +221,11 @@ class AppBackupService {
         orElse: () => _themeController.terminalToolbarStyle,
       ),
     );
+    if (json['terminalPillItems'] is List) {
+      await _themeController.setTerminalPillItems(
+        TerminalPillItem.decodeList(json['terminalPillItems']),
+      );
+    }
     final menuButtonsEnabled = json['menuButtonsEnabled'];
     if (menuButtonsEnabled is bool) {
       await _themeController.setMenuButtonsEnabled(menuButtonsEnabled);

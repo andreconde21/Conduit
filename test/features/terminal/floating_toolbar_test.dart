@@ -1,7 +1,10 @@
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
+import 'package:conduit/core/theme/terminal_pill_items.dart';
+import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
+import 'package:conduit/features/terminal/domain/herdr_navigator.dart';
 import 'package:conduit/features/terminal/presentation/terminal_keyboard_bar.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/widgets/floating_toolbar.dart';
@@ -12,9 +15,15 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../support/test_doubles.dart';
+import 'herdr/fake_herdr_runner.dart';
 
 const _pill = ValueKey('floating-toolbar-pill');
 const _arrows = ValueKey('toolbar-arrows');
+const _withArrows = [
+  TerminalPillItem.button(TerminalPillButton.ctrl),
+  TerminalPillItem.button(TerminalPillButton.esc),
+  TerminalPillItem.button(TerminalPillButton.arrows),
+];
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -27,6 +36,11 @@ void main() {
     VoidCallback? onToggleCompose,
     Future<void> Function()? onReconnect,
     TerminalToolbarStyle style = TerminalToolbarStyle.floatingPill,
+    List<TerminalPillItem> pillItems = defaultTerminalPillItems,
+    ValueChanged<List<TerminalPillItem>>? onPillItemsChanged,
+    PillCommandRunnerFactory? runnerFactory,
+    List<TerminalKeyboardItem> extraRowItems = const [],
+    MultiplexerPrefixKey prefix = MultiplexerPrefixKey.controlB,
   }) {
     return MaterialApp(
       home: Scaffold(
@@ -43,15 +57,16 @@ void main() {
               focusNode: focusNode,
               palette: AppPalette.catppuccin,
               brightness: Brightness.dark,
-              rows: const [
+              rows: [
                 TerminalKeyboardRow(
                   items: [
-                    TerminalKeyboardItem.builtIn(
+                    const TerminalKeyboardItem.builtIn(
                       TerminalKeyboardAction.herdrMenu,
                     ),
-                    TerminalKeyboardItem.builtIn(
+                    const TerminalKeyboardItem.builtIn(
                       TerminalKeyboardAction.tmuxMenu,
                     ),
+                    ...extraRowItems,
                   ],
                 ),
               ],
@@ -62,9 +77,15 @@ void main() {
               onToggleCompose: onToggleCompose,
               onEnterTmuxScrollMode: () {},
               onExitTmuxScrollMode: () {},
-              tmuxPrefixKey: MultiplexerPrefixKey.controlB,
+              tmuxPrefixKey: prefix,
               tmuxScrollMode: false,
-            ).withToolbarStyle(style, onReconnect: onReconnect),
+            ).withToolbarStyle(
+              style,
+              onReconnect: onReconnect,
+              pillItems: pillItems,
+              onPillItemsChanged: onPillItemsChanged,
+              runnerFactory: runnerFactory,
+            ),
           ],
         ),
       ),
@@ -180,7 +201,11 @@ void main() {
       addTearDown(controller.dispose);
 
       await tester.pumpWidget(
-        buildToolbar(controller: controller, focusNode: focusNode),
+        buildToolbar(
+          controller: controller,
+          focusNode: focusNode,
+          pillItems: _withArrows,
+        ),
       );
 
       final pad = find.byKey(_arrows);
@@ -238,7 +263,11 @@ void main() {
       addTearDown(controller.dispose);
 
       await tester.pumpWidget(
-        buildToolbar(controller: controller, focusNode: focusNode),
+        buildToolbar(
+          controller: controller,
+          focusNode: focusNode,
+          pillItems: _withArrows,
+        ),
       );
 
       final pad = find.byKey(_arrows);
@@ -381,6 +410,9 @@ void main() {
       final withInset = tester.getBottomRight(find.byKey(_pill)).dy;
       expect(withInset, lessThanOrEqualTo(screenHeight - inset));
       expect(withInset, lessThanOrEqualTo(withoutInset - inset));
+      // Exactly the pill gap above the navigation bar, like Moshi.
+      expect(withInset, screenHeight - inset - floatingToolbarBottomGap);
+      expect(tester.getSize(find.byKey(_pill)).height, 40);
     });
 
     testWidgets('the overflow button reveals and hides the key rows', (
@@ -499,6 +531,303 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('toolbar-keyboard')));
       await tester.pump();
       expect(textInputCalls, ['TextInput.show', 'TextInput.hide']);
+    });
+
+    testWidgets('default pill is Moshi-compact: 40 dp high, 36 dp buttons, '
+        'Moshi set plus Herdr in order', (tester) async {
+      final controller = _RecordingTerminalSessionController();
+      final focusNode = FocusNode();
+      addTearDown(focusNode.dispose);
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(
+        buildToolbar(controller: controller, focusNode: focusNode),
+      );
+
+      expect(tester.getSize(find.byKey(_pill)).height, 40);
+      for (final key in ['toolbar-herdr', 'toolbar-paste', 'toolbar-more']) {
+        expect(tester.getSize(find.byKey(ValueKey(key))), const Size(36, 36));
+      }
+      expect(
+        tester.getSize(find.byKey(const ValueKey('toolbar-esc'))).height,
+        36,
+      );
+      final order = [
+        'toolbar-ctrl',
+        'toolbar-esc',
+        'toolbar-tab',
+        'toolbar-herdr',
+        'toolbar-redraw',
+        'toolbar-paste',
+        'toolbar-chat',
+        'toolbar-keyboard',
+        'toolbar-more',
+      ];
+      final xs = [
+        for (final key in order) tester.getCenter(find.byKey(ValueKey(key))).dx,
+      ];
+      expect(xs, [...xs]..sort());
+      expect(find.byKey(_arrows), findsNothing);
+      final icon = tester.widget<Icon>(
+        find.descendant(
+          of: find.byKey(const ValueKey('toolbar-paste')),
+          matching: find.byType(Icon),
+        ),
+      );
+      expect(icon.size, 20);
+    });
+
+    testWidgets('configured buttons, custom keys and the Tmux key appear in '
+        'the chosen order', (tester) async {
+      final controller = _RecordingTerminalSessionController();
+      final focusNode = FocusNode();
+      addTearDown(focusNode.dispose);
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(
+        buildToolbar(
+          controller: controller,
+          focusNode: focusNode,
+          pillItems: const [
+            TerminalPillItem.custom('deploy'),
+            TerminalPillItem.button(TerminalPillButton.tmux),
+            TerminalPillItem.custom('gone'),
+            TerminalPillItem.button(TerminalPillButton.esc),
+          ],
+          extraRowItems: const [
+            TerminalKeyboardItem(
+              id: 'deploy',
+              kind: TerminalKeyboardItemKind.customText,
+              label: 'Deploy',
+              text: 'make deploy',
+              submit: true,
+            ),
+          ],
+        ),
+      );
+
+      expect(find.byKey(const ValueKey('toolbar-ctrl')), findsNothing);
+      expect(find.byKey(const ValueKey('toolbar-custom-gone')), findsNothing);
+      final deployX = tester.getCenter(find.text('Deploy')).dx;
+      final tmuxX = tester
+          .getCenter(find.byKey(const ValueKey('toolbar-tmux')))
+          .dx;
+      final escX = tester.getCenter(find.text('Esc')).dx;
+      expect(deployX, lessThan(tmuxX));
+      expect(tmuxX, lessThan(escX));
+
+      await tester.tap(find.text('Deploy'));
+      expect(controller.sentText, ['make deploy\r']);
+    });
+
+    testWidgets('long-press on ⋯ opens the configurator; reorder, remove and '
+        'add are saved', (tester) async {
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 2.625;
+      addTearDown(tester.view.reset);
+      final controller = _RecordingTerminalSessionController();
+      final focusNode = FocusNode();
+      addTearDown(focusNode.dispose);
+      addTearDown(controller.dispose);
+      final saved = <List<TerminalPillItem>>[];
+
+      await tester.pumpWidget(
+        buildToolbar(
+          controller: controller,
+          focusNode: focusNode,
+          onPillItemsChanged: saved.add,
+        ),
+      );
+
+      await tester.longPress(find.byKey(const ValueKey('toolbar-more')));
+      await tester.pumpAndSettle();
+      expect(find.text('Toolbar buttons'), findsOneWidget);
+
+      // Drag Ctrl below Esc and Tab.
+      final ctrlRow = find.byKey(const ValueKey('pill-config-item-ctrl'));
+      final handle = find.descendant(
+        of: ctrlRow,
+        matching: find.byIcon(Icons.drag_indicator_rounded),
+      );
+      final rowHeight = tester.getSize(ctrlRow).height;
+      final gesture = await tester.startGesture(tester.getCenter(handle));
+      await tester.pump();
+      for (var step = 0; step < 10; step += 1) {
+        await gesture.moveBy(Offset(0, rowHeight * 1.8 / 10));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('pill-config-remove-paste')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('pill-config-add-arrows')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('pill-config-add-arrows')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('pill-config-save')));
+      await tester.pumpAndSettle();
+
+      expect(saved, hasLength(1));
+      expect(saved.single.map((item) => item.encode()), [
+        'esc',
+        'tab',
+        'ctrl',
+        'herdr',
+        'reconnect',
+        'chat',
+        'keyboard',
+        'arrows',
+      ]);
+    });
+
+    testWidgets('the configurator can be cancelled and is off without a '
+        'save callback', (tester) async {
+      final controller = _RecordingTerminalSessionController();
+      final focusNode = FocusNode();
+      addTearDown(focusNode.dispose);
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(
+        buildToolbar(controller: controller, focusNode: focusNode),
+      );
+      await tester.longPress(find.byKey(const ValueKey('toolbar-more')));
+      await tester.pumpAndSettle();
+      expect(find.text('Toolbar buttons'), findsNothing);
+    });
+
+    testWidgets('Herdr button lists panes, highlights the current one and '
+        'switches with herdr agent focus', (tester) async {
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 2.625;
+      addTearDown(tester.view.reset);
+      HerdrPaneListingCache.instance.clear();
+      final controller = _RecordingTerminalSessionController();
+      final focusNode = FocusNode();
+      addTearDown(focusNode.dispose);
+      addTearDown(controller.dispose);
+      final runners = <FakeHerdrRunner>[];
+
+      await tester.pumpWidget(
+        buildToolbar(
+          controller: controller,
+          focusNode: focusNode,
+          runnerFactory: (host) {
+            final runner = FakeHerdrRunner.withPanes();
+            runners.add(runner);
+            return runner;
+          },
+        ),
+      );
+
+      await tester.tap(find.byKey(const ValueKey('toolbar-herdr')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('reviewer'), findsOneWidget);
+      expect(find.text('fix-auth'), findsOneWidget);
+      expect(find.text('logs'), findsOneWidget);
+      expect(find.text('Current'), findsNWidgets(1));
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('herdr-pane-w1:p1')),
+          matching: find.text('Current'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Needs input'), findsOneWidget);
+      // Shortcuts follow the panes, grouped.
+      expect(find.text('Splits'), findsOneWidget);
+      expect(
+        tester.getTopLeft(find.text('fix-auth')).dy,
+        lessThan(tester.getTopLeft(find.text('Splits')).dy),
+      );
+
+      await tester.tap(find.text('fix-auth'));
+      await tester.pumpAndSettle();
+
+      expect(runners, hasLength(1));
+      expect(runners.single.commands.last, contains('agent focus w2:p1'));
+      expect(runners.single.closed, isTrue);
+      expect(controller.sentControlKeys, isEmpty);
+      expect(controller.sentText, isEmpty);
+
+      // The cached listing shows at once on the next open.
+      await tester.tap(find.byKey(const ValueKey('toolbar-herdr')));
+      await tester.pump();
+      expect(find.text('reviewer'), findsOneWidget);
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('Herdr navigator says Herdr is not found and its shortcuts '
+        'still send the host prefix', (tester) async {
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 2.625;
+      addTearDown(tester.view.reset);
+      HerdrPaneListingCache.instance.clear();
+      final controller = _RecordingTerminalSessionController();
+      final focusNode = FocusNode();
+      addTearDown(focusNode.dispose);
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(
+        buildToolbar(
+          controller: controller,
+          focusNode: focusNode,
+          prefix: MultiplexerPrefixKey.controlSpace,
+          runnerFactory: (host) => FakeHerdrRunner.notInstalled(),
+        ),
+      );
+
+      await tester.tap(find.byKey(const ValueKey('toolbar-herdr')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('herdr-not-found')), findsOneWidget);
+      expect(find.textContaining('prefix Ctrl+Space'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('herdr-shortcut-newTab')));
+      await tester.pumpAndSettle();
+
+      expect(controller.sentControlKeys, [TerminalKey.space]);
+      expect(controller.sentText, ['c']);
+    });
+
+    testWidgets('picking a pane without a command channel falls back to '
+        "Herdr's goto picker", (tester) async {
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 2.625;
+      addTearDown(tester.view.reset);
+      HerdrPaneListingCache.instance.clear();
+      final controller = _RecordingTerminalSessionController();
+      final focusNode = FocusNode();
+      addTearDown(focusNode.dispose);
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(
+        buildToolbar(
+          controller: controller,
+          focusNode: focusNode,
+          runnerFactory: (host) => FakeHerdrRunner((command) {
+            if (command.contains('focus')) {
+              return const AgentCommandResult(
+                stdout: '',
+                stderr: 'unknown',
+                exitCode: 2,
+              );
+            }
+            return FakeHerdrRunner.panesResponse(command);
+          }),
+        ),
+      );
+
+      await tester.tap(find.byKey(const ValueKey('toolbar-herdr')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('reviewer'));
+      await tester.pumpAndSettle();
+
+      expect(controller.sentControlKeys, [TerminalKey.keyB]);
+      expect(controller.sentText, ['g']);
+      expect(find.textContaining('goto picker'), findsOneWidget);
     });
 
     testWidgets('the key rows style bypasses the pill entirely', (
