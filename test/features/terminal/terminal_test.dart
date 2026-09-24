@@ -1038,6 +1038,70 @@ void main() {
       expect(activations, 1);
     });
 
+    testWidgets('touch mode key defers the activation report when the '
+        'session switches to one that already tracks the mouse', (
+      tester,
+    ) async {
+      final first = _RecordingTerminalSessionController();
+      final second = _RecordingTerminalSessionController();
+      final focusNode = FocusNode();
+      var activations = 0;
+      late StateSetter setOuterState;
+      addTearDown(focusNode.dispose);
+      addTearDown(first.dispose);
+      addTearDown(second.dispose);
+      second.terminal.write('\x1b[?1000h');
+
+      var controller = first;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: StatefulBuilder(
+              builder: (context, setState) {
+                setOuterState = setState;
+                return TerminalKeyboardBar(
+                  controller: controller,
+                  focusNode: focusNode,
+                  palette: AppPalette.catppuccin,
+                  brightness: Brightness.dark,
+                  rows: const [
+                    TerminalKeyboardRow(
+                      items: [
+                        TerminalKeyboardItem.builtIn(
+                          TerminalKeyboardAction.touchMode,
+                        ),
+                      ],
+                    ),
+                  ],
+                  globalSnippets: const [],
+                  fullscreen: false,
+                  onToggleFullscreen: () {},
+                  onEnterTmuxScrollMode: () {},
+                  onExitTmuxScrollMode: () {},
+                  tmuxPrefixKey: TmuxPrefixKey.controlB,
+                  tmuxScrollMode: false,
+                  onRemoteMouseTrackingActivated: () {
+                    // The page reacts by notifying a ThemeController and
+                    // showing a SnackBar, both of which rebuild ancestors;
+                    // that must not happen while the key is being built.
+                    setOuterState(() => activations += 1);
+                  },
+                );
+              },
+            ),
+          ),
+        ),
+      );
+      expect(activations, 0);
+
+      setOuterState(() => controller = second);
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      await tester.pump();
+
+      expect(activations, 1);
+    });
+
     testWidgets('tmux scroll mode drags without visible overlay', (
       tester,
     ) async {

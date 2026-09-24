@@ -1037,12 +1037,20 @@ class _TouchModeKeyState extends State<_TouchModeKey> {
       // Tracking can already be on when the key first appears (e.g.
       // reconnecting into a TUI with the mouse armed); the discoverability
       // hint should fire then too, not only on a live transition.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _remoteTracking) {
-          widget.onRemoteMouseTrackingActivated?.call();
-        }
-      });
+      _reportActivationAfterFrame();
     }
+  }
+
+  /// Reports an activation once the current frame is done. [initState] and
+  /// [didUpdateWidget] run during build, and the page reacts by notifying
+  /// the theme controller and showing a SnackBar, both of which rebuild
+  /// ancestors and are not allowed while the tree is being built.
+  void _reportActivationAfterFrame() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _remoteTracking) {
+        widget.onRemoteMouseTrackingActivated?.call();
+      }
+    });
   }
 
   @override
@@ -1053,7 +1061,7 @@ class _TouchModeKeyState extends State<_TouchModeKey> {
       widget.controller.terminal.addListener(_handleTerminalChanged);
       _remoteTracking = widget.controller.remoteMouseTrackingActive;
       if (_remoteTracking) {
-        widget.onRemoteMouseTrackingActivated?.call();
+        _reportActivationAfterFrame();
       }
     }
   }
