@@ -73,7 +73,11 @@ class TerminalFileTabsController extends ChangeNotifier {
   ) async {
     final session = await _session(tab.host);
     final path = await _resolve(session, tab);
-    return session.read(path, onProgress: onProgress);
+    return session.read(
+      path,
+      onProgress: onProgress,
+      maxBytes: remoteFileViewerMaxBytes,
+    );
   }
 
   Future<void> write(TerminalFileTab tab, Uint8List bytes) async {

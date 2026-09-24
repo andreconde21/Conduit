@@ -5,6 +5,7 @@ import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sftp/data/tar_archive_builder.dart';
 import 'package:conduit/features/sftp/domain/file_export.dart';
+import 'package:conduit/features/sftp/domain/remote_file_kind.dart';
 import 'package:conduit/features/sftp/domain/sftp_entry.dart';
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
 import 'package:conduit/features/sftp/domain/sftp_session.dart';
@@ -380,7 +381,11 @@ class SftpBrowserController extends ChangeNotifier {
     if (session == null) {
       throw const AppFailure('Not connected.');
     }
-    return session.read(path, onProgress: onProgress);
+    return session.read(
+      path,
+      onProgress: onProgress,
+      maxBytes: remoteFileViewerMaxBytes,
+    );
   }
 
   Future<void> writeFile(String path, Uint8List bytes) async {
