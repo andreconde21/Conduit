@@ -76,6 +76,10 @@ Dart implementation of the protocol, and the terminal is
   multiline editor for prompting Claude Code and other agents, with drafts per
   session, voice dictation via the system keyboard, and safe bracketed-paste
   delivery into TUIs, with insert-only or insert-and-send.
+- Optional Agent Attention dashboard: opt a machine in to poll
+  [Herdr](https://herdr.dev)'s JSON CLI while connected and see which coding
+  agents are working, need input, or finished, with edge-triggered local
+  notifications on Android and one-tap focus of an agent's pane.
 - Saved global and per-machine snippets from the key row, with hidden snippets
   for passwords or secrets and optional per-machine run-on-connect snippets.
 - Optional device-auth app lock for protecting saved machines and credentials.

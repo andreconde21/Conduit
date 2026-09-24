@@ -175,6 +175,10 @@ class ThemeController extends ChangeNotifier {
       return;
     }
     _touchModeHintSeen = true;
+    notifyListeners();
+    await _save();
+  }
+
   Future<void> setComposeSubmitEnter(bool enabled) async {
     if (_composeSubmitEnter == enabled) {
       return;

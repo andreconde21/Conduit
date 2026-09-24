@@ -5,6 +5,8 @@ import 'package:cbor/cbor.dart';
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/theme_preferences_repository.dart';
+import 'package:conduit/features/agent_attention/domain/agent_attention_notifier.dart';
+import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/app_lock/domain/app_authenticator.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/domain/saved_hosts_repository.dart';
@@ -441,6 +443,50 @@ class InMemorySftpBookmarks implements SftpBookmarksRepository {
     } else {
       stored[hostId] = List.of(paths);
     }
+  }
+}
+
+/// Scripted remote-command runner: returns queued results (or throws queued
+/// errors) in order, repeating the last one when the queue runs dry.
+class ScriptedAgentCommandRunner implements AgentCommandRunner {
+  ScriptedAgentCommandRunner(this.script);
+
+  final List<Object> script;
+  final List<String> commands = [];
+  int closeCount = 0;
+  int _index = 0;
+
+  @override
+  Future<AgentCommandResult> run(
+    String command, {
+    required Duration timeout,
+  }) async {
+    commands.add(command);
+    final step = script[_index.clamp(0, script.length - 1)];
+    _index += 1;
+    if (step is AgentCommandResult) {
+      return step;
+    }
+    // ignore: only_throw_errors
+    throw step;
+  }
+
+  @override
+  Future<void> close() async {
+    closeCount += 1;
+  }
+}
+
+class RecordingAgentNotifier implements AgentAttentionNotifier {
+  final List<(String, String, String)> shown = [];
+
+  @override
+  Future<void> show({
+    required String id,
+    required String title,
+    required String body,
+  }) async {
+    shown.add((id, title, body));
   }
 }
 

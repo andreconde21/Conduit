@@ -5,6 +5,8 @@ import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
+import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
+import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/discard_changes_dialog.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/sftp_file_viewer.dart';
@@ -30,12 +32,16 @@ class TerminalPage extends StatefulWidget {
     required this.workspace,
     required this.themeController,
     required this.sftpRepository,
+    this.agentAttention,
     super.key,
   });
 
   final TerminalWorkspaceController workspace;
   final ThemeController themeController;
   final SftpRepository sftpRepository;
+
+  /// Optional Agent Attention monitoring; null hides the dashboard.
+  final AgentAttentionController? agentAttention;
 
   @override
   State<TerminalPage> createState() => _TerminalPageState();
@@ -137,6 +143,8 @@ class _TerminalPageState extends State<TerminalPage> {
         duration: Duration(seconds: 6),
       ),
     );
+  }
+
   void _showTerminal() {
     _fileTabs.activate(null);
     _focusNode.requestFocus();
@@ -168,6 +176,8 @@ class _TerminalPageState extends State<TerminalPage> {
     _fileTabs.close(tab);
   }
 
+  static final Listenable _inertListenable = ChangeNotifier();
+
   void _toggleFullscreen() {
     setState(() => _fullscreen = !_fullscreen);
     _setSystemUiFullscreen(_fullscreen);
@@ -193,6 +203,29 @@ class _TerminalPageState extends State<TerminalPage> {
     // inline bar so it shows the latest text.
     setState(() => _composeRevision += 1);
     _focusNode.requestFocus();
+  }
+
+  Future<void> _openAgentAttention(AgentAttentionController attention) async {
+    await showAgentAttentionSheet(
+      context: context,
+      controller: attention,
+      onOpenAgent: (host, agent) {
+        // Navigate as close as possible: activate the host's terminal tab
+        // and ask the provider to focus the agent in the remote UI.
+        final session = widget.workspace.sessions
+            .where((session) => session.host.id == host.id)
+            .firstOrNull;
+        if (session != null) {
+          widget.workspace.activate(session);
+        }
+        unawaited(attention.focusAgent(host.id, agent));
+        Navigator.of(context).pop();
+        _focusNode.requestFocus();
+      },
+    );
+    if (mounted) {
+      _focusNode.requestFocus();
+    }
   }
 
   void _setSystemUiFullscreen(bool fullscreen) {
@@ -239,15 +272,29 @@ class _TerminalPageState extends State<TerminalPage> {
                   children: [
                     if (!_fullscreen) ...[
                       if (activeSession != null)
-                        TerminalHeader(
-                          session: activeSession,
-                          palette: palette,
-                          brightness: brightness,
-                          onBack: () => Navigator.of(context).pop(),
-                          onReconnect: () async {
-                            await activeSession.disconnect();
-                            await activeSession.connect();
-                            _focusNode.requestFocus();
+                        ListenableBuilder(
+                          listenable: widget.agentAttention ?? _inertListenable,
+                          builder: (context, _) {
+                            final attention = widget.agentAttention;
+                            final showAgents =
+                                attention != null &&
+                                (attention.monitoredHosts.isNotEmpty ||
+                                    activeSession.host.agentAttentionEnabled);
+                            return TerminalHeader(
+                              session: activeSession,
+                              palette: palette,
+                              brightness: brightness,
+                              onBack: () => Navigator.of(context).pop(),
+                              onReconnect: () async {
+                                await activeSession.disconnect();
+                                await activeSession.connect();
+                                _focusNode.requestFocus();
+                              },
+                              attentionCount: attention?.attentionCount ?? 0,
+                              onOpenAgentAttention: showAgents
+                                  ? () => _openAgentAttention(attention)
+                                  : null,
+                            );
                           },
                         ),
                       SessionTabs(

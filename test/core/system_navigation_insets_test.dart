@@ -3,6 +3,8 @@ import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/core/theme/theme_preferences_repository.dart';
+import 'package:conduit/features/agent_attention/data/herdr_attention_provider.dart';
+import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
@@ -95,6 +97,11 @@ void main() {
         promptCoordinator: promptCoordinator,
         sftpRepository: NoNetworkSftpRepository(),
         sftpBookmarksRepository: InMemorySftpBookmarks(),
+        agentAttention: AgentAttentionController(
+          workspace: TerminalWorkspaceController(NoNetworkTerminalRepository()),
+          runnerFactory: (_) => throw StateError('no agent polling in tests'),
+          provider: const HerdrAttentionProvider(),
+        ),
         backupService: AppBackupService(
           hostsController: hostsController,
           themeController: themeController,
@@ -143,6 +150,11 @@ void main() {
         promptCoordinator: promptCoordinator,
         sftpRepository: NoNetworkSftpRepository(),
         sftpBookmarksRepository: InMemorySftpBookmarks(),
+        agentAttention: AgentAttentionController(
+          workspace: TerminalWorkspaceController(NoNetworkTerminalRepository()),
+          runnerFactory: (_) => throw StateError('no agent polling in tests'),
+          provider: const HerdrAttentionProvider(),
+        ),
         backupService: AppBackupService(
           hostsController: hostsController,
           themeController: themeController,

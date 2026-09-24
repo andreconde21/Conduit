@@ -33,6 +33,7 @@ class ThemePreferences {
 
   /// Whether the one-time touch-mode discoverability hint has been shown.
   final bool touchModeHintSeen;
+
   /// Whether the prompt composer presses Enter after inserting a prompt.
   /// Off by default so composed text lands in the TUI for review.
   final bool composeSubmitEnter;
@@ -83,6 +84,7 @@ class ThemePreferencesRepository {
     );
     final rawTouchModeHintSeen = await _storage.read(
       key: _touchModeHintSeenKey,
+    );
     final rawComposeSubmitEnter = await _storage.read(
       key: _composeSubmitEnterKey,
     );
@@ -174,6 +176,8 @@ class ThemePreferencesRepository {
     await _storage.write(
       key: _touchModeHintSeenKey,
       value: preferences.touchModeHintSeen.toString(),
+    );
+    await _storage.write(
       key: _composeSubmitEnterKey,
       value: preferences.composeSubmitEnter.toString(),
     );

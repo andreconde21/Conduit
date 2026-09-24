@@ -4,6 +4,7 @@ import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/presentation/theme_sheet.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
+import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
@@ -49,6 +50,7 @@ class HostsPage extends StatefulWidget {
     required this.promptCoordinator,
     required this.sftpRepository,
     required this.sftpBookmarksRepository,
+    required this.agentAttention,
     required this.backupService,
     required this.fileExport,
     super.key,
@@ -64,6 +66,7 @@ class HostsPage extends StatefulWidget {
   final HostKeyPromptCoordinator promptCoordinator;
   final SftpRepository sftpRepository;
   final SftpBookmarksRepository sftpBookmarksRepository;
+  final AgentAttentionController agentAttention;
   final AppBackupService backupService;
   final FileExport fileExport;
 
@@ -444,6 +447,7 @@ class _HostsPageState extends State<HostsPage> {
           workspace: widget.workspaceController,
           themeController: widget.themeController,
           sftpRepository: widget.sftpRepository,
+          agentAttention: widget.agentAttention,
         ),
       ),
     );
