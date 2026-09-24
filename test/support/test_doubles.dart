@@ -480,6 +480,13 @@ class ScriptedAgentCommandRunner implements AgentCommandRunner {
 class RecordingAgentNotifier implements AgentAttentionNotifier {
   final List<(String, String, String)> shown = [];
 
+  /// Permission notifications as (id, title, body, hostId, requestId).
+  final List<(String, String, String, String, String)> permissionsShown = [];
+  final List<String> cancelled = [];
+
+  /// Ids currently showing (shown or permission-shown, minus cancelled).
+  final Set<String> active = {};
+
   @override
   Future<void> show({
     required String id,
@@ -487,6 +494,25 @@ class RecordingAgentNotifier implements AgentAttentionNotifier {
     required String body,
   }) async {
     shown.add((id, title, body));
+    active.add(id);
+  }
+
+  @override
+  Future<void> showPermissionRequest({
+    required String id,
+    required String title,
+    required String body,
+    required String hostId,
+    required String requestId,
+  }) async {
+    permissionsShown.add((id, title, body, hostId, requestId));
+    active.add(id);
+  }
+
+  @override
+  Future<void> cancel({required String id}) async {
+    cancelled.add(id);
+    active.remove(id);
   }
 }
 

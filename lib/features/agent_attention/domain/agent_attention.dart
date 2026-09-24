@@ -36,6 +36,63 @@ extension AgentAttentionStateDetails on AgentAttentionState {
       this == AgentAttentionState.blocked;
 }
 
+/// What a human answers to a pending permission request.
+enum PermissionVerdict { allow, deny, always }
+
+extension PermissionVerdictDetails on PermissionVerdict {
+  /// The verdict as the host companion's `decide` command spells it.
+  String get wireName => name;
+
+  String get label => switch (this) {
+    PermissionVerdict.allow => 'Allow',
+    PermissionVerdict.deny => 'Deny',
+    PermissionVerdict.always => 'Always',
+  };
+}
+
+/// One tool call an agent is waiting to have approved, as reported by a
+/// provider that can relay permission prompts (the Conductore host
+/// companion). Herdr agents never carry these.
+class PendingPermissionRequest {
+  const PendingPermissionRequest({
+    required this.id,
+    required this.toolName,
+    required this.summary,
+    this.toolInput = '',
+    this.createdAt,
+  });
+
+  /// Provider-issued request id, passed back verbatim with the decision.
+  final String id;
+
+  final String toolName;
+
+  /// One-line human description of the call (e.g. the shell command).
+  final String summary;
+
+  /// The full tool input, pretty-printed, capped at [maxToolInputLength].
+  final String toolInput;
+
+  final DateTime? createdAt;
+
+  /// Longest tool input kept on the phone; anything beyond is truncated
+  /// with a marker so a huge file write cannot bloat the dashboard.
+  static const maxToolInputLength = 4000;
+
+  @override
+  bool operator ==(Object other) {
+    return other is PendingPermissionRequest &&
+        other.id == id &&
+        other.toolName == toolName &&
+        other.summary == summary &&
+        other.toolInput == toolInput &&
+        other.createdAt == createdAt;
+  }
+
+  @override
+  int get hashCode => Object.hash(id, toolName, summary, toolInput, createdAt);
+}
+
 /// One remote agent as reported by a provider.
 class AgentInfo {
   const AgentInfo({
@@ -48,6 +105,7 @@ class AgentInfo {
     this.pane,
     this.stateChangedAt,
     this.stateSequence,
+    this.pendingRequests = const [],
   });
 
   /// Stable identity across polls (provider-specific; e.g. pane id or a
@@ -72,6 +130,10 @@ class AgentInfo {
   /// Monotonic state-transition sequence, if the provider reports one.
   final int? stateSequence;
 
+  /// Permission prompts waiting on a human, oldest first. Empty for
+  /// providers that cannot relay them.
+  final List<PendingPermissionRequest> pendingRequests;
+
   @override
   bool operator ==(Object other) {
     return other is AgentInfo &&
@@ -83,7 +145,23 @@ class AgentInfo {
         other.tab == tab &&
         other.pane == pane &&
         other.stateChangedAt == stateChangedAt &&
-        other.stateSequence == stateSequence;
+        other.stateSequence == stateSequence &&
+        _sameRequests(other.pendingRequests, pendingRequests);
+  }
+
+  static bool _sameRequests(
+    List<PendingPermissionRequest> a,
+    List<PendingPermissionRequest> b,
+  ) {
+    if (a.length != b.length) {
+      return false;
+    }
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) {
+        return false;
+      }
+    }
+    return true;
   }
 
   @override
@@ -97,12 +175,17 @@ class AgentInfo {
     pane,
     stateChangedAt,
     stateSequence,
+    Object.hashAll(pendingRequests),
   );
 }
 
 /// One poll's worth of agent information for a host.
 class AgentAttentionSnapshot {
-  const AgentAttentionSnapshot({required this.agents});
+  const AgentAttentionSnapshot({required this.agents, this.sequence});
 
   final List<AgentInfo> agents;
+
+  /// Monotonic snapshot sequence, when the provider numbers its snapshots
+  /// (used to resume a change stream and to drop stale results).
+  final int? sequence;
 }

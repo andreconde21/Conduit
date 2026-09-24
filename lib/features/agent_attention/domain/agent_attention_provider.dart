@@ -17,8 +17,12 @@ class AgentProviderUnavailable implements Exception {
 ///
 /// Implementations must use the manager's machine-readable interface, parse
 /// defensively (older versions, partial output), and never scrape terminal
-/// contents.
+/// contents. The optional capabilities (availability probe, change stream,
+/// permission decisions) default to "not supported" so a plain polling
+/// provider only needs [fetchAgents] and [focusCommand].
 abstract class AgentAttentionProvider {
+  const AgentAttentionProvider();
+
   /// Stable identifier, e.g. `herdr`.
   String get id;
 
@@ -30,4 +34,27 @@ abstract class AgentAttentionProvider {
   /// Command that focuses [agent] in the remote manager's UI, or null when
   /// the provider has no such command.
   String? focusCommand(AgentInfo agent);
+
+  /// Cheap check whether this provider's tooling exists on the host, used
+  /// to pick a provider automatically. Must not throw for "not installed".
+  Future<bool> isAvailable(AgentCommandRunner runner) async => true;
+
+  /// Whether [watchAgents] blocks until something changes instead of
+  /// returning immediately.
+  bool get supportsWatch => false;
+
+  /// Waits for the next change after snapshot [since] (a long-poll on the
+  /// host) and returns the new snapshot, or null when nothing changed
+  /// before the provider's own timeout.
+  Future<AgentAttentionSnapshot?> watchAgents(
+    AgentCommandRunner runner, {
+    required int? since,
+  }) async => null;
+
+  /// Command that answers [request] with [verdict], or null when the
+  /// provider cannot relay permission decisions.
+  String? decideCommand(
+    PendingPermissionRequest request,
+    PermissionVerdict verdict,
+  ) => null;
 }

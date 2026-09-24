@@ -1,0 +1,373 @@
+import 'dart:convert';
+
+import 'package:conduit/core/app_failure.dart';
+import 'package:conduit/features/agent_attention/data/remote_tool_command.dart';
+import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
+import 'package:conduit/features/agent_attention/domain/agent_attention_provider.dart';
+import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
+
+/// Reads agent state from the Conductore host companion daemon
+/// (`conductore-hostd`), which watches Claude Code sessions through their
+/// hooks and can answer permission prompts on the phone's behalf.
+///
+/// Contract (protocol version 1): every command prints JSON on stdout and
+/// exits 0; on failure it exits 1 with `{"error": "..."}`; exit 127 means
+/// the CLI is not installed.
+///
+/// - `status` → `{"version": 1, "seq": N, "agents": [...]}`
+/// - `events --since N --timeout S` → long-poll; one full snapshot per
+///   line (`{"seq": N, "agents": [...]}`), exiting after the first batch or
+///   the timeout.
+/// - `decide <requestId> allow|deny|always`, `focus <sessionId>`,
+///   `version`, `doctor`.
+///
+/// Agent entries look like `{"sessionId": "...", "name": "...", "cwd":
+/// "/path", "tmux": {"session": "main", "window": 2, "paneId": "%5"} |
+/// null, "state": "working|waiting_input|needs_permission|ended",
+/// "lastEvent": "PreToolUse", "lastToolName": "Bash" | null, "updatedAt":
+/// 1700000000000, "pending": [{"id": "req-...", "toolName": "Bash",
+/// "summary": "rm -rf build", "toolInput": {...}, "createdAt":
+/// 1700000000000}]}` (timestamps are epoch milliseconds).
+class ConductoreHostAttentionProvider extends AgentAttentionProvider {
+  const ConductoreHostAttentionProvider();
+
+  static const _commandTimeout = Duration(seconds: 10);
+
+  /// How long the host holds an `events` long-poll before returning an
+  /// empty batch. Well under the SSH keepalive so the channel stays warm.
+  static const watchTimeout = Duration(seconds: 55);
+
+  /// The runner's own deadline for a long-poll: the host timeout plus room
+  /// for a slow exit, after which the channel is presumed hung.
+  static const _watchCommandTimeout = Duration(seconds: 70);
+
+  static const _tool = 'conductore-hostd';
+
+  /// Wraps `conductore-hostd [args]` in the shared PATH wrapper so a
+  /// user-local install (npm global prefix, `~/.local/bin`, mise shims) is
+  /// found from a non-interactive SSH shell.
+  static String remoteCommand(String args) => remoteToolCommand(_tool, args);
+
+  /// `conductore-hostd doctor`, for the host form's "Set up companion"
+  /// check.
+  static final doctorCommand = remoteCommand('doctor');
+
+  @override
+  String get id => 'conductore';
+
+  @override
+  String get label => 'Conductore companion';
+
+  @override
+  bool get supportsWatch => true;
+
+  @override
+  Future<bool> isAvailable(AgentCommandRunner runner) async {
+    try {
+      final result = await runner.run(
+        remoteCommand('version'),
+        timeout: _commandTimeout,
+      );
+      return result.exitCode == 0 && result.stdout.trim().isNotEmpty;
+    } catch (_) {
+      // A connection problem is not "not installed", but the caller has
+      // nothing better to do than fall back; the next poll surfaces the
+      // error itself.
+      return false;
+    }
+  }
+
+  @override
+  Future<AgentAttentionSnapshot> fetchAgents(AgentCommandRunner runner) async {
+    final result = await runner.run(
+      remoteCommand('status'),
+      timeout: _commandTimeout,
+    );
+    _checkResult(result);
+    return parseSnapshot(result.stdout);
+  }
+
+  @override
+  Future<AgentAttentionSnapshot?> watchAgents(
+    AgentCommandRunner runner, {
+    required int? since,
+  }) async {
+    final result = await runner.run(
+      remoteCommand(
+        'events --since ${since ?? 0} --timeout ${watchTimeout.inSeconds}',
+      ),
+      timeout: _watchCommandTimeout,
+    );
+    _checkResult(result);
+    return parseEvents(result.stdout);
+  }
+
+  @override
+  String? focusCommand(AgentInfo agent) {
+    if (agent.id.isEmpty) {
+      return null;
+    }
+    return remoteCommand('focus ${shellQuoteArgument(agent.id)}');
+  }
+
+  @override
+  String? decideCommand(
+    PendingPermissionRequest request,
+    PermissionVerdict verdict,
+  ) {
+    if (request.id.isEmpty) {
+      return null;
+    }
+    return remoteCommand(
+      'decide ${shellQuoteArgument(request.id)} ${verdict.wireName}',
+    );
+  }
+
+  /// Maps exit codes to the two conditions the controller distinguishes:
+  /// not installed (monitoring stops) versus a reported error (retried).
+  static void _checkResult(AgentCommandResult result) {
+    final stderr = result.stderr.trim();
+    if (result.exitCode == 127 ||
+        stderr.contains('command not found') ||
+        stderr.contains('$_tool: not found')) {
+      throw const AgentProviderUnavailable(
+        'The Conductore companion is not installed on this machine. Run '
+        '"conductore-hostd install" there, or switch this machine to Herdr.',
+      );
+    }
+    if (result.exitCode != null && result.exitCode != 0) {
+      throw failureFrom(result.stdout, stderr);
+    }
+  }
+
+  /// Turns the `{"error": "..."}` output (or bare stderr) into a failure.
+  static AppFailure failureFrom(String stdout, String stderr) {
+    for (final raw in [stdout.trim(), stderr]) {
+      if (raw.isEmpty) {
+        continue;
+      }
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map && decoded['error'] is String) {
+          return AppFailure(
+            'The Conductore companion reported an error.',
+            decoded['error'] as String,
+          );
+        }
+      } catch (_) {
+        // Not JSON; fall through to the raw text.
+      }
+      return AppFailure(
+        'The Conductore companion reported an error.',
+        raw.length > 200 ? raw.substring(0, 200) : raw,
+      );
+    }
+    return const AppFailure(
+      'The Conductore companion reported an error.',
+      'no error output',
+    );
+  }
+
+  /// Parses one `status` document.
+  static AgentAttentionSnapshot parseSnapshot(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) {
+      throw const AppFailure('The Conductore companion returned no output.');
+    }
+    final snapshot = _parseSnapshotLine(trimmed);
+    if (snapshot == null) {
+      throw const AppFailure(
+        'The Conductore companion returned JSON in an unexpected shape.',
+      );
+    }
+    return snapshot;
+  }
+
+  /// Parses `events` output: one snapshot per line, the last one wins. An
+  /// empty batch (timeout with no change) yields null.
+  static AgentAttentionSnapshot? parseEvents(String raw) {
+    AgentAttentionSnapshot? latest;
+    for (final line in const LineSplitter().convert(raw)) {
+      final trimmed = line.trim();
+      if (trimmed.isEmpty) {
+        continue;
+      }
+      final snapshot = _parseSnapshotLine(trimmed);
+      if (snapshot == null) {
+        continue;
+      }
+      if (latest == null ||
+          latest.sequence == null ||
+          snapshot.sequence == null ||
+          snapshot.sequence! >= latest.sequence!) {
+        latest = snapshot;
+      }
+    }
+    return latest;
+  }
+
+  static AgentAttentionSnapshot? _parseSnapshotLine(String line) {
+    Object? decoded;
+    try {
+      decoded = jsonDecode(line);
+    } catch (_) {
+      throw const AppFailure(
+        'The Conductore companion returned output that is not JSON.',
+      );
+    }
+    if (decoded is! Map) {
+      return null;
+    }
+    if (decoded['error'] is String) {
+      throw failureFrom(line, '');
+    }
+    final items = decoded['agents'];
+    if (items is! List) {
+      return null;
+    }
+    final agents = <AgentInfo>[];
+    for (final item in items) {
+      final agent = _parseAgent(item);
+      if (agent != null) {
+        agents.add(agent);
+      }
+    }
+    return AgentAttentionSnapshot(
+      agents: agents,
+      sequence: _int(decoded['seq']),
+    );
+  }
+
+  static AgentInfo? _parseAgent(Object? item) {
+    if (item is! Map) {
+      return null;
+    }
+    final id = _string(item['sessionId']);
+    if (id == null) {
+      return null;
+    }
+    final cwd = _string(item['cwd']);
+    final name = _string(item['name']) ?? _basename(cwd) ?? id;
+    final tmux = item['tmux'];
+    String? tab;
+    String? pane;
+    if (tmux is Map) {
+      final session = _string(tmux['session']);
+      final window = tmux['window'];
+      if (session != null) {
+        tab = window == null ? session : '$session:$window';
+      }
+      pane = _string(tmux['paneId']);
+    }
+    final pendingRaw = item['pending'];
+    final pending = <PendingPermissionRequest>[
+      if (pendingRaw is List)
+        for (final entry in pendingRaw) ?_parseRequest(entry),
+    ];
+    return AgentInfo(
+      id: id,
+      name: name,
+      kind: 'claude',
+      state: parseState(_string(item['state']), pending: pending),
+      workspace: cwd,
+      tab: tab,
+      pane: pane,
+      stateChangedAt: _timestamp(item['updatedAt']),
+      pendingRequests: pending,
+    );
+  }
+
+  /// Maps the companion's states onto the shared attention states. A
+  /// permission prompt is "needs input" with the request attached (so the
+  /// dashboard, widget and notifications all treat it as attention).
+  static AgentAttentionState parseState(
+    String? raw, {
+    List<PendingPermissionRequest> pending = const [],
+  }) {
+    return switch (raw?.toLowerCase()) {
+      'working' => AgentAttentionState.working,
+      'needs_permission' || 'waiting_input' => AgentAttentionState.needsInput,
+      'ended' => AgentAttentionState.finished,
+      'idle' => AgentAttentionState.idle,
+      _ =>
+        pending.isNotEmpty
+            ? AgentAttentionState.needsInput
+            : AgentAttentionState.unknown,
+    };
+  }
+
+  static PendingPermissionRequest? _parseRequest(Object? entry) {
+    if (entry is! Map) {
+      return null;
+    }
+    final id = _string(entry['id']);
+    if (id == null) {
+      return null;
+    }
+    final toolName = _string(entry['toolName']) ?? 'tool';
+    return PendingPermissionRequest(
+      id: id,
+      toolName: toolName,
+      summary: _string(entry['summary']) ?? toolName,
+      toolInput: formatToolInput(entry['toolInput']),
+      createdAt: _timestamp(entry['createdAt']),
+    );
+  }
+
+  /// Pretty-prints a tool input for the sheet, capped so a large file write
+  /// cannot flood the phone.
+  static String formatToolInput(Object? input) {
+    if (input == null) {
+      return '';
+    }
+    final text = input is String
+        ? input
+        : const JsonEncoder.withIndent('  ').convert(input);
+    const limit = PendingPermissionRequest.maxToolInputLength;
+    if (text.length <= limit) {
+      return text;
+    }
+    return '${text.substring(0, limit)}\n… (${text.length - limit} more '
+        'characters)';
+  }
+
+  static String? _basename(String? path) {
+    if (path == null) {
+      return null;
+    }
+    final parts = path.split('/').where((part) => part.isNotEmpty);
+    return parts.isEmpty ? null : parts.last;
+  }
+
+  static String? _string(Object? value) {
+    if (value is String && value.trim().isNotEmpty) {
+      return value.trim();
+    }
+    return null;
+  }
+
+  static int? _int(Object? value) {
+    if (value is int) {
+      return value;
+    }
+    if (value is num) {
+      return value.toInt();
+    }
+    if (value is String) {
+      return int.tryParse(value);
+    }
+    return null;
+  }
+
+  static DateTime? _timestamp(Object? value) {
+    final millis = _int(value);
+    if (millis == null || millis <= 0) {
+      return null;
+    }
+    try {
+      return DateTime.fromMillisecondsSinceEpoch(millis, isUtc: true);
+    } on ArgumentError {
+      return null;
+    }
+  }
+}
