@@ -31,7 +31,9 @@ import org.json.JSONObject
  * - `consumePermissionActions()` -> `List<Map>`: queued action taps, cleared.
  *
  * Native -> Dart:
- * - `permissionActionAvailable()`: an action was tapped while the engine runs.
+ * - `permissionActionAvailable()` -> `bool`: an action was tapped while the
+ *   engine runs; Dart answers whether it is completing it now (false while
+ *   the app is locked or not yet listening).
  *
  * Action taps go through [AgentPermissionActionReceiver], which queues the
  * tap durably and pings Dart when the engine is alive. When the engine goes
@@ -102,9 +104,34 @@ class AgentNotificationBridge : FlutterPlugin, ActivityAware, PluginRegistry.New
         return true
     }
 
-    /** Called by the receiver while the engine runs. */
-    fun notifyActionAvailable() {
-        channel?.invokeMethod("permissionActionAvailable", null)
+    /**
+     * Called by the receiver while the engine runs. When Dart cannot take the
+     * tap now (app locked, listener not mounted yet) the notification asks
+     * the user to open the app; the tap stays queued either way.
+     */
+    fun notifyActionAvailable(context: Context, action: AgentNotificationStore.PermissionAction) {
+        val channel = channel
+        if (channel == null) {
+            AgentNotificationStore.showOpenToFinish(context, action)
+            return
+        }
+        channel.invokeMethod(
+            "permissionActionAvailable",
+            null,
+            object : MethodChannel.Result {
+                override fun success(result: Any?) {
+                    if (result != true) AgentNotificationStore.showOpenToFinish(context, action)
+                }
+
+                override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
+                    AgentNotificationStore.showOpenToFinish(context, action)
+                }
+
+                override fun notImplemented() {
+                    AgentNotificationStore.showOpenToFinish(context, action)
+                }
+            },
+        )
     }
 
     private fun handle(call: MethodCall, result: MethodChannel.Result) {
@@ -161,7 +188,7 @@ class AgentPermissionActionReceiver : BroadcastReceiver() {
         val bridge = AgentNotificationBridge.active
         if (bridge != null) {
             AgentNotificationStore.showSending(context, action)
-            bridge.notifyActionAvailable()
+            bridge.notifyActionAvailable(context.applicationContext, action)
         } else {
             // The engine is gone and a receiver may not start the activity
             // (notification trampoline rules): ask for one more tap.
@@ -259,6 +286,21 @@ object AgentNotificationStore {
         return builder.setSmallIcon(R.mipmap.ic_launcher)
     }
 
+    /**
+     * Bodies carry the agent's last message and the permission summary: on a
+     * secure lock screen show only the title (Dart keeps titles to labels).
+     */
+    private fun Notification.Builder.lockScreenSafe(context: Context, title: String): Notification.Builder {
+        setVisibility(Notification.VISIBILITY_PRIVATE)
+        setPublicVersion(
+            builder(context)
+                .setContentTitle(title)
+                .setContentText("Open Conductore for details")
+                .build(),
+        )
+        return this
+    }
+
     private fun launchIntent(context: Context, requestCode: Int, extras: Intent.() -> Unit = {}): PendingIntent {
         val intent = Intent(context, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
@@ -277,6 +319,8 @@ object AgentNotificationStore {
         val notification = builder(context)
             .setContentTitle(title)
             .setContentText(body)
+            .setStyle(Notification.BigTextStyle().bigText(body))
+            .lockScreenSafe(context, title)
             .setContentIntent(launchIntent(context, 0))
             .setAutoCancel(true)
             .build()
@@ -297,6 +341,7 @@ object AgentNotificationStore {
             .setContentTitle(request.title)
             .setContentText(request.body)
             .setStyle(Notification.BigTextStyle().bigText(request.body))
+            .lockScreenSafe(context, request.title)
             .setContentIntent(launchIntent(context, 0))
             .setAutoCancel(false)
             .setOnlyAlertOnce(true)

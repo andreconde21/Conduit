@@ -391,9 +391,12 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
                   child: AgentPermissionActionListener(
                     source: PlatformAgentPermissionActions.instance,
                     agentAttention: widget.agentAttention,
-                    findHost: (hostId) => widget.hostsController.hosts
-                        .where((host) => host.id == hostId)
-                        .firstOrNull,
+                    findHost: (hostId) async {
+                      await widget.hostsController.firstLoad;
+                      return widget.hostsController.hosts
+                          .where((host) => host.id == hostId)
+                          .firstOrNull;
+                    },
                     child: home,
                   ),
                 ),

@@ -69,18 +69,21 @@ class PlatformAgentPermissionActions implements AgentPermissionActionSource {
 
   static final instance = PlatformAgentPermissionActions._();
 
-  void Function()? _listener;
+  bool Function()? _listener;
   bool _handlerInstalled = false;
 
   @override
-  void setListener(void Function()? listener) {
+  void setListener(bool Function()? listener) {
     _listener = listener;
     if (!_handlerInstalled && defaultTargetPlatform == TargetPlatform.android) {
       _handlerInstalled = true;
       PlatformAgentAttentionNotifier.channel.setMethodCallHandler((call) async {
         if (call.method == 'permissionActionAvailable') {
-          _listener?.call();
+          // Tells the native side whether the tap is being completed; if
+          // not (app locked), it asks the user to open the app.
+          return _listener?.call() ?? false;
         }
+        return null;
       });
     }
   }

@@ -26,7 +26,9 @@ class AgentPermissionActionListener extends StatefulWidget {
   final AgentAttentionController agentAttention;
 
   /// Looks up a saved host by id (null when it was deleted meanwhile).
-  final SavedHost? Function(String hostId) findHost;
+  /// Asynchronous because a tap that cold-started the app is drained
+  /// before the saved hosts have finished loading.
+  final Future<SavedHost?> Function(String hostId) findHost;
   final Widget child;
 
   @override
@@ -42,8 +44,17 @@ class _AgentPermissionActionListenerState
   @override
   void initState() {
     super.initState();
-    widget.source.setListener(_drain);
+    widget.source.setListener(_onAction);
     _drain();
+  }
+
+  /// The platform's ping; returns whether the tap will be handled now.
+  bool _onAction() {
+    if (!mounted) {
+      return false;
+    }
+    _drain();
+    return true;
   }
 
   @override
@@ -51,7 +62,7 @@ class _AgentPermissionActionListenerState
     super.didUpdateWidget(oldWidget);
     if (oldWidget.source != widget.source) {
       oldWidget.source.setListener(null);
-      widget.source.setListener(_drain);
+      widget.source.setListener(_onAction);
     }
   }
 
@@ -78,11 +89,9 @@ class _AgentPermissionActionListenerState
             if (!mounted) {
               return;
             }
-            await widget.agentAttention.completePermissionAction(
-              action,
-              widget.findHost(action.hostId),
-            );
-            _report(action);
+            final host = await widget.findHost(action.hostId);
+            await widget.agentAttention.completePermissionAction(action, host);
+            _report(action, host);
           }
         } while (_drainAgain && mounted);
       } finally {
@@ -91,11 +100,10 @@ class _AgentPermissionActionListenerState
     }());
   }
 
-  void _report(AgentPermissionAction action) {
-    if (!mounted) {
+  void _report(AgentPermissionAction action, SavedHost? host) {
+    if (!mounted || host == null) {
       return;
     }
-    final host = widget.findHost(action.hostId);
     final verdict = switch (action.verdict) {
       'allow' => 'Allowed',
       'deny' => 'Denied',
@@ -104,10 +112,7 @@ class _AgentPermissionActionListenerState
     };
     ScaffoldMessenger.maybeOf(context)?.showSnackBar(
       SnackBar(
-        content: Text(
-          '$verdict the permission request'
-          '${host == null ? '' : ' on ${host.name}'}.',
-        ),
+        content: Text('$verdict the permission request on ${host.name}.'),
       ),
     );
   }

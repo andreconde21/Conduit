@@ -37,6 +37,8 @@ abstract class AgentPermissionActionSource {
   /// Takes every queued tap, clearing the queue.
   Future<List<AgentPermissionAction>> consumeActions();
 
-  /// Called when a new tap was queued while the app is running.
-  void setListener(void Function()? listener);
+  /// Called when a new tap was queued while the app is running; the
+  /// listener returns whether it will drain the queue now (false while
+  /// nothing can, e.g. the app is locked, so the platform can say so).
+  void setListener(bool Function()? listener);
 }
