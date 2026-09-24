@@ -11,6 +11,7 @@ class TerminalHeader extends StatelessWidget {
     required this.onReconnect,
     this.attentionCount = 0,
     this.onOpenAgentAttention,
+    this.onOpenSessionGrid,
     super.key,
   });
 
@@ -25,6 +26,9 @@ class TerminalHeader extends StatelessWidget {
 
   /// Opens the Agent Attention dashboard; null hides the button.
   final VoidCallback? onOpenAgentAttention;
+
+  /// Opens the session home grid; null hides the button.
+  final VoidCallback? onOpenSessionGrid;
 
   @override
   Widget build(BuildContext context) {
@@ -75,6 +79,13 @@ class TerminalHeader extends StatelessWidget {
               ],
             ),
           ),
+          if (onOpenSessionGrid != null)
+            IconButton(
+              tooltip: 'Sessions',
+              color: foreground,
+              icon: const Icon(Icons.grid_view_rounded),
+              onPressed: onOpenSessionGrid,
+            ),
           if (onOpenAgentAttention != null)
             IconButton(
               tooltip: 'Agents',

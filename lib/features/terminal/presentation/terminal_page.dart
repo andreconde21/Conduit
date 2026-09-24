@@ -7,6 +7,8 @@ import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
+import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
+import 'package:conduit/features/sessions/presentation/session_grid_page.dart';
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/discard_changes_dialog.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/sftp_file_viewer.dart';
@@ -33,6 +35,7 @@ class TerminalPage extends StatefulWidget {
     required this.themeController,
     required this.sftpRepository,
     this.agentAttention,
+    this.connectFlow,
     super.key,
   });
 
@@ -42,6 +45,9 @@ class TerminalPage extends StatefulWidget {
 
   /// Optional Agent Attention monitoring; null hides the dashboard.
   final AgentAttentionController? agentAttention;
+
+  /// Optional connect flow for the session grid's "+" tile.
+  final SessionConnectFlow? connectFlow;
 
   @override
   State<TerminalPage> createState() => _TerminalPageState();
@@ -228,6 +234,18 @@ class _TerminalPageState extends State<TerminalPage> {
     }
   }
 
+  Future<void> _openSessionGrid() async {
+    await showSessionGrid(
+      context,
+      workspace: widget.workspace,
+      themeController: widget.themeController,
+      agentAttention: widget.agentAttention,
+      connectFlow: widget.connectFlow,
+    );
+    if (!mounted) return;
+    _showTerminal();
+  }
+
   void _setSystemUiFullscreen(bool fullscreen) {
     SystemChrome.setEnabledSystemUIMode(
       fullscreen ? SystemUiMode.immersiveSticky : SystemUiMode.edgeToEdge,
@@ -294,6 +312,7 @@ class _TerminalPageState extends State<TerminalPage> {
                               onOpenAgentAttention: showAgents
                                   ? () => _openAgentAttention(attention)
                                   : null,
+                              onOpenSessionGrid: _openSessionGrid,
                             );
                           },
                         ),
