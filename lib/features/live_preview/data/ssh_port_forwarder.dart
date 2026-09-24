@@ -148,6 +148,10 @@ class SshLocalPortForward implements LocalPortForward {
   int get activeConnections => _sockets.length;
 
   Future<void> _accept(Socket socket) async {
+    if (_closed) {
+      socket.destroy();
+      return;
+    }
     _sockets.add(socket);
     socket.setOption(SocketOption.tcpNoDelay, true);
     final SSHForwardChannel channel;
@@ -168,6 +172,14 @@ class SshLocalPortForward implements LocalPortForward {
               : 'Port $remotePort refused the connection.',
         );
       }
+      return;
+    }
+    if (_closed) {
+      // The forward closed while the channel was opening; nothing tracks
+      // this pair any more, so drop it here instead of leaking it.
+      _sockets.remove(socket);
+      socket.destroy();
+      channel.destroy();
       return;
     }
     _channels.add(channel);
