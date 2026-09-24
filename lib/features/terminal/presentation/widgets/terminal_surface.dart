@@ -163,6 +163,13 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
     if (offset.y < 0 || offset.y >= lines.length) {
       return;
     }
+    // The cursor row is the prompt or the command being typed. Tapping there
+    // is how the keyboard gets summoned on a phone, and prompts routinely
+    // show the working directory, so it must not raise an "Open" snackbar on
+    // every tap. Output above the cursor is unaffected.
+    if (offset.y == terminal.buffer.absoluteCursorY) {
+      return;
+    }
     // Join soft-wrapped rows into one logical line so a path broken across
     // rows is still recognized; earlier rows are padded back to full width
     // because getText() trims trailing blanks.

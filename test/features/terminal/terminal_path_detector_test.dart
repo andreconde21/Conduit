@@ -46,6 +46,17 @@ void main() {
       expect(terminalPathAt(time, 4), isNull);
     });
 
+    test('ignores the host part of a shell prompt', () {
+      const prompt = r'andre@dev:~/projects$ ';
+      expect(terminalPathAt(prompt, prompt.indexOf('dev')), isNull);
+      expect(terminalPathAt(prompt, prompt.indexOf('andre')), isNull);
+    });
+
+    test('keeps the path in a bare directory prompt', () {
+      const prompt = r'~/projects $ ';
+      expect(terminalPathAt(prompt, 3), '~/projects');
+    });
+
     test('handles out-of-range columns and blank lines', () {
       expect(terminalPathAt('', 0), isNull);
       expect(terminalPathAt('/etc/hosts', -1), isNull);
