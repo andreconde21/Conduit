@@ -19,6 +19,7 @@ class ThemeController extends ChangeNotifier {
   bool _terminalMouseInput = false;
   TerminalEnterSequence _terminalEnterSequence = TerminalEnterSequence.cr;
   bool _touchModeHintSeen = false;
+  bool _composeSubmitEnter = false;
 
   ThemeMode get themeMode => _themeMode;
   AppPalette get palette => _palette;
@@ -32,6 +33,7 @@ class ThemeController extends ChangeNotifier {
   bool get terminalMouseInput => _terminalMouseInput;
   TerminalEnterSequence get terminalEnterSequence => _terminalEnterSequence;
   bool get touchModeHintSeen => _touchModeHintSeen;
+  bool get composeSubmitEnter => _composeSubmitEnter;
 
   Future<void> load() async {
     final preferences = await _repository.load();
@@ -45,6 +47,7 @@ class ThemeController extends ChangeNotifier {
     _terminalMouseInput = preferences.terminalMouseInput;
     _terminalEnterSequence = preferences.terminalEnterSequence;
     _touchModeHintSeen = preferences.touchModeHintSeen;
+    _composeSubmitEnter = preferences.composeSubmitEnter;
     notifyListeners();
   }
 
@@ -172,6 +175,11 @@ class ThemeController extends ChangeNotifier {
       return;
     }
     _touchModeHintSeen = true;
+  Future<void> setComposeSubmitEnter(bool enabled) async {
+    if (_composeSubmitEnter == enabled) {
+      return;
+    }
+    _composeSubmitEnter = enabled;
     notifyListeners();
     await _save();
   }
@@ -189,6 +197,7 @@ class ThemeController extends ChangeNotifier {
         terminalMouseInput: _terminalMouseInput,
         terminalEnterSequence: _terminalEnterSequence,
         touchModeHintSeen: _touchModeHintSeen,
+        composeSubmitEnter: _composeSubmitEnter,
       ),
     );
   }

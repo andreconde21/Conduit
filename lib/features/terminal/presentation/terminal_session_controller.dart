@@ -294,6 +294,69 @@ class TerminalSessionController extends ChangeNotifier {
     keyboard.clearModifiers();
   }
 
+  /// Whether the remote application has switched bracketed paste on
+  /// (DECSET 2004), so pasted text is delivered atomically instead of being
+  /// interpreted as individual key presses.
+  bool get bracketedPasteSupported => terminal.bracketedPasteMode;
+
+  static const composedEnterDelay = Duration(milliseconds: 120);
+
+  /// Sends a composed, possibly multiline prompt into the terminal.
+  ///
+  /// The payload goes through the terminal's paste path: when the remote
+  /// application advertises bracketed paste (DECSET 2004) the text — newlines,
+  /// quotes, and all — is wrapped in paste markers and arrives as one literal
+  /// block. Without bracketed paste the text falls back to the plain input
+  /// path with newlines normalized to carriage returns, which is what each
+  /// line's Enter key would have sent.
+  ///
+  /// Control characters other than tab and newline are stripped in both
+  /// paths: a prompt copied from a terminal can carry ESC, ^C or ^D bytes
+  /// that the remote application would act on as keystrokes, and inside a
+  /// bracketed paste an embedded paste-end marker would let the rest of the
+  /// text escape the paste guard.
+  ///
+  /// With [submit], Enter is delivered as a separate write shortly after the
+  /// text. Some TUIs classify a single read that contains a long line ending
+  /// in CR as a paste and insert the trailing CR literally instead of
+  /// submitting; an isolated Enter keypress submits regardless.
+  Future<void> sendComposed(String text, {required bool submit}) async {
+    final sanitized = sanitizeComposedText(text);
+    if (terminal.bracketedPasteMode) {
+      terminal.paste(sanitized);
+    } else {
+      // Without bracketed paste, newlines are delivered as carriage returns
+      // (what Enter sends). Trailing newlines are dropped so "insert only"
+      // never submits the final line on its own.
+      final normalized = sanitized
+          .replaceAll(RegExp(r'\n+$'), '')
+          .replaceAll('\n', '\r');
+      terminal.textInput(normalized);
+    }
+    keyboard.clearModifiers();
+    if (submit) {
+      await Future<void>.delayed(composedEnterDelay);
+      if (!_disposed) {
+        terminal.keyInput(TerminalKey.enter);
+      }
+    }
+  }
+
+  /// Normalizes line endings to `\n` and strips every C0 control character
+  /// except tab and newline (plus DEL), so composed text can only ever reach
+  /// the remote application as printable input. Stripping ESC also removes
+  /// any embedded bracketed-paste end marker.
+  static String sanitizeComposedText(String text) {
+    return text
+        .replaceAll('\r\n', '\n')
+        .replaceAll('\r', '\n')
+        .replaceAll(_composedControlCharacters, '');
+  }
+
+  static final _composedControlCharacters = RegExp(
+    r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]',
+  );
+
   void _startTmuxIfConfigured(SshTerminalSession session) {
     final command = _buildTmuxCommand();
     if (command == null) {

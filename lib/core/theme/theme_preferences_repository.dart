@@ -18,6 +18,7 @@ class ThemePreferences {
     this.terminalMouseInput = false,
     this.terminalEnterSequence = TerminalEnterSequence.cr,
     this.touchModeHintSeen = false,
+    this.composeSubmitEnter = false,
   });
 
   final ThemeMode themeMode;
@@ -32,6 +33,9 @@ class ThemePreferences {
 
   /// Whether the one-time touch-mode discoverability hint has been shown.
   final bool touchModeHintSeen;
+  /// Whether the prompt composer presses Enter after inserting a prompt.
+  /// Off by default so composed text lands in the TUI for review.
+  final bool composeSubmitEnter;
 }
 
 class ThemePreferencesRepository {
@@ -51,6 +55,7 @@ class ThemePreferencesRepository {
   static const _terminalMouseInputKey = 'conduit.terminal_mouse_input.v1';
   static const _terminalEnterSequenceKey = 'conduit.terminal_enter_sequence.v1';
   static const _touchModeHintSeenKey = 'conduit.touch_mode_hint_seen.v1';
+  static const _composeSubmitEnterKey = 'conduit.compose_submit_enter.v1';
 
   final FlutterSecureStorage _storage;
 
@@ -78,6 +83,8 @@ class ThemePreferencesRepository {
     );
     final rawTouchModeHintSeen = await _storage.read(
       key: _touchModeHintSeenKey,
+    final rawComposeSubmitEnter = await _storage.read(
+      key: _composeSubmitEnterKey,
     );
     final terminalFontSize = double.tryParse(rawTerminalFontSize ?? '');
     final terminalKeyboardRows = _appendUnseenBuiltIns(
@@ -113,6 +120,7 @@ class ThemePreferencesRepository {
         orElse: () => TerminalEnterSequence.cr,
       ),
       touchModeHintSeen: rawTouchModeHintSeen == 'true',
+      composeSubmitEnter: rawComposeSubmitEnter == 'true',
     );
   }
 
@@ -166,6 +174,8 @@ class ThemePreferencesRepository {
     await _storage.write(
       key: _touchModeHintSeenKey,
       value: preferences.touchModeHintSeen.toString(),
+      key: _composeSubmitEnterKey,
+      value: preferences.composeSubmitEnter.toString(),
     );
   }
 

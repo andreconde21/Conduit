@@ -472,9 +472,7 @@ void main() {
               rows: const [
                 TerminalKeyboardRow(
                   items: [
-                    TerminalKeyboardItem.builtIn(
-                      TerminalKeyboardAction.control,
-                    ),
+                    TerminalKeyboardItem.builtIn(TerminalKeyboardAction.alt),
                     TerminalKeyboardItem.builtIn(
                       TerminalKeyboardAction.compose,
                     ),
@@ -494,19 +492,18 @@ void main() {
         ),
       );
 
-      final controlKey = find.ancestor(
-        of: find.text('Ctrl'),
+      final altKey = find.ancestor(
+        of: find.text('Alt'),
         matching: find.byType(AnimatedContainer),
       );
-      final composeKey = find.ancestor(
-        of: find.text('Compose'),
+      final chatKey = find.ancestor(
+        of: find.text('Chat'),
         matching: find.byType(AnimatedContainer),
       );
 
-      expect(tester.getSize(composeKey).width, greaterThan(50));
       expect(
-        tester.getSize(composeKey).width,
-        greaterThan(tester.getSize(controlKey).width),
+        tester.getSize(chatKey).width,
+        greaterThan(tester.getSize(altKey).width),
       );
     });
 

@@ -389,7 +389,7 @@ extension TerminalKeyboardActionDetails on TerminalKeyboardAction {
     TerminalKeyboardAction.tmuxMenu => 'Tmux+',
     TerminalKeyboardAction.herdrMenu => 'Herdr',
     TerminalKeyboardAction.snippets => 'Snip',
-    TerminalKeyboardAction.compose => 'Compose',
     TerminalKeyboardAction.touchMode => 'Touch',
+    TerminalKeyboardAction.compose => 'Chat',
   };
 }

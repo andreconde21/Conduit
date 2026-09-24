@@ -72,6 +72,10 @@ Dart implementation of the protocol, and the terminal is
 - Touch-mode indicator in the key row that shows whether taps select text, are
   forwarded as mouse clicks, or scroll tmux history, with a quick toggle for
   mouse tap forwarding.
+- Chat mode: the Chat key opens a line composer, expandable into a full
+  multiline editor for prompting Claude Code and other agents, with drafts per
+  session, voice dictation via the system keyboard, and safe bracketed-paste
+  delivery into TUIs, with insert-only or insert-and-send.
 - Saved global and per-machine snippets from the key row, with hidden snippets
   for passwords or secrets and optional per-machine run-on-connect snippets.
 - Optional device-auth app lock for protecting saved machines and credentials.
