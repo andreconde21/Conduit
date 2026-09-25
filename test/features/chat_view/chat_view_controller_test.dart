@@ -38,31 +38,42 @@ void main() {
     return controller;
   }
 
-  test('first load reads the tail, later polls continue from the offset',
-      () async {
-    final runner = ScriptedAgentCommandRunner([
-      ok(page([userLine('u1', 'hi')], offset: 50, start: 20, state: 'working')),
-      ok(page([assistantLine('a1', [text('hello')])], offset: 90)),
-      ok(page([], offset: 90)),
-    ]);
-    final controller = controllerFor(runner);
-    await controller.refresh();
-    expect(runner.commands.single, contains('transcript s-1 --tail-bytes 1000'));
-    expect(controller.loading, isFalse);
-    expect(controller.items.single, isA<ChatUserMessage>());
-    expect(controller.hasOlder, isTrue);
-    expect(controller.activity, ChatActivity.thinking);
+  test(
+    'first load reads the tail, later polls continue from the offset',
+    () async {
+      final runner = ScriptedAgentCommandRunner([
+        ok(
+          page([userLine('u1', 'hi')], offset: 50, start: 20, state: 'working'),
+        ),
+        ok(
+          page([
+            assistantLine('a1', [text('hello')]),
+          ], offset: 90),
+        ),
+        ok(page([], offset: 90)),
+      ]);
+      final controller = controllerFor(runner);
+      await controller.refresh();
+      expect(
+        runner.commands.single,
+        contains('transcript s-1 --tail-bytes 1000'),
+      );
+      expect(controller.loading, isFalse);
+      expect(controller.items.single, isA<ChatUserMessage>());
+      expect(controller.hasOlder, isTrue);
+      expect(controller.activity, ChatActivity.thinking);
 
-    await controller.refresh();
-    expect(runner.commands[1], contains('transcript s-1 --since 50'));
-    expect(controller.items.last, isA<ChatAssistantText>());
-    expect(controller.name, 'api');
-    expect(controller.activity, ChatActivity.idle);
+      await controller.refresh();
+      expect(runner.commands[1], contains('transcript s-1 --since 50'));
+      expect(controller.items.last, isA<ChatAssistantText>());
+      expect(controller.name, 'api');
+      expect(controller.activity, ChatActivity.idle);
 
-    await controller.refresh();
-    expect(runner.commands[2], contains('--since 90'));
-    expect(controller.items, hasLength(2));
-  });
+      await controller.refresh();
+      expect(runner.commands[2], contains('--since 90'));
+      expect(controller.items, hasLength(2));
+    },
+  );
 
   test('keeps reading while the transcript is ahead of the offset', () async {
     final runner = ScriptedAgentCommandRunner([
@@ -103,34 +114,36 @@ void main() {
     expect(controller.hasOlder, isFalse);
   });
 
-  test('send types base64 text and polls; errors surface as AppFailure',
-      () async {
-    final runner = ScriptedAgentCommandRunner([
-      ok(page([], offset: 10)),
-      ok('{"ok":true}'),
-      ok(page([userLine('u1', "it's done?\nyes")], offset: 60)),
-      failed('agent is waiting for a permission decision; answer it first'),
-    ]);
-    final controller = controllerFor(runner);
-    await controller.refresh();
-    await controller.send("it's done?\nyes");
-    final encoded = base64.encode(utf8.encode("it's done?\nyes"));
-    expect(runner.commands[1], contains('send s-1 --text-b64 $encoded'));
-    expect(runner.commands[1], isNot(contains('--no-enter')));
-    await pumpEventQueue();
-    expect(controller.items.single, isA<ChatUserMessage>());
-    await expectLater(
-      controller.send('again'),
-      throwsA(
-        isA<AppFailure>().having(
-          (f) => f.userMessage,
-          'message',
-          contains('permission decision'),
+  test(
+    'send types base64 text and polls; errors surface as AppFailure',
+    () async {
+      final runner = ScriptedAgentCommandRunner([
+        ok(page([], offset: 10)),
+        ok('{"ok":true}'),
+        ok(page([userLine('u1', "it's done?\nyes")], offset: 60)),
+        failed('agent is waiting for a permission decision; answer it first'),
+      ]);
+      final controller = controllerFor(runner);
+      await controller.refresh();
+      await controller.send("it's done?\nyes");
+      final encoded = base64.encode(utf8.encode("it's done?\nyes"));
+      expect(runner.commands[1], contains('send s-1 --text-b64 $encoded'));
+      expect(runner.commands[1], isNot(contains('--no-enter')));
+      await pumpEventQueue();
+      expect(controller.items.single, isA<ChatUserMessage>());
+      await expectLater(
+        controller.send('again'),
+        throwsA(
+          isA<AppFailure>().having(
+            (f) => f.userMessage,
+            'message',
+            contains('permission decision'),
+          ),
         ),
-      ),
-    );
-    expect(controller.sending, isFalse);
-  });
+      );
+      expect(controller.sending, isFalse);
+    },
+  );
 
   test('interrupt and question answers use the right commands', () async {
     final runner = ScriptedAgentCommandRunner([
@@ -148,34 +161,38 @@ void main() {
     await controller.answerQuestion(2);
     expect(
       runner.commands[3],
-      contains('send s-1 --text-b64 ${base64.encode(utf8.encode('2'))} '
-          '--no-enter'),
+      contains(
+        'send s-1 --text-b64 ${base64.encode(utf8.encode('2'))} '
+        '--no-enter',
+      ),
     );
   });
 
-  test('a missing or old companion stops polling with a clear reason',
-      () async {
-    final missing = ScriptedAgentCommandRunner([
-      const AgentCommandResult(
-        stdout: '',
-        stderr: 'sh: conductore-hostd: not found',
-        exitCode: 127,
-      ),
-    ]);
-    final a = controllerFor(missing);
-    await a.refresh();
-    expect(a.unsupported, contains('not installed'));
-    expect(a.canSend, isFalse);
-    await a.refresh();
-    expect(missing.commands, hasLength(1));
+  test(
+    'a missing or old companion stops polling with a clear reason',
+    () async {
+      final missing = ScriptedAgentCommandRunner([
+        const AgentCommandResult(
+          stdout: '',
+          stderr: 'sh: conductore-hostd: not found',
+          exitCode: 127,
+        ),
+      ]);
+      final a = controllerFor(missing);
+      await a.refresh();
+      expect(a.unsupported, contains('not installed'));
+      expect(a.canSend, isFalse);
+      await a.refresh();
+      expect(missing.commands, hasLength(1));
 
-    final old = ScriptedAgentCommandRunner([
-      failed('unknown command transcript\nusage: ...'),
-    ]);
-    final b = controllerFor(old);
-    await b.refresh();
-    expect(b.unsupported, contains('too old'));
-  });
+      final old = ScriptedAgentCommandRunner([
+        failed('unknown command transcript\nusage: ...'),
+      ]);
+      final b = controllerFor(old);
+      await b.refresh();
+      expect(b.unsupported, contains('too old'));
+    },
+  );
 
   test('other errors keep the thread and are retried', () async {
     final runner = ScriptedAgentCommandRunner([
@@ -192,36 +209,38 @@ void main() {
     expect(controller.error, isNull);
   });
 
-  test('decide goes through the attention flow and drops the request',
-      () async {
-    final decided = <(String, PermissionVerdict)>[];
-    final runner = ScriptedAgentCommandRunner([
-      ok(
-        page(
-          [],
-          offset: 10,
-          state: 'needs_permission',
-          pending: [
-            {'id': 'req-1', 'toolName': 'Bash', 'summary': 'rm -rf build'},
-          ],
+  test(
+    'decide goes through the attention flow and drops the request',
+    () async {
+      final decided = <(String, PermissionVerdict)>[];
+      final runner = ScriptedAgentCommandRunner([
+        ok(
+          page(
+            [],
+            offset: 10,
+            state: 'needs_permission',
+            pending: [
+              {'id': 'req-1', 'toolName': 'Bash', 'summary': 'rm -rf build'},
+            ],
+          ),
         ),
-      ),
-      ok(page([], offset: 10, state: 'working')),
-    ]);
-    final controller = controllerFor(
-      runner,
-      decide: (request, verdict) async => decided.add((request.id, verdict)),
-    );
-    await controller.refresh();
-    expect(controller.activity, ChatActivity.needsApproval);
-    expect(controller.canSend, isFalse);
-    await controller.decide(
-      controller.pending.single,
-      PermissionVerdict.allow,
-    );
-    expect(decided, [('req-1', PermissionVerdict.allow)]);
-    expect(controller.pending, isEmpty);
-  });
+        ok(page([], offset: 10, state: 'working')),
+      ]);
+      final controller = controllerFor(
+        runner,
+        decide: (request, verdict) async => decided.add((request.id, verdict)),
+      );
+      await controller.refresh();
+      expect(controller.activity, ChatActivity.needsApproval);
+      expect(controller.canSend, isFalse);
+      await controller.decide(
+        controller.pending.single,
+        PermissionVerdict.allow,
+      );
+      expect(decided, [('req-1', PermissionVerdict.allow)]);
+      expect(controller.pending, isEmpty);
+    },
+  );
 
   test('an agent change triggers a poll while visible', () async {
     final changes = ChangeNotifier();

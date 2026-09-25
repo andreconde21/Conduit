@@ -50,37 +50,41 @@ void main() {
     expect((items[1] as ChatAssistantText).text, 'Looking at it.');
   });
 
-  test('tool_use and tool_result pair up by id; results never render alone',
-      () {
-    final items = build([
-      assistantLine('a1', [
-        toolUse('t1', 'Bash', {'command': 'npm test', 'description': 'Run'}),
-      ]),
-      userLine('u1', [toolResult('t1', 'Exit code 1\nFAIL x', error: true)]),
-      assistantLine('a2', [
-        toolUse('t2', 'Read', {'file_path': '/w/a.dart'}),
-      ]),
-    ]);
-    expect(items, hasLength(2));
-    final bash = items[0] as ChatToolCall;
-    expect(bash.kind, ChatToolKind.bash);
-    expect(bash.failed, isTrue);
-    expect(bash.result!.content, startsWith('Exit code 1'));
-    final summary = ChatToolSummary.of(bash);
-    expect(summary.subject, 'npm test');
-    expect(summary.detail, 'Run');
-    expect(summary.exitCode, 1);
-    final read = items[1] as ChatToolCall;
-    expect(read.running, isTrue);
-    expect(ChatToolSummary.of(read).subject, '/w/a.dart');
-  });
+  test(
+    'tool_use and tool_result pair up by id; results never render alone',
+    () {
+      final items = build([
+        assistantLine('a1', [
+          toolUse('t1', 'Bash', {'command': 'npm test', 'description': 'Run'}),
+        ]),
+        userLine('u1', [toolResult('t1', 'Exit code 1\nFAIL x', error: true)]),
+        assistantLine('a2', [
+          toolUse('t2', 'Read', {'file_path': '/w/a.dart'}),
+        ]),
+      ]);
+      expect(items, hasLength(2));
+      final bash = items[0] as ChatToolCall;
+      expect(bash.kind, ChatToolKind.bash);
+      expect(bash.failed, isTrue);
+      expect(bash.result!.content, startsWith('Exit code 1'));
+      final summary = ChatToolSummary.of(bash);
+      expect(summary.subject, 'npm test');
+      expect(summary.detail, 'Run');
+      expect(summary.exitCode, 1);
+      final read = items[1] as ChatToolCall;
+      expect(read.running, isTrue);
+      expect(ChatToolSummary.of(read).subject, '/w/a.dart');
+    },
+  );
 
   test('a successful Bash result reports exit 0 and an output tail', () {
     final items = build([
       assistantLine('a1', [
         toolUse('t1', 'Bash', {'command': 'seq 10'}),
       ]),
-      userLine('u1', [toolResult('t1', List.generate(10, (i) => '$i').join('\n'))]),
+      userLine('u1', [
+        toolResult('t1', List.generate(10, (i) => '$i').join('\n')),
+      ]),
     ]);
     final summary = ChatToolSummary.of(items.single as ChatToolCall);
     expect(summary.exitCode, 0);
@@ -210,7 +214,10 @@ void main() {
     final task = items.single as ChatToolCall;
     expect(task.kind, ChatToolKind.task);
     expect(task.children.single.name, 'Grep');
-    expect(ChatToolSummary.of(task.children.single).resultPreview, 'Found 3 files');
+    expect(
+      ChatToolSummary.of(task.children.single).resultPreview,
+      'Found 3 files',
+    );
     final summary = ChatToolSummary.of(task);
     expect(summary.title, 'Explore');
     expect(summary.subject, 'Find usages');
@@ -219,14 +226,20 @@ void main() {
   test('meta lines, command wrappers, interrupts and compaction', () {
     final items = build([
       userLine('m1', 'Base directory for this skill', meta: true),
-      userLine('c1', '<command-name>/review</command-name>\n'
-          '<command-message>review</command-message>\n'
-          '<command-args>123</command-args>'),
+      userLine(
+        'c1',
+        '<command-name>/review</command-name>\n'
+            '<command-message>review</command-message>\n'
+            '<command-args>123</command-args>',
+      ),
       userLine('c2', '<local-command-stdout>ok</local-command-stdout>'),
       userLine('b1', '<bash-input>ls</bash-input>'),
       userLine('i1', [text('[Request interrupted by user]')]),
       userLine('k1', 'This session is being continued', compact: true),
-      userLine('img', [text('see this'), {'type': 'image', 'omitted': true}]),
+      userLine('img', [
+        text('see this'),
+        {'type': 'image', 'omitted': true},
+      ]),
     ]);
     expect(items.map((i) => i.runtimeType), [
       ChatUserMessage,

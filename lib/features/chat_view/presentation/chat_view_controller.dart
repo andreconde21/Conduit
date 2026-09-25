@@ -111,6 +111,9 @@ class ChatViewController extends ChangeNotifier {
   /// Whether older lines exist before the loaded window.
   bool get hasOlder => _start > 0 && !_olderExhausted;
 
+  /// Older lines exist but cannot be shown here (they only fit the TUI).
+  bool get olderOnlyInTerminal => _start > 0 && _olderExhausted;
+
   bool isDeciding(String requestId) => _deciding.contains(requestId);
 
   String get name => _agent?.name ?? fallbackName ?? 'Claude';
@@ -321,8 +324,7 @@ class ChatViewController extends ChangeNotifier {
 
   /// Picks option [number] (1-based) of an open AskUserQuestion prompt by
   /// typing its number, as the terminal's menu accepts.
-  Future<void> answerQuestion(int number) =>
-      send('$number', enter: false);
+  Future<void> answerQuestion(int number) => send('$number', enter: false);
 
   Future<void> decide(
     PendingPermissionRequest request,

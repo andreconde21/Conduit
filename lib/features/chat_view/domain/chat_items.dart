@@ -302,7 +302,11 @@ class ChatItemBuilder {
     return null;
   }
 
-  static void _addUser(String key, TranscriptEntry entry, List<ChatItem> items) {
+  static void _addUser(
+    String key,
+    TranscriptEntry entry,
+    List<ChatItem> items,
+  ) {
     final texts = <String>[];
     var images = 0;
     for (final block in entry.blocks) {
@@ -353,9 +357,7 @@ class ChatItemBuilder {
       return raw.isEmpty ? null : (raw, false);
     }
     String? tag(String name) {
-      final match = RegExp(
-        '<$name>([\\s\\S]*?)</$name>',
-      ).firstMatch(raw);
+      final match = RegExp('<$name>([\\s\\S]*?)</$name>').firstMatch(raw);
       return match?.group(1)?.trim();
     }
 
