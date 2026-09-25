@@ -200,10 +200,52 @@ void main() {
       expect(find.text('Delete'), findsNothing);
     });
 
+    testWidgets('a desktop shows This computer and no proot "This device"', (
+      tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+      try {
+        await pumpHome(tester, desktop: true);
+        await tester.tap(find.byKey(const ValueKey('machine-name')));
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const ValueKey('machine-row-$thisComputerHostId')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey('machine-filter-local')),
+          findsNothing,
+        );
+        expect(find.text('This device'), findsNothing);
+        expect(find.text('Local shell sessions'), findsNothing);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+
+    testWidgets('Android keeps the proot local shell section', (tester) async {
+      await pumpHome(tester, desktop: false);
+      await tester.tap(find.byKey(const ValueKey('machine-name')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('machine-filter-local')),
+        findsOneWidget,
+      );
+      expect(find.text('This device'), findsOneWidget);
+    });
+
     testWidgets('a phone has no This computer', (tester) async {
       await pumpHome(tester, desktop: false);
       expect(find.text('No saved machines yet'), findsOneWidget);
       expect(runnerHosts, isEmpty);
     });
+  });
+
+  test('a saved "This device" filter only survives on Android', () {
+    const filter = MachineFilter({localMachineFilterKey, 'gone'});
+    expect(filter.validFor(const []).keys, {localMachineFilterKey});
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    expect(filter.validFor(const []).isAll, isTrue);
+    debugDefaultTargetPlatformOverride = null;
   });
 }

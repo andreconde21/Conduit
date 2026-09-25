@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/desktop_layout.dart';
@@ -554,10 +555,14 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     return [..._buildSessions(context), ..._buildOtherWorkspaces(context)];
   }
 
+  /// The proot local-shell section ("This device"): Android only, and
+  /// only while the setting shows it. Desktops have This computer.
+  bool get _showProotShell =>
+      PlatformFeatures.prootLocalShell && widget.themeController.showLocalShell;
+
   Widget _buildNoMachines(BuildContext context) {
     final showLocal =
-        widget.themeController.showLocalShell &&
-        !widget.localShellController.isUnsupported;
+        _showProotShell && !widget.localShellController.isUnsupported;
     return SliverPadding(
       padding: const EdgeInsets.fromLTRB(18, 8, 18, 24),
       sliver: SliverList(
@@ -1098,7 +1103,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
   }
 
   Future<void> _openMachineSheet() async {
-    final showLocal = widget.themeController.showLocalShell;
+    final showLocal = _showProotShell;
     final result = await showMachineSheet(
       context: context,
       hostsController: widget.hostsController,

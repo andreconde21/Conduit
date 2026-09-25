@@ -83,13 +83,15 @@ class SettingsSectionBody extends StatelessWidget {
     const SettingsHeading('Terminal font'),
     TerminalFontControls(controller: theme),
     _gap,
-    SettingsSwitchCard(
-      icon: Icons.terminal_rounded,
-      title: 'Show local shell',
-      subtitle: 'Show the local terminal shortcut on the home screen.',
-      value: theme.showLocalShell,
-      onChanged: theme.setShowLocalShell,
-    ),
+    // The proot local shell is Android's; desktops have This computer.
+    if (PlatformFeatures.prootLocalShell)
+      SettingsSwitchCard(
+        icon: Icons.terminal_rounded,
+        title: 'Show local shell',
+        subtitle: 'Show the local terminal shortcut on the home screen.',
+        value: theme.showLocalShell,
+        onChanged: theme.setShowLocalShell,
+      ),
   ];
 
   List<Widget> _terminal(ThemeController theme) => [
