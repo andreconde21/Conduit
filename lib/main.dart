@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_theme.dart';
+import 'package:conduit/core/theme/omarchy_theme_sync_controller.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/core/theme/theme_licenses.dart';
 import 'package:conduit/core/theme/theme_preferences_repository.dart';
@@ -141,7 +142,18 @@ void main() {
     sftpRepository: sftpRepository,
   );
 
-  unawaited(themeController.load());
+  // Follows a machine's Omarchy theme (Appearance settings); syncs once
+  // the saved theme is loaded, then on every resume.
+  final omarchyThemeSync = OmarchyThemeSyncController(
+    theme: themeController,
+    hosts: () async {
+      await hostsController.firstLoad;
+      return hostsController.hosts;
+    },
+    runnerFactory: (host) => SshAgentCommandRunner(hostKeyVerifier, host),
+  );
+  themeController.omarchySync = omarchyThemeSync;
+  unawaited(themeController.load().then((_) => omarchyThemeSync.start()));
   unawaited(shareTarget.start());
 
   runApp(

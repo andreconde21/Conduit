@@ -1,5 +1,6 @@
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/omarchy_theme_sync.dart';
+import 'package:conduit/core/theme/omarchy_theme_sync_controller.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/terminal_pill_items.dart';
 import 'package:conduit/core/theme/theme_preferences_repository.dart';
@@ -11,6 +12,11 @@ class ThemeController extends ChangeNotifier {
   ThemeController(this._repository);
 
   final ThemePreferencesRepository _repository;
+
+  /// Reads the followed machine's Omarchy theme; set once at startup so the
+  /// Appearance settings can offer "Follow Omarchy theme". Null in tests
+  /// and builds without it.
+  OmarchyThemeSyncController? omarchySync;
 
   ThemeMode _themeMode = ThemeMode.dark;
   AppPalette _palette = AppPalette.defaultPalette;
