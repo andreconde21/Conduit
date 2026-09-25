@@ -2045,7 +2045,10 @@ class _DesktopKeysToggle extends StatelessWidget {
           style: TextButton.styleFrom(
             foregroundColor: palette.mutedForegroundFor(brightness),
             visualDensity: VisualDensity.compact,
-            textStyle: const TextStyle(fontSize: 12),
+            // The theme's font: a bare TextStyle would drop it.
+            textStyle: Theme.of(
+              context,
+            ).textTheme.labelMedium?.copyWith(fontSize: 12),
           ),
           onPressed: () => onChanged(!visible),
           icon: Icon(
