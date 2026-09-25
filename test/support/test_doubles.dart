@@ -239,6 +239,7 @@ class TrackableTerminalSession implements SshTerminalSession {
   final int? completeAfterSends;
   final Completer<void> _done = Completer<void>();
   final List<List<int>> sent = <List<int>>[];
+  final List<(int, int)> resizes = <(int, int)>[];
   int closeCount = 0;
 
   @override
@@ -259,7 +260,9 @@ class TrackableTerminalSession implements SshTerminalSession {
   }
 
   @override
-  void resize(int columns, int rows, int pixelWidth, int pixelHeight) {}
+  void resize(int columns, int rows, int pixelWidth, int pixelHeight) {
+    resizes.add((columns, rows));
+  }
 
   @override
   Future<void> send(List<int> data) async {

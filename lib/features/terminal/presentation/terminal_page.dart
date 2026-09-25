@@ -299,6 +299,57 @@ class _TerminalPageState extends State<TerminalPage> {
     });
   }
 
+  /// The pill's Chat button: Chat View when the session shows a Claude
+  /// session the companion knows, else the inline composer. Long-press
+  /// always toggles the composer.
+  void _handleChatButton(TerminalSessionController session) {
+    _maybeShowChatButtonHint();
+    if (_composeMode) {
+      setState(() => _composeMode = false);
+      _focusNode.requestFocus();
+      return;
+    }
+    final attention = widget.agentAttention;
+    final host = session.host;
+    final agent = attention == null || host.isLocal
+        ? null
+        : chatAgentForSession(attention, host);
+    if (attention != null && agent != null) {
+      unawaited(
+        openChatView(
+          context: context,
+          attention: attention,
+          host: host,
+          agent: agent,
+          dictation: _dictation,
+          onOpenTerminal: () => _showAgentTerminal(attention, host, agent),
+        ),
+      );
+      return;
+    }
+    setState(() => _composeMode = true);
+  }
+
+  void _maybeShowChatButtonHint() {
+    final themeController = widget.themeController;
+    if (!mounted || themeController.chatButtonHintSeen) {
+      return;
+    }
+    unawaited(themeController.markChatButtonHintSeen());
+    // Floating well above the bottom edge: the chat bar (or Chat View's
+    // input) that just opened lives there and must stay tappable.
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        behavior: SnackBarBehavior.floating,
+        margin: EdgeInsets.fromLTRB(16, 0, 16, 112),
+        content: Text(
+          'Chat opens Chat View for Claude sessions. Long-press it for the '
+          'composer.',
+        ),
+      ),
+    );
+  }
+
   void _maybeShowTouchModeHint() {
     final themeController = widget.themeController;
     if (!mounted ||
@@ -1171,6 +1222,7 @@ class _TerminalPageState extends State<TerminalPage> {
                         composeActive: _composeMode,
                         onToggleCompose: () =>
                             setState(() => _composeMode = !_composeMode),
+                        onChatButton: () => _handleChatButton(activeSession),
                         tmuxPrefixKey: activeSession.host.tmuxPrefixKey,
                         tmuxScrollMode: _tmuxScrollMode,
                         terminalMouseInput:
@@ -1279,9 +1331,12 @@ class _ComposeInputBarState extends State<_ComposeInputBar> {
       );
     }
     _controller.addListener(_notifyChanged);
-    WidgetsBinding.instance.addPostFrameCallback(
-      (_) => _focusNode.requestFocus(),
-    );
+    // Ask for focus now, not after the first frame: the request is applied
+    // as soon as the field is in the tree, so the keyboard comes up in the
+    // same frame the bar replaces the pill. A post-frame request let the
+    // terminal drop its input connection first (keyboard starts hiding)
+    // and then reopen it, so the terminal resized twice, a frame late.
+    _focusNode.requestFocus();
   }
 
   void _notifyChanged() {

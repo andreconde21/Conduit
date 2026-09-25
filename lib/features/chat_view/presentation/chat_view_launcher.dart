@@ -7,6 +7,7 @@ import 'package:conduit/features/chat_view/presentation/chat_view_page.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_controller.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_page.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/voice/presentation/dictation_controller.dart';
 import 'package:flutter/material.dart';
 
@@ -16,6 +17,44 @@ bool chatViewAvailable(AgentAttentionController attention, SavedHost host) =>
     attention.isMonitoring(host.id) &&
     attention.providerFor(host.id).id ==
         const ConductoreHostAttentionProvider().id;
+
+/// The Claude session the terminal session on [host] is showing, when the
+/// companion reports one: the live agent in the session's own tmux session
+/// or Herdr tab, else the only live agent on [host]. Null when the chat
+/// view is unavailable or the choice is ambiguous.
+AgentInfo? chatAgentForSession(
+  AgentAttentionController attention,
+  SavedHost host,
+) {
+  if (!chatViewAvailable(attention, host)) {
+    return null;
+  }
+  final live = [
+    for (final agent
+        in attention.statusFor(host.id)?.agents ?? const <AgentInfo>[])
+      if (agent.state != AgentAttentionState.finished) agent,
+  ];
+  if (live.isEmpty) {
+    return null;
+  }
+  final target = ConnectTarget.fromSessionHostId(host.id);
+  final Iterable<AgentInfo> matches;
+  if (target?.kind == ConnectTargetKind.herdr && target!.tabId.isNotEmpty) {
+    matches = live.where((agent) => agent.tab == target.tabId);
+  } else if (host.startTmuxOnConnect && host.tmuxSessionName.isNotEmpty) {
+    final name = host.tmuxSessionName;
+    matches = live.where(
+      (agent) =>
+          agent.tab == name || (agent.tab?.startsWith('$name:') ?? false),
+    );
+  } else {
+    matches = const [];
+  }
+  if (matches.length == 1) {
+    return matches.single;
+  }
+  return live.length == 1 ? live.single : null;
+}
 
 /// Opens the chat view for [agent] on [host] as a full-screen route.
 /// [onOpenTerminal] runs after the route is popped by its Terminal button

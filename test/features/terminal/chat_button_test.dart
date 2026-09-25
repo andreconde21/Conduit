@@ -1,0 +1,255 @@
+import 'package:conduit/core/theme/theme_controller.dart';
+import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
+import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
+import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
+import 'package:conduit/features/chat_view/presentation/chat_view_launcher.dart';
+import 'package:conduit/features/chat_view/presentation/chat_view_page.dart';
+import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/sessions/domain/connect_target.dart';
+import 'package:conduit/features/terminal/presentation/terminal_page.dart';
+import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
+import 'package:conduit_vt/conduit_vt.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import '../../support/test_doubles.dart';
+
+/// The floating pill's Chat button: Chat View for a Claude session the
+/// companion knows, else the inline composer, which must take over at once.
+void main() {
+  AgentCommandResult ok(String stdout) =>
+      AgentCommandResult(stdout: stdout, stderr: '', exitCode: 0);
+
+  String agent(String id, {String extra = '', String state = 'working'}) =>
+      '{"sessionId":"$id","name":"$id","cwd":"/home/a/$id",'
+      '"state":"$state","pending":[]$extra}';
+
+  String status(List<String> agents) =>
+      '{"version":1,"seq":2,"agents":[${agents.join(',')}]}';
+
+  SavedHost companion(SavedHost host) => host.copyWith(
+    agentAttentionEnabled: true,
+    agentMonitor: AgentMonitorKind.companion,
+  );
+
+  late ThemeController themeController;
+
+  setUp(() async {
+    themeController = ThemeController(InMemoryThemePreferences());
+    await themeController.load();
+  });
+
+  Future<(AgentAttentionController, TerminalWorkspaceController)> monitor(
+    WidgetTester tester,
+    SavedHost host,
+    String statusJson,
+  ) async {
+    final workspace = TerminalWorkspaceController(
+      ImmediateTerminalRepository(TrackableTerminalSession()),
+    );
+    final controller = AgentAttentionController(
+      workspace: workspace,
+      runnerFactory: (_) => ScriptedAgentCommandRunner([ok(statusJson)]),
+      provider: const ConductoreHostAttentionProvider(),
+      pollInterval: const Duration(days: 1),
+    );
+    controller.setAppForeground(false);
+    addTearDown(controller.dispose);
+    addTearDown(workspace.dispose);
+    final session = workspace.open(host);
+    await tester.runAsync(session.connect);
+    await tester.runAsync(pumpEventQueue);
+    return (controller, workspace);
+  }
+
+  group('chatAgentForSession', () {
+    testWidgets('the only live agent on the host', (tester) async {
+      final host = companion(buildHost('h'));
+      final (controller, _) = await monitor(
+        tester,
+        host,
+        status([agent('a'), agent('old', state: 'ended')]),
+      );
+      expect(chatAgentForSession(controller, host)?.id, 'a');
+    });
+
+    testWidgets('the agent in the session\'s own tmux session', (tester) async {
+      final host = companion(
+        const ConnectTarget.tmux('work').apply(buildHost('h')),
+      );
+      final (controller, _) = await monitor(
+        tester,
+        host,
+        status([
+          agent('a', extra: ',"tmux":{"session":"other","window":0}'),
+          agent('b', extra: ',"tmux":{"session":"work","window":1}'),
+        ]),
+      );
+      expect(chatAgentForSession(controller, host)?.id, 'b');
+    });
+
+    testWidgets('the agent in the session\'s Herdr tab', (tester) async {
+      final host = companion(
+        const ConnectTarget.herdr(
+          workspaceId: 'w1',
+          tabId: 't2',
+        ).apply(buildHost('h')),
+      );
+      final (controller, _) = await monitor(
+        tester,
+        host,
+        status([
+          agent('a', extra: ',"herdr":{"tabId":"t1","paneId":"p1"}'),
+          agent('b', extra: ',"herdr":{"tabId":"t2","paneId":"p2"}'),
+        ]),
+      );
+      expect(chatAgentForSession(controller, host)?.id, 'b');
+    });
+
+    testWidgets('null when several agents and none matches', (tester) async {
+      final host = companion(buildHost('h'));
+      final (controller, _) = await monitor(
+        tester,
+        host,
+        status([agent('a'), agent('b')]),
+      );
+      expect(chatAgentForSession(controller, host), isNull);
+    });
+
+    testWidgets('null without agent monitoring', (tester) async {
+      final host = buildHost('h');
+      final (controller, _) = await monitor(tester, host, status([agent('a')]));
+      expect(chatAgentForSession(controller, host), isNull);
+    });
+  });
+
+  group('on the terminal page', () {
+    Future<void> pumpPage(
+      WidgetTester tester,
+      TerminalWorkspaceController workspace, {
+      AgentAttentionController? attention,
+    }) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: TerminalPage(
+            workspace: workspace,
+            themeController: themeController,
+            sftpRepository: NoNetworkSftpRepository(),
+            agentAttention: attention,
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+    }
+
+    // Lets the hint SnackBar time out so no timer outlives the test.
+    Future<void> drainSnackBars(WidgetTester tester) async {
+      for (var i = 0; i < 12; i += 1) {
+        await tester.pump(const Duration(milliseconds: 500));
+      }
+    }
+
+    final chatButton = find.byKey(const ValueKey('toolbar-chat'));
+    const hint =
+        'Chat opens Chat View for Claude sessions. Long-press it for the '
+        'composer.';
+
+    testWidgets('a Claude session opens Chat View directly', (tester) async {
+      final host = companion(buildHost('h'));
+      final (controller, workspace) = await monitor(
+        tester,
+        host,
+        status([agent('a')]),
+      );
+      await pumpPage(tester, workspace, attention: controller);
+
+      await tester.tap(chatButton);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(find.byType(ChatViewPage), findsOneWidget);
+      expect(find.text(hint), findsOneWidget);
+    });
+
+    testWidgets('long-press opens the composer instead', (tester) async {
+      final host = companion(buildHost('h'));
+      final (controller, workspace) = await monitor(
+        tester,
+        host,
+        status([agent('a')]),
+      );
+      await pumpPage(tester, workspace, attention: controller);
+
+      await tester.longPress(chatButton);
+      await tester.pump();
+
+      expect(find.byType(ChatViewPage), findsNothing);
+      expect(find.byTooltip('Close chat mode'), findsOneWidget);
+      await drainSnackBars(tester);
+    });
+
+    testWidgets('without a Claude session the composer takes over at once', (
+      tester,
+    ) async {
+      final remote = TrackableTerminalSession();
+      final workspace = TerminalWorkspaceController(
+        ImmediateTerminalRepository(remote),
+      );
+      addTearDown(workspace.dispose);
+      final session = workspace.open(buildHost('plain'));
+      await pumpPage(tester, workspace);
+      final before = tester.getSize(find.byType(TerminalView)).height;
+      // Let any start-up resize settle, then watch what the tap sends.
+      await tester.pump(const Duration(seconds: 1));
+      remote.resizes.clear();
+
+      await tester.tap(chatButton);
+      // One frame: no post-frame focus, no animation to wait for.
+      await tester.pump();
+
+      final field = find.byType(TextField);
+      expect(field, findsOneWidget);
+      final editable = tester.widget<EditableText>(
+        find.descendant(of: field, matching: find.byType(EditableText)),
+      );
+      expect(editable.focusNode.hasPrimaryFocus, isTrue);
+      expect(tester.testTextInput.isVisible, isTrue);
+      expect(tester.getSize(find.byType(TerminalView)).height, isNot(before));
+      // The remote app hears about the new size in the same frame, so the
+      // TUI redraws for the chat bar straight away.
+      expect(remote.resizes, isNotEmpty);
+      expect(remote.resizes.last, (
+        session.terminal.viewWidth,
+        session.terminal.viewHeight,
+      ));
+      expect(find.text(hint), findsOneWidget);
+      await drainSnackBars(tester);
+    });
+
+    testWidgets('the hint shows only once', (tester) async {
+      final workspace = TerminalWorkspaceController(
+        ImmediateTerminalRepository(TrackableTerminalSession()),
+      );
+      addTearDown(workspace.dispose);
+      workspace.open(buildHost('plain'));
+      await pumpPage(tester, workspace);
+
+      await tester.tap(chatButton);
+      await tester.pump();
+      expect(themeController.chatButtonHintSeen, isTrue);
+      await tester.tap(find.byTooltip('Close chat mode'));
+      await tester.pump();
+      ScaffoldMessenger.of(
+        tester.element(find.byType(TerminalView)),
+      ).removeCurrentSnackBar();
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text(hint), findsNothing);
+
+      await tester.tap(chatButton);
+      await tester.pump();
+      expect(find.text(hint), findsNothing);
+      await drainSnackBars(tester);
+    });
+  });
+}
