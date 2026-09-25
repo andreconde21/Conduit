@@ -43,7 +43,7 @@ class HomePreferences {
   }
 
   /// Keys of the machines the page is filtered to (saved host ids, and
-  /// `local:<instance>` for local shells); empty means every machine.
+  /// `local` for the on-device shells); empty means every machine.
   final Set<String> machineFilter;
   final HomeSessionsView sessionsView;
   final HomeWorkspacesView workspacesView;

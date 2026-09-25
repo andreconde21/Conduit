@@ -252,10 +252,7 @@ void main() {
       tester,
     ) async {
       final tmuxOnly = HerdrFakeRunner.tmuxOnly();
-      final timed = HomeBoardController(
-        runnerFactory: (_) => tmuxOnly,
-        pollInterval: const Duration(seconds: 5),
-      );
+      final timed = HomeBoardController(runnerFactory: (_) => tmuxOnly);
       addTearDown(timed.dispose);
       timed
         ..setVisible(true)
