@@ -1,9 +1,11 @@
 @TestOn('linux || mac-os')
 library;
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:conduit/core/app_failure.dart';
+import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/sessions/data/remote_session_lister.dart';
 import 'package:conduit/features/sessions/domain/remote_session_listing.dart';
 import 'package:conduit/features/this_computer/data/local_agent_command_runner.dart';
@@ -87,6 +89,33 @@ void main() {
       timeout: const Duration(seconds: 10),
     );
     expect(result.stdout.trim(), 'done');
+  });
+
+  test('feeds text on stdin, then end of file', () async {
+    final result = await runner().runWithStdin(
+      'wc -c; cat >/dev/null; echo eof',
+      stdin: 'héllo\n"quoted" \$HOME',
+      timeout: const Duration(seconds: 10),
+    );
+    expect(result.stdout.trim().split('\n'), ['21', 'eof']);
+  });
+
+  test('cancelling kills the command', () async {
+    final cancel = Completer<void>();
+    final running = runner().runWithStdin(
+      'sleep 30',
+      stdin: 'text',
+      timeout: const Duration(seconds: 20),
+      cancel: cancel.future,
+    );
+    final started = DateTime.now();
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    cancel.complete();
+    await expectLater(running, throwsA(isA<AgentCommandCancelled>()));
+    expect(
+      DateTime.now().difference(started),
+      lessThan(const Duration(seconds: 5)),
+    );
   });
 
   test('times out and kills a hung command', () async {

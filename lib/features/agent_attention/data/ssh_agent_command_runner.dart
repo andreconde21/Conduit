@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
@@ -15,7 +16,7 @@ import 'package:dartssh2/dartssh2.dart';
 /// [SshClientFactory]) but its own connection, opened lazily on first use
 /// and kept for subsequent polls; a broken connection is dropped so the
 /// next call reconnects. Never touches the interactive PTY.
-class SshAgentCommandRunner implements AgentCommandRunner {
+class SshAgentCommandRunner implements StdinAgentCommandRunner {
   SshAgentCommandRunner(this._hostKeyVerifier, this._host);
 
   final HostKeyVerifier _hostKeyVerifier;
@@ -29,21 +30,7 @@ class SshAgentCommandRunner implements AgentCommandRunner {
     String command, {
     required Duration timeout,
   }) async {
-    if (_closed) {
-      throw const AppFailure('This connection is closed.');
-    }
-    final SSHClient client;
-    try {
-      client = await (_client ??= SshClientFactory(
-        _hostKeyVerifier,
-      ).connect(_host));
-    } catch (error) {
-      _client = null;
-      throw AppFailure(
-        'Could not reach ${_host.name}.',
-        describeSshConnectionError(error),
-      );
-    }
+    final client = await _connect();
     try {
       final result = await client.runWithResult(command).timeout(timeout);
       return AgentCommandResult(
@@ -63,6 +50,96 @@ class SshAgentCommandRunner implements AgentCommandRunner {
         describeSshConnectionError(error),
       );
     }
+  }
+
+  Future<SSHClient> _connect() async {
+    if (_closed) {
+      throw const AppFailure('This connection is closed.');
+    }
+    try {
+      return await (_client ??= SshClientFactory(
+        _hostKeyVerifier,
+      ).connect(_host));
+    } catch (error) {
+      _client = null;
+      throw AppFailure(
+        'Could not reach ${_host.name}.',
+        describeSshConnectionError(error),
+      );
+    }
+  }
+
+  @override
+  Future<AgentCommandResult> runWithStdin(
+    String command, {
+    required String stdin,
+    required Duration timeout,
+    Future<void>? cancel,
+  }) async {
+    final client = await _connect();
+    final SSHSession session;
+    try {
+      session = await client.execute(command);
+    } catch (error) {
+      await _dropClient();
+      throw AppFailure(
+        'Running a command on ${_host.name} failed.',
+        describeSshConnectionError(error),
+      );
+    }
+    final stdout = BytesBuilder(copy: false);
+    final stderr = BytesBuilder(copy: false);
+    final stdoutDone = Completer<void>();
+    final stderrDone = Completer<void>();
+    session.stdout.listen(
+      stdout.add,
+      onDone: stdoutDone.complete,
+      onError: (Object _) => stdoutDone.complete(),
+    );
+    session.stderr.listen(
+      stderr.add,
+      onDone: stderrDone.complete,
+      onError: (Object _) => stderrDone.complete(),
+    );
+    session.stdin.add(utf8.encode(stdin));
+    // Closing sends end of file; the sink's own future only completes
+    // with the channel.
+    unawaited(session.stdin.close().catchError((Object _) {}));
+    final finished = Future.wait([
+      stdoutDone.future,
+      stderrDone.future,
+      session.done,
+    ]).then((_) => true);
+    final cancelled = cancel?.then((_) => false);
+    try {
+      final completed = await Future.any([
+        finished,
+        ?cancelled,
+      ]).timeout(timeout);
+      if (!completed) {
+        _abort(session);
+        throw const AgentCommandCancelled();
+      }
+      return AgentCommandResult(
+        stdout: utf8.decode(stdout.takeBytes(), allowMalformed: true),
+        stderr: utf8.decode(stderr.takeBytes(), allowMalformed: true),
+        exitCode: session.exitCode,
+      );
+    } on TimeoutException {
+      _abort(session);
+      throw const AppFailure('The command timed out.');
+    }
+  }
+
+  /// Stops [session]'s process: a signal where the server supports it,
+  /// and closing the channel (which ends its input and output) anyway.
+  static void _abort(SSHSession session) {
+    try {
+      session.kill(SSHSignal.TERM);
+    } catch (_) {}
+    try {
+      session.close();
+    } catch (_) {}
   }
 
   Future<void> _dropClient() async {

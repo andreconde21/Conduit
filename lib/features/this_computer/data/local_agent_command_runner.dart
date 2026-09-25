@@ -14,7 +14,7 @@ import 'package:conduit/features/this_computer/domain/local_shell_launch.dart';
 /// with the tool directories put on PATH ([localCommandEnvironment]). On
 /// Windows they run inside WSL (`wsl.exe -e sh -c`), where tmux and Herdr
 /// live, and only when "This computer" uses the WSL shell.
-class LocalAgentCommandRunner implements AgentCommandRunner {
+class LocalAgentCommandRunner implements StdinAgentCommandRunner {
   LocalAgentCommandRunner({
     LocalOs? os,
     this._environment,
@@ -44,6 +44,21 @@ class LocalAgentCommandRunner implements AgentCommandRunner {
   Future<AgentCommandResult> run(
     String command, {
     required Duration timeout,
+  }) => _run(command, timeout: timeout);
+
+  @override
+  Future<AgentCommandResult> runWithStdin(
+    String command, {
+    required String stdin,
+    required Duration timeout,
+    Future<void>? cancel,
+  }) => _run(command, timeout: timeout, stdin: stdin, cancel: cancel);
+
+  Future<AgentCommandResult> _run(
+    String command, {
+    required Duration timeout,
+    String? stdin,
+    Future<void>? cancel,
   }) async {
     if (_closed) {
       throw const AppFailure('This connection is closed.');
@@ -73,9 +88,18 @@ class LocalAgentCommandRunner implements AgentCommandRunner {
       throw AppFailure('Could not run a command on this computer.', error);
     }
     _running.add(process);
-    // No input: a command waiting on stdin must see end of file, like an
-    // SSH exec channel without a PTY.
+    // Without input a command waiting on stdin must see end of file, like
+    // an SSH exec channel without a PTY.
+    if (stdin != null) process.stdin.add(utf8.encode(stdin));
     unawaited(process.stdin.close().catchError((_) {}));
+    var cancelled = false;
+    unawaited(
+      cancel?.then((_) {
+        if (!_running.contains(process)) return;
+        cancelled = true;
+        process.kill(ProcessSignal.sigkill);
+      }),
+    );
     final stdout = process.stdout
         .transform(const Utf8Decoder(allowMalformed: true))
         .join();
@@ -84,6 +108,7 @@ class LocalAgentCommandRunner implements AgentCommandRunner {
         .join();
     try {
       final exitCode = await process.exitCode.timeout(timeout);
+      if (cancelled) throw const AgentCommandCancelled();
       return AgentCommandResult(
         stdout: await stdout,
         stderr: await stderr,
