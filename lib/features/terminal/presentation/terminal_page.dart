@@ -11,6 +11,7 @@ import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_launcher.dart';
+import 'package:conduit/features/companion_setup/domain/companion_status.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_controller.dart';
 import 'package:conduit/features/diff_view/data/ssh_git_diff_source.dart';
 import 'package:conduit/features/diff_view/presentation/diff_view.dart';
@@ -26,6 +27,7 @@ import 'package:conduit/features/live_preview/presentation/live_preview_tab.dart
 import 'package:conduit/features/live_preview/presentation/live_preview_view.dart';
 import 'package:conduit/features/prompt_menus/presentation/prompt_menu_strip.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
+import 'package:conduit/features/sessions/presentation/herdr_session_focus.dart';
 import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
 import 'package:conduit/features/sessions/presentation/session_grid_page.dart';
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
@@ -316,21 +318,144 @@ class _TerminalPageState extends State<TerminalPage> {
       setState(() => _composeMode = true);
       return;
     }
-    final agent = chatAgentForSession(attention, host);
-    if (agent != null) {
-      _openChat(attention, host, agent);
-      return;
+    unawaited(_openChatForSession(attention, session));
+  }
+
+  /// The Chat button on a remote session: finds the Claude session this
+  /// terminal shows (through the agent monitor, else by asking the
+  /// companion), and opens its Chat View. Every way this can fail says so:
+  /// a machine without the companion, or without a Claude session here,
+  /// gets the composer with a note why; a broken companion explains what to
+  /// fix; several candidates ask which one.
+  Future<void> _openChatForSession(
+    AgentAttentionController attention,
+    TerminalSessionController session,
+  ) async {
+    final host = session.host;
+    final List<AgentInfo> agents;
+    if (chatViewAvailable(attention, host)) {
+      agents = attention.statusFor(host.id)?.agents ?? const [];
+    } else {
+      final companion = CompanionSetupScope.maybeOf(context);
+      final known = companion?.statusFor(
+        host.copyWith(id: baseHostId(host.id)),
+      );
+      if (known?.state == CompanionState.notInstalled) {
+        _openComposerBecause(
+          'No Conductore companion on ${host.name}, so there is no Chat '
+          'View here. Opened the composer.',
+        );
+        return;
+      }
+      final access = await checkChatViewAccessWithProgress(
+        context,
+        attention: attention,
+        host: host,
+      );
+      if (!mounted || access == null) return;
+      if (!access.ready) {
+        if (access.companionMissing) {
+          _openComposerBecause(
+            'No Conductore companion on ${host.name}, so there is no Chat '
+            'View here. Opened the composer.',
+          );
+        } else {
+          await showChatViewUnavailable(context, host: host, access: access);
+        }
+        return;
+      }
+      agents = access.agents;
     }
-    // Not monitored through the companion, but the Agent hooks check
-    // found it working: ask the machine for its sessions.
-    final companion = CompanionSetupScope.maybeOf(context);
-    final known = companion?.statusFor(host.copyWith(id: baseHostId(host.id)));
-    if (!chatViewAvailable(attention, host) &&
-        (known?.state.isWorking ?? false)) {
-      unawaited(_openChatOrComposer(attention, session));
-      return;
+    if (!mounted || widget.workspace.activeSession != session) return;
+
+    var location = _chatLocationFor(session);
+    var match = resolveChatAgent(host, agents, location: location);
+    if (match is ChatAgentAmbiguous && !match.elsewhere) {
+      // Several Claude sessions in this workspace: the one on screen is
+      // the pane Herdr has focused.
+      final pane = await _focusedHerdrPane(session, location);
+      if (!mounted) return;
+      if (pane != null) {
+        location = ChatSessionLocation(
+          herdrWorkspaceId: location.herdrWorkspaceId,
+          herdrTabId: pane.tabId,
+          herdrPaneId: pane.paneId,
+        );
+        match = resolveChatAgent(host, agents, location: location);
+      }
     }
+    switch (match) {
+      case ChatAgentMatched(:final agent):
+        _openChat(attention, host, agent);
+      case ChatAgentAmbiguous(:final candidates, :final elsewhere):
+        final agent = await pickChatAgent(
+          context,
+          host: host,
+          agents: candidates,
+          alwaysAsk: elsewhere,
+          title: elsewhere
+              ? 'No Claude session in this ${_placeName(session)}. Open '
+                    'another?'
+              : 'Open chat for…',
+        );
+        if (agent != null && mounted) {
+          _openChat(attention, host, agent);
+        }
+      case ChatAgentNone():
+        _openComposerBecause(
+          'No Claude session is running on ${host.name}. Opened the '
+          'composer.',
+        );
+    }
+  }
+
+  static String _placeName(TerminalSessionController session) =>
+      ConnectTarget.fromSessionHostId(session.host.id)?.kind ==
+          ConnectTargetKind.herdr
+      ? 'workspace'
+      : 'session';
+
+  void _openComposerBecause(String message) {
+    if (!mounted) return;
     setState(() => _composeMode = true);
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          key: const ValueKey('chat-fallback-notice'),
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 112),
+          content: Text(message),
+        ),
+      );
+  }
+
+  /// Where [session] is in Herdr as far as the app tracks it (the
+  /// workspace it was moved to, else its connect target's).
+  ChatSessionLocation _chatLocationFor(TerminalSessionController session) {
+    final herdr = widget.connectFlow?.herdr;
+    final workspace = herdr?.workspaceOf(session) ?? '';
+    return ChatSessionLocation(herdrWorkspaceId: workspace);
+  }
+
+  /// The pane Herdr shows in [session] right now, when it is in the
+  /// session's workspace (Herdr's focus is per server).
+  Future<HerdrFocusedPane?> _focusedHerdrPane(
+    TerminalSessionController session,
+    ChatSessionLocation location,
+  ) async {
+    if (HerdrSessionFocus.herdrTargetOf(session) == null) return null;
+    final control = widget.connectFlow?.herdr.controlFor(session);
+    if (control == null) return null;
+    final pane = await control.readFocusedPane();
+    if (pane == null) return null;
+    final workspace = location.herdrWorkspaceId;
+    if (workspace.isNotEmpty &&
+        pane.workspaceId.isNotEmpty &&
+        pane.workspaceId != workspace) {
+      return null;
+    }
+    return pane;
   }
 
   void _openChat(
@@ -348,27 +473,6 @@ class _TerminalPageState extends State<TerminalPage> {
         onOpenTerminal: () => _showAgentTerminal(attention, host, agent),
       ),
     );
-  }
-
-  Future<void> _openChatOrComposer(
-    AgentAttentionController attention,
-    TerminalSessionController session,
-  ) async {
-    final host = session.host;
-    final access = await checkChatViewAccessWithProgress(
-      context,
-      attention: attention,
-      host: host,
-    );
-    if (!mounted) return;
-    final agent = access != null && access.ready
-        ? matchChatAgent(host, access.agents)
-        : null;
-    if (agent != null) {
-      _openChat(attention, host, agent);
-    } else {
-      setState(() => _composeMode = true);
-    }
   }
 
   void _maybeShowChatButtonHint() {

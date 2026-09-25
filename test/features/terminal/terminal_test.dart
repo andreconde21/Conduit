@@ -78,6 +78,42 @@ void main() {
       await tester.pump(TerminalSessionController.resizeCoalesce);
     });
 
+    testWidgets('forceResize makes the remote repaint with a real size '
+        'change, then restores the size', (tester) async {
+      final remote = TrackableTerminalSession();
+      final controller = TerminalSessionController(
+        host: buildHost('redraw'),
+        repository: ImmediateTerminalRepository(remote),
+      );
+      addTearDown(controller.dispose);
+      await tester.runAsync(controller.connect);
+      controller.terminal.resize(80, 24);
+      await tester.pump(TerminalSessionController.resizeCoalesce);
+      remote.resizes.clear();
+
+      // Resending 80x24 would change nothing on the server (no SIGWINCH).
+      controller.forceResize();
+      expect(remote.resizes, [(80, 23)]);
+      await tester.pump(TerminalSessionController.redrawNudgeDelay);
+      expect(remote.resizes, [(80, 23), (80, 24)]);
+
+      // Afterwards the size counts as sent: nothing more goes out.
+      controller.terminal.resize(80, 24);
+      await tester.pump(TerminalSessionController.resizeCoalesce);
+      expect(remote.resizes, [(80, 23), (80, 24)]);
+    });
+
+    test('forceResize does nothing without a live connection', () {
+      final remote = TrackableTerminalSession();
+      final controller = TerminalSessionController(
+        host: buildHost('idle'),
+        repository: ImmediateTerminalRepository(remote),
+      );
+      addTearDown(controller.dispose);
+      controller.forceResize();
+      expect(remote.resizes, isEmpty);
+    });
+
     test('does not build a tmux startup command when disabled', () {
       final controller = TerminalSessionController(
         host: buildHost('tmux-off'),

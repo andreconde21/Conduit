@@ -101,9 +101,17 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
     super.dispose();
   }
 
+  /// Connects a new or dropped session. A session that is already live
+  /// had no view while this page was closed (or the app was away), so the
+  /// remote is asked for a full repaint instead of trusting the buffer.
   Future<void> _connectIfNeeded() async {
-    if (!mounted || !widget.session.shouldConnect) return;
-    await widget.session.connect();
+    if (!mounted) return;
+    final session = widget.session;
+    if (session.shouldConnect) {
+      await session.connect();
+    } else if (session.isConnected) {
+      session.forceResize();
+    }
   }
 
   void _handleTmuxScrollDrag(DragUpdateDetails details) {

@@ -102,17 +102,6 @@ class ToolbarSnippetPalette extends StatelessWidget {
         shrinkWrap: true,
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
         children: [
-          Center(
-            child: Container(
-              width: 36,
-              height: 4,
-              margin: const EdgeInsets.only(bottom: 14),
-              decoration: BoxDecoration(
-                color: palette.hairlineFor(brightness),
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-          ),
           Text(
             'Quick prompts',
             style: theme.textTheme.titleSmall?.copyWith(color: foreground),
