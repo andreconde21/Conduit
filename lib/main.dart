@@ -30,6 +30,8 @@ import 'package:conduit/features/hosts/presentation/hosts_page.dart';
 import 'package:conduit/features/local_shell/data/local_terminal_repository.dart';
 import 'package:conduit/features/local_shell/local_shell_licenses.dart';
 import 'package:conduit/features/local_shell/presentation/local_shell_controller.dart';
+import 'package:conduit/features/session_navigation/data/secure_session_view_preferences_repository.dart';
+import 'package:conduit/features/session_navigation/presentation/session_view_controller.dart';
 import 'package:conduit/features/sessions/data/secure_connect_preferences_repository.dart';
 import 'package:conduit/features/sessions/data/secure_session_snapshot_repository.dart';
 import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
@@ -199,27 +201,36 @@ void main() {
   );
   unawaited(shareTarget.start());
 
+  // "Open Claude sessions in" and the per-session choices, for every page.
+  final sessionViews = SessionViewController(
+    const SecureSessionViewPreferencesRepository(secureStorage),
+  );
+  loadSessionViews(sessionViews);
+
   runApp(
-    CompanionSetupScope(
-      controller: companionSetup,
-      agentAttention: agentAttention,
-      child: ConduitApp(
-        themeController: themeController,
-        lockController: lockController,
-        hostsController: hostsController,
-        terminalRepository: terminalRepository,
-        workspaceController: workspaceController,
-        localShellController: localShellController,
-        hostKeyVerifier: hostKeyVerifier,
-        promptCoordinator: promptCoordinator,
-        sftpRepository: sftpRepository,
-        sftpBookmarksRepository: sftpBookmarksRepository,
+    SessionViewScope(
+      controller: sessionViews,
+      child: CompanionSetupScope(
+        controller: companionSetup,
         agentAttention: agentAttention,
-        backupService: backupService,
-        fileExport: fileExport,
-        connectFlow: connectFlow,
-        shareTarget: shareTarget,
-        sessionRestore: sessionRestore,
+        child: ConduitApp(
+          themeController: themeController,
+          lockController: lockController,
+          hostsController: hostsController,
+          terminalRepository: terminalRepository,
+          workspaceController: workspaceController,
+          localShellController: localShellController,
+          hostKeyVerifier: hostKeyVerifier,
+          promptCoordinator: promptCoordinator,
+          sftpRepository: sftpRepository,
+          sftpBookmarksRepository: sftpBookmarksRepository,
+          agentAttention: agentAttention,
+          backupService: backupService,
+          fileExport: fileExport,
+          connectFlow: connectFlow,
+          shareTarget: shareTarget,
+          sessionRestore: sessionRestore,
+        ),
       ),
     ),
   );

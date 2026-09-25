@@ -26,6 +26,9 @@ import 'package:conduit/features/local_shell/domain/local_shell_instance.dart';
 import 'package:conduit/features/local_shell/presentation/local_shell_controller.dart';
 import 'package:conduit/features/local_shell/presentation/local_shell_instance_page.dart';
 import 'package:conduit/features/local_shell/presentation/local_shell_setup_page.dart';
+import 'package:conduit/features/session_navigation/presentation/session_view_controller.dart';
+import 'package:conduit/features/session_navigation/presentation/session_view_launcher.dart';
+import 'package:conduit/features/session_navigation/presentation/session_view_widgets.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/domain/remote_session_listing.dart';
 import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
@@ -525,6 +528,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     void open(TerminalSessionController session) {
       widget.workspaceController.activate(session);
       unawaited(_openTerminalWorkspace());
+      _openPreferredChat(session);
     }
 
     // The "+" tile fills the last row's gap (or stands alone when nothing
@@ -1185,7 +1189,30 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     await _openTerminalWorkspace();
   }
 
+  /// After [session]'s terminal was pushed: Chat View on top when its pane
+  /// runs a Claude session the companion knows and it opens in Chat View.
+  /// Its Terminal button leaves the terminal, at the agent's pane.
+  void _openPreferredChat(TerminalSessionController session) {
+    final attention = widget.agentAttention;
+    openPreferredChatView(
+      context,
+      attention: attention,
+      host: session.host,
+      onOpenTerminal: (agent) {
+        final flow = widget.connectFlow;
+        if (flow != null) {
+          unawaited(flow.openAgent(session.host, agent));
+        } else {
+          unawaited(attention.focusAgent(session.host.id, agent));
+        }
+      },
+    );
+  }
+
   Future<void> _showSessionActions(TerminalSessionController session) async {
+    final views = session.host.isLocal
+        ? null
+        : SessionViewScope.maybeOf(context);
     final action = await showModalBottomSheet<_SessionAction>(
       context: context,
       useSafeArea: true,
@@ -1212,6 +1239,14 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
               title: const Text('Rename'),
               onTap: () => Navigator.of(context).pop(_SessionAction.rename),
             ),
+            if (views != null)
+              ListTile(
+                key: const ValueKey('session-action-open-in'),
+                leading: const Icon(Icons.forum_outlined),
+                title: const Text('Open in…'),
+                subtitle: Text(sessionViewSummary(views, session.host.id)),
+                onTap: () => Navigator.of(context).pop(_SessionAction.openIn),
+              ),
             ListTile(
               leading: const Icon(Icons.close_rounded),
               title: const Text('Close session'),
@@ -1227,6 +1262,15 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
         await session.connect();
       case _SessionAction.rename:
         await _renameSession(session);
+      case _SessionAction.openIn:
+        if (views != null && mounted) {
+          await showSessionViewPicker(
+            context,
+            controller: views,
+            sessionHostId: session.host.id,
+            title: session.title,
+          );
+        }
       case _SessionAction.close:
         await widget.workspaceController.close(session);
       case null:
@@ -1506,7 +1550,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
   }
 }
 
-enum _SessionAction { reconnect, rename, close }
+enum _SessionAction { reconnect, rename, openIn, close }
 
 class _MachineSectionHeader extends StatelessWidget {
   const _MachineSectionHeader();

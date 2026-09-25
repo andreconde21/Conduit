@@ -26,6 +26,9 @@ import 'package:conduit/features/live_preview/presentation/live_preview_port_dia
 import 'package:conduit/features/live_preview/presentation/live_preview_tab.dart';
 import 'package:conduit/features/live_preview/presentation/live_preview_view.dart';
 import 'package:conduit/features/prompt_menus/presentation/prompt_menu_strip.dart';
+import 'package:conduit/features/session_navigation/presentation/session_view_controller.dart';
+import 'package:conduit/features/session_navigation/presentation/session_view_launcher.dart';
+import 'package:conduit/features/session_navigation/presentation/session_view_widgets.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/presentation/herdr_session_focus.dart';
 import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
@@ -118,8 +121,16 @@ class TerminalPage extends StatefulWidget {
   State<TerminalPage> createState() => _TerminalPageState();
 }
 
-class _TerminalPageState extends State<TerminalPage> {
+class _TerminalPageState extends State<TerminalPage>
+    with SingleTickerProviderStateMixin {
   final _focusNode = FocusNode();
+
+  /// The short slide after a swipe on the top row switched sessions.
+  late final AnimationController _slide = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 220),
+  );
+  int _slideDirection = 0;
   late final TerminalFileTabsController _fileTabs;
   TerminalSessionController? _focusedSession;
   bool _fullscreen = false;
@@ -233,6 +244,7 @@ class _TerminalPageState extends State<TerminalPage> {
     _clipboardSubscriptions.clear();
     _focusNode.dispose();
     _fileTabs.dispose();
+    _slide.dispose();
     super.dispose();
   }
 
@@ -873,6 +885,73 @@ class _TerminalPageState extends State<TerminalPage> {
     _showTerminal();
   }
 
+  /// A session the user picked (its tab, the switcher): Chat View when its
+  /// pane runs a Claude session the companion knows and its effective view
+  /// is Chat View; the terminal otherwise.
+  void _openPreferredView(TerminalSessionController session) {
+    final attention = widget.agentAttention;
+    if (!mounted ||
+        attention == null ||
+        widget.workspace.activeSession != session) {
+      return;
+    }
+    openPreferredChatView(
+      context,
+      attention: attention,
+      host: session.host,
+      dictation: _dictation,
+      onOpenTerminal: (agent) =>
+          _showAgentTerminal(attention, session.host, agent),
+    );
+  }
+
+  /// Long-press on a session's tab: where it opens when it runs Claude.
+  Future<void> _pickSessionView(TerminalSessionController session) async {
+    final views = SessionViewScope.maybeOf(context);
+    if (views == null || session.host.isLocal) return;
+    await showSessionViewPicker(
+      context,
+      controller: views,
+      sessionHostId: session.host.id,
+      title: session.title,
+    );
+    if (mounted) _focusNode.requestFocus();
+  }
+
+  /// A horizontal swipe on the top row: the next (1) or previous (-1)
+  /// open session, sliding in from that side.
+  void _swipeSession(int direction) {
+    final sessions = widget.workspace.sessions;
+    final active = widget.workspace.activeSession;
+    if (active == null) return;
+    final index = sessions.indexOf(active) + direction;
+    if (index < 0 || index >= sessions.length) return;
+    widget.workspace.activate(sessions[index]);
+    _showTerminal();
+    if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) return;
+    _slideDirection = direction;
+    unawaited(_slide.forward(from: 0));
+  }
+
+  Widget _slideIn(Widget child) {
+    return ClipRect(
+      child: AnimatedBuilder(
+        animation: _slide,
+        child: child,
+        builder: (context, child) {
+          final sliding = _slide.status == AnimationStatus.forward;
+          final remaining = sliding
+              ? 1 - Curves.easeOutCubic.transform(_slide.value)
+              : 0.0;
+          return FractionalTranslation(
+            translation: Offset(_slideDirection * remaining * 0.3, 0),
+            child: child,
+          );
+        },
+      ),
+    );
+  }
+
   Future<void> _openSessionGrid() async {
     await showSessionGrid(
       context,
@@ -1175,6 +1254,10 @@ class _TerminalPageState extends State<TerminalPage> {
                                 ? () => _openAgentAttention(attention)
                                 : null,
                             onOpenSessionGrid: _openSessionGrid,
+                            onSwipeSession: _swipeSession,
+                            onSessionActivated: _openPreferredView,
+                            onSessionLongPress: (session) =>
+                                unawaited(_pickSessionView(session)),
                             swipeDownOpensSessionGrid: widget
                                 .themeController
                                 .terminalGestures
@@ -1196,99 +1279,108 @@ class _TerminalPageState extends State<TerminalPage> {
                             ? EmptyTerminalState(
                                 onBack: () => Navigator.of(context).pop(),
                               )
-                            : IndexedStack(
-                                index: activeFileTab != null
-                                    ? widget.workspace.sessions.length +
-                                          fileTabs.indexOf(activeFileTab)
-                                    : widget.workspace.sessions.indexOf(
-                                        activeSession!,
-                                      ),
-                                children: [
-                                  for (final session
-                                      in widget.workspace.sessions)
-                                    TerminalGestureLayer(
-                                      key: ValueKey(session.host.id),
-                                      target: _gestureTargetFor(session),
-                                      herdrControl: _herdrControlFor(session),
-                                      onHerdrWorkspaceFocused: (workspaceId) =>
-                                          widget.connectFlow?.herdr
-                                              .noteWorkspace(
-                                                session,
-                                                workspaceId,
-                                              ),
-                                      preferences: widget
-                                          .themeController
-                                          .terminalGestures,
-                                      session: session,
-                                      fontSize: widget
-                                          .themeController
-                                          .terminalFontSize,
-                                      onFontSizeChanged: (fontSize) {
-                                        unawaited(
-                                          widget.themeController
-                                              .setTerminalFontSize(fontSize),
-                                        );
-                                      },
-                                      scrollMode:
-                                          session == activeSession &&
-                                          _tmuxScrollMode,
-                                      onEnterScrollMode: () {
-                                        setState(() => _tmuxScrollMode = true);
-                                        _focusNode.requestFocus();
-                                      },
-                                      onExitScrollMode: () {
-                                        setState(() => _tmuxScrollMode = false);
-                                        _focusNode.requestFocus();
-                                      },
-                                      onOpenSessionGrid: _openSessionGrid,
-                                      onOpenAgentPanel: _agentPanelOpener(),
-                                      child: TerminalSurface(
-                                        session: session,
-                                        autoConnect: widget.workspace
-                                            .mayAutoConnect(session),
-                                        palette: palette,
-                                        brightness: brightness,
-                                        fontFamily: widget
+                            : _slideIn(
+                                IndexedStack(
+                                  index: activeFileTab != null
+                                      ? widget.workspace.sessions.length +
+                                            fileTabs.indexOf(activeFileTab)
+                                      : widget.workspace.sessions.indexOf(
+                                          activeSession!,
+                                        ),
+                                  children: [
+                                    for (final session
+                                        in widget.workspace.sessions)
+                                      TerminalGestureLayer(
+                                        key: ValueKey(session.host.id),
+                                        target: _gestureTargetFor(session),
+                                        herdrControl: _herdrControlFor(session),
+                                        onHerdrWorkspaceFocused:
+                                            (workspaceId) => widget
+                                                .connectFlow
+                                                ?.herdr
+                                                .noteWorkspace(
+                                                  session,
+                                                  workspaceId,
+                                                ),
+                                        preferences: widget
                                             .themeController
-                                            .terminalFont
-                                            .fontFamily,
+                                            .terminalGestures,
+                                        session: session,
                                         fontSize: widget
                                             .themeController
                                             .terminalFontSize,
-                                        predictiveEchoEnabled:
-                                            session.host.predictiveEchoEnabled,
-                                        terminalMouseInput: widget
-                                            .themeController
-                                            .terminalMouseInput,
-                                        focusNode:
-                                            session == activeSession &&
-                                                activeFileTab == null
-                                            ? _focusNode
-                                            : null,
-                                        tmuxScrollMode:
+                                        onFontSizeChanged: (fontSize) {
+                                          unawaited(
+                                            widget.themeController
+                                                .setTerminalFontSize(fontSize),
+                                          );
+                                        },
+                                        scrollMode:
                                             session == activeSession &&
                                             _tmuxScrollMode,
-                                        onExitTmuxScrollMode: () {
+                                        onEnterScrollMode: () {
+                                          setState(
+                                            () => _tmuxScrollMode = true,
+                                          );
+                                          _focusNode.requestFocus();
+                                        },
+                                        onExitScrollMode: () {
                                           setState(
                                             () => _tmuxScrollMode = false,
                                           );
                                           _focusNode.requestFocus();
                                         },
-                                        onPathTap: (path) =>
-                                            _handlePathTap(session, path),
-                                        onLinkTap: (url) =>
-                                            _handleLinkTap(session, url),
-                                        onLinkLongPress: (url, line) =>
-                                            _handleLinkLongPress(
-                                              session,
-                                              url,
-                                              line,
-                                            ),
+                                        onOpenSessionGrid: _openSessionGrid,
+                                        onOpenAgentPanel: _agentPanelOpener(),
+                                        child: TerminalSurface(
+                                          session: session,
+                                          autoConnect: widget.workspace
+                                              .mayAutoConnect(session),
+                                          palette: palette,
+                                          brightness: brightness,
+                                          fontFamily: widget
+                                              .themeController
+                                              .terminalFont
+                                              .fontFamily,
+                                          fontSize: widget
+                                              .themeController
+                                              .terminalFontSize,
+                                          predictiveEchoEnabled: session
+                                              .host
+                                              .predictiveEchoEnabled,
+                                          terminalMouseInput: widget
+                                              .themeController
+                                              .terminalMouseInput,
+                                          focusNode:
+                                              session == activeSession &&
+                                                  activeFileTab == null
+                                              ? _focusNode
+                                              : null,
+                                          tmuxScrollMode:
+                                              session == activeSession &&
+                                              _tmuxScrollMode,
+                                          onExitTmuxScrollMode: () {
+                                            setState(
+                                              () => _tmuxScrollMode = false,
+                                            );
+                                            _focusNode.requestFocus();
+                                          },
+                                          onPathTap: (path) =>
+                                              _handlePathTap(session, path),
+                                          onLinkTap: (url) =>
+                                              _handleLinkTap(session, url),
+                                          onLinkLongPress: (url, line) =>
+                                              _handleLinkLongPress(
+                                                session,
+                                                url,
+                                                line,
+                                              ),
+                                        ),
                                       ),
-                                    ),
-                                  for (final tab in fileTabs)
-                                    _buildFileTab(tab, palette, brightness),
-                                ],
+                                    for (final tab in fileTabs)
+                                      _buildFileTab(tab, palette, brightness),
+                                  ],
+                                ),
                               ),
                       ),
                     ),
