@@ -3,12 +3,24 @@ import 'dart:async';
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/domain/saved_hosts_repository.dart';
+import 'package:conduit/features/this_computer/domain/local_shell_launch.dart';
+import 'package:conduit/features/this_computer/domain/this_computer_settings.dart';
 import 'package:flutter/foundation.dart';
 
 class HostsController extends ChangeNotifier {
-  HostsController(this._repository);
+  /// With [thisComputerStore] (desktops), "This computer" is a machine
+  /// too: listed first by [machines] and [sortedMachines], found by
+  /// [findById], and its settings go to that store instead of the saved
+  /// list, so they are never backed up or synced.
+  HostsController(this._repository, {ThisComputerStore? thisComputerStore})
+    : _thisComputerStore = thisComputerStore,
+      _thisComputer = thisComputerStore == null
+          ? null
+          : ThisComputerSettings(host: SavedHost.thisComputer());
 
   final SavedHostsRepository _repository;
+  final ThisComputerStore? _thisComputerStore;
+  ThisComputerSettings? _thisComputer;
 
   List<SavedHost> _hosts = const [];
   List<SavedHost>? _sortedHostsCache;
@@ -22,9 +34,48 @@ class HostsController extends ChangeNotifier {
   /// for work that must see the saved hosts right after app start.
   Future<void> get firstLoad => _firstLoad.future;
 
+  /// The saved machines (what backups and sync carry).
   List<SavedHost> get hosts => _hosts;
   List<SavedHost> get sortedHosts =>
       _sortedHostsCache ??= _computeSortedHosts();
+
+  /// "This computer" on a desktop, else null.
+  SavedHost? get thisComputer => _thisComputer?.host;
+
+  /// The shell "This computer" opens on Windows.
+  WindowsShellKind get windowsShell =>
+      _thisComputer?.windowsShell ?? WindowsShellKind.powershell;
+
+  /// Every machine a session can open on: "This computer" first, then the
+  /// saved ones.
+  List<SavedHost> get machines => [?thisComputer, ..._hosts];
+
+  /// [machines] in the machine list's order ("This computer" stays first).
+  List<SavedHost> get sortedMachines => [?thisComputer, ...sortedHosts];
+
+  /// The machine with [id] (a saved one or "This computer"), or null.
+  SavedHost? findById(String id) {
+    final local = thisComputer;
+    if (local != null && id == local.id) return local;
+    return _hosts.where((host) => host.id == id).firstOrNull;
+  }
+
+  Future<void> setWindowsShell(WindowsShellKind shell) async {
+    final current = _thisComputer;
+    if (current == null || current.windowsShell == shell) return;
+    await _saveThisComputer(current.copyWith(windowsShell: shell));
+  }
+
+  Future<void> _saveThisComputer(ThisComputerSettings settings) async {
+    _thisComputer = settings;
+    notifyListeners();
+    try {
+      await _thisComputerStore?.save(settings);
+    } catch (error) {
+      _errorMessage = error.toString();
+      notifyListeners();
+    }
+  }
   HostListSortMode get sortMode => _sortMode;
   List<String> get manualOrder => List.unmodifiable(_manualOrder);
 
@@ -36,8 +87,18 @@ class HostsController extends ChangeNotifier {
     _errorMessage = null;
     notifyListeners();
 
+    final thisComputerStore = _thisComputerStore;
+    if (thisComputerStore != null) {
+      try {
+        _thisComputer = await thisComputerStore.load();
+      } catch (_) {
+        // Defaults stay: the machine itself always works.
+      }
+    }
     try {
-      final hosts = await _repository.loadHosts();
+      final hosts = (await _repository.loadHosts())
+          .where((host) => !host.isThisComputer)
+          .toList(growable: false);
       _sortMode = await _repository.loadSortMode();
       _manualOrder = await _repository.loadManualOrder();
       _setHosts(hosts);
@@ -106,6 +167,14 @@ class HostsController extends ChangeNotifier {
   }
 
   Future<void> upsert(SavedHost host) async {
+    if (host.isThisComputer) {
+      final current = _thisComputer;
+      if (current == null) return;
+      await _saveThisComputer(
+        current.copyWith(host: host.copyWith(id: thisComputerHostId)),
+      );
+      return;
+    }
     final index = _hosts.indexWhere((currentHost) => currentHost.id == host.id);
     final updatedHosts = [..._hosts];
 
@@ -125,7 +194,7 @@ class HostsController extends ChangeNotifier {
   }) async {
     final mergedById = {for (final host in _hosts) host.id: host};
     for (final host in hosts) {
-      if (host.id.isNotEmpty) {
+      if (host.id.isNotEmpty && !host.isThisComputer) {
         mergedById[host.id] = host;
       }
     }
@@ -168,6 +237,7 @@ class HostsController extends ChangeNotifier {
     List<String>? manualOrder,
   }) async {
     _errorMessage = null;
+    hosts = hosts.where((host) => !host.isThisComputer).toList();
     try {
       await _repository.saveHosts(hosts);
       if (sortMode != null && sortMode != _sortMode) {
@@ -189,12 +259,19 @@ class HostsController extends ChangeNotifier {
   }
 
   Future<void> remove(SavedHost host) async {
+    if (host.isThisComputer) return;
     await _save(
       _hosts.where((currentHost) => currentHost.id != host.id).toList(),
     );
   }
 
   Future<void> markConnected(SavedHost host) async {
+    if (host.isThisComputer) {
+      final local = thisComputer;
+      if (local == null) return;
+      await upsert(local.copyWith(lastConnectedAt: DateTime.now()));
+      return;
+    }
     final current = _hosts.firstWhere(
       (currentHost) => currentHost.id == host.id,
       orElse: () => host,

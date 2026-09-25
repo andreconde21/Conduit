@@ -96,6 +96,16 @@ class TerminalSessionController extends ChangeNotifier {
   static const _connectSnippetAfterTmuxDelay = Duration(milliseconds: 250);
 
   TerminalConnectionStatus get status => _status;
+
+  /// How the shell of a local session ("This computer") ended, while the
+  /// session is disconnected because it did; null otherwise.
+  int? get exitCode =>
+      _status == TerminalConnectionStatus.disconnected ? _exitCode : null;
+  int? _exitCode;
+
+  /// Whether this session's shell runs on the device itself, so it ends
+  /// with an exit code and restarts instead of reconnecting.
+  bool get isLocalShell => host.isThisComputer || host.isLocal;
   String get title => _customTitle ?? host.name;
 
   /// Name the user gave this session (long-press › Rename on the home
@@ -190,11 +200,14 @@ class TerminalSessionController extends ChangeNotifier {
     }
 
     final generation = ++_connectionGeneration;
+    _exitCode = null;
     _outputFilter.reset();
     _predictiveEcho.reset();
     _status = TerminalConnectionStatus.connecting;
     terminal.write(
-      host.isLocal
+      host.isThisComputer
+          ? 'Starting the shell on this computer...\r\n'
+          : host.isLocal
           ? 'Starting ${host.name}...\r\n'
           : 'Connecting to ${host.endpoint}...\r\n',
     );
@@ -244,14 +257,23 @@ class TerminalSessionController extends ChangeNotifier {
           .cast<List<int>>()
           .transform(const Utf8Decoder(allowMalformed: true))
           .listen(_writeTerminalOutput, onError: _handleStreamError);
-      _doneSubscription = session.done.asStream().listen((_) {
-        if (_status == TerminalConnectionStatus.connected) {
+      _doneSubscription = session.done.asStream().asyncMap((_) async {
+        if (session is ExitStatusTerminalSession) {
+          return (session as ExitStatusTerminalSession).exitCode
+              .then<int?>((code) => code)
+              .catchError((_) => null);
+        }
+        return null;
+      }).listen((code) {
+        if (_status == TerminalConnectionStatus.connected &&
+            _session == session) {
           _status = TerminalConnectionStatus.disconnected;
-          terminal.write(
-            host.isLocal
-                ? '\r\nShell exited.\r\n'
-                : '\r\nConnection closed.\r\n',
-          );
+          _exitCode = code;
+          terminal.write(switch ((host.isLocal, code)) {
+            (_, final int code) => '\r\n[Shell exited (code $code)]\r\n',
+            (true, null) => '\r\nShell exited.\r\n',
+            (false, null) => '\r\nConnection closed.\r\n',
+          });
           notifyListeners();
         }
       }, onError: _handleStreamError);
