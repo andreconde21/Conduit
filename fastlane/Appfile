@@ -1,0 +1,6 @@
+# Store identities. Both default to com.outsmartis.conductore and can be
+# overridden with the PLAY_PACKAGE_NAME and IOS_BUNDLE_ID environment
+# variables (the workflows pass the repository variables of the same names).
+package_name(ENV.fetch("PLAY_PACKAGE_NAME", "com.outsmartis.conductore"))
+app_identifier(ENV.fetch("IOS_BUNDLE_ID", "com.outsmartis.conductore"))
+team_id(ENV["APPLE_TEAM_ID"]) unless ENV["APPLE_TEAM_ID"].to_s.empty?

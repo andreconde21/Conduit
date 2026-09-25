@@ -1,0 +1,255 @@
+# Store lanes for Conductore. The GitHub workflows build the app with
+# Flutter and call these lanes only to talk to Google Play and App Store
+# Connect, so everything a lane needs arrives through environment variables
+# (never files in the repo). See docs/release-pipeline.md.
+#
+# Android:
+#   fastlane android upload aab:<path> [track:internal]
+#   fastlane android promote from:internal to:alpha version_code:123 [rollout:0.2]
+# iOS:
+#   fastlane ios beta [upload:false]    (archive, sign, upload to TestFlight)
+#   fastlane ios distribute_external group:"Beta" app_version:0.1.0 build_number:123
+#   fastlane ios submit_review app_version:0.1.0 build_number:123
+#
+# Store listings are managed in the consoles: no lane uploads metadata,
+# screenshots or changelogs. fastlane/metadata/android is upstream Conduit's
+# F-Droid listing and is left untouched.
+
+opt_out_usage
+default_platform(:android)
+
+PLAY_PACKAGE = ENV.fetch("PLAY_PACKAGE_NAME", "com.outsmartis.conductore")
+IOS_BUNDLE_ID = ENV.fetch("IOS_BUNDLE_ID", "com.outsmartis.conductore")
+PLAY_TRACKS = %w[internal alpha beta production].freeze
+
+def required_env(name)
+  value = ENV[name].to_s
+  UI.user_error!("#{name} is not set") if value.empty?
+  value
+end
+
+def required_option(options, name)
+  value = options[name].to_s
+  UI.user_error!("Missing option #{name}:") if value.empty?
+  value
+end
+
+platform :android do
+  def play_common
+    {
+      package_name: PLAY_PACKAGE,
+      json_key_data: required_env("PLAY_SERVICE_ACCOUNT_JSON"),
+      skip_upload_apk: true,
+      skip_upload_metadata: true,
+      skip_upload_changelogs: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true
+    }
+  end
+
+  desc "Upload a signed AAB to a Play track (internal by default)"
+  lane :upload do |options|
+    track = options[:track] || "internal"
+    UI.user_error!("Unknown track #{track}") unless PLAY_TRACKS.include?(track)
+    # A Play app that has never been rolled out anywhere only accepts
+    # draft releases; PLAY_RELEASE_STATUS=draft covers that phase.
+    status = ENV["PLAY_RELEASE_STATUS"].to_s.empty? ? "completed" : ENV["PLAY_RELEASE_STATUS"]
+    upload_to_play_store(
+      **play_common,
+      track: track,
+      aab: required_option(options, :aab),
+      release_status: status
+    )
+  end
+
+  desc "Promote a version code from one track to another, or change the production rollout"
+  lane :promote do |options|
+    from = required_option(options, :from)
+    to = required_option(options, :to)
+    version_code = required_option(options, :version_code).to_i
+    [from, to].each do |track|
+      UI.user_error!("Unknown track #{track}") unless PLAY_TRACKS.include?(track)
+    end
+    rollout = options[:rollout].to_s.empty? ? nil : options[:rollout].to_f
+    if rollout && !(rollout > 0 && rollout <= 1)
+      UI.user_error!("rollout must be a fraction in (0, 1], e.g. 0.2")
+    end
+    staged = to == "production" && rollout && rollout < 1
+
+    if from == to
+      # Same track: only the rollout of an existing release changes
+      # (e.g. production 20% -> 100%).
+      UI.user_error!("from == to only changes a rollout; pass rollout:") unless rollout
+      upload_to_play_store(
+        **play_common,
+        track: to,
+        version_code: version_code,
+        rollout: rollout.to_s,
+        release_status: rollout < 1 ? "inProgress" : "completed"
+      )
+    else
+      params = {
+        **play_common,
+        track: from,
+        track_promote_to: to,
+        version_code: version_code,
+        track_promote_release_status: staged ? "inProgress" : "completed"
+      }
+      params[:rollout] = rollout.to_s if staged
+      upload_to_play_store(**params)
+    end
+  end
+end
+
+platform :ios do
+  def asc_api_key
+    app_store_connect_api_key(
+      key_id: required_env("ASC_KEY_ID"),
+      issuer_id: required_env("ASC_ISSUER_ID"),
+      key_content: required_env("ASC_KEY_P8_BASE64"),
+      is_key_content_base64: true,
+      in_house: false
+    )
+  end
+
+  # Writes the .p8 for xcodebuild's own -authenticationKeyPath flag.
+  def asc_key_file
+    path = File.expand_path("../build/ios/asc-api-key.p8", __dir__)
+    FileUtils.mkdir_p(File.dirname(path))
+    File.binwrite(path, Base64.decode64(required_env("ASC_KEY_P8_BASE64")))
+    File.chmod(0o600, path)
+    path
+  end
+
+  desc "Build a signed IPA from the Flutter-prepared workspace and upload it to TestFlight"
+  lane :beta do |options|
+    api_key = asc_api_key
+    team_id = required_env("APPLE_TEAM_ID")
+    workspace = File.expand_path("../ios/Runner.xcworkspace", __dir__)
+    output_dir = File.expand_path("../build/ios/ipa", __dir__)
+    identity = "APP_BUNDLE_ID=#{IOS_BUNDLE_ID} DEVELOPMENT_TEAM=#{team_id}"
+
+    if ENV["IOS_DIST_CERT_P12_BASE64"].to_s.empty?
+      # Automatic, cloud-managed signing: Xcode registers the App ID,
+      # creates the profile and signs with Apple's cloud distribution
+      # certificate. Needs an App Store Connect key with the Admin role.
+      UI.important("No IOS_DIST_CERT_P12_BASE64: using Xcode automatic (cloud) signing")
+      auth = [
+        "-allowProvisioningUpdates",
+        "-authenticationKeyPath #{asc_key_file}",
+        "-authenticationKeyID #{required_env('ASC_KEY_ID')}",
+        "-authenticationKeyIssuerID #{required_env('ASC_ISSUER_ID')}"
+      ].join(" ")
+      build_app(
+        workspace: workspace,
+        scheme: "Runner",
+        configuration: "Release",
+        export_method: "app-store",
+        export_team_id: team_id,
+        export_options: { signingStyle: "automatic", teamID: team_id },
+        xcargs: "#{auth} #{identity} CODE_SIGN_STYLE=Automatic",
+        export_xcargs: auth,
+        output_directory: output_dir,
+        output_name: "Conductore.ipa"
+      )
+    else
+      # Manual signing with our own distribution certificate (secret) and an
+      # App Store profile that sigh creates or reuses through the API key.
+      setup_ci(force: true)
+      cert_path = File.expand_path("../build/ios/distribution.p12", __dir__)
+      FileUtils.mkdir_p(File.dirname(cert_path))
+      File.binwrite(cert_path, Base64.decode64(ENV["IOS_DIST_CERT_P12_BASE64"]))
+      import_certificate(
+        certificate_path: cert_path,
+        certificate_password: ENV["IOS_DIST_CERT_PASSWORD"].to_s,
+        keychain_name: "fastlane_tmp_keychain",
+        keychain_password: ""
+      )
+      File.delete(cert_path)
+      get_provisioning_profile(
+        api_key: api_key,
+        app_identifier: IOS_BUNDLE_ID,
+        team_id: team_id,
+        platform: "ios"
+      )
+      profile_name = lane_context[SharedValues::SIGH_NAME]
+      update_code_signing_settings(
+        path: File.expand_path("../ios/Runner.xcodeproj", __dir__),
+        use_automatic_signing: false,
+        targets: ["Runner"],
+        build_configurations: ["Release"],
+        team_id: team_id,
+        code_sign_identity: "Apple Distribution",
+        profile_name: profile_name
+      )
+      build_app(
+        workspace: workspace,
+        scheme: "Runner",
+        configuration: "Release",
+        export_method: "app-store",
+        export_team_id: team_id,
+        export_options: {
+          signingStyle: "manual",
+          teamID: team_id,
+          provisioningProfiles: { IOS_BUNDLE_ID => profile_name }
+        },
+        xcargs: identity,
+        output_directory: output_dir,
+        output_name: "Conductore.ipa"
+      )
+    end
+
+    if options[:upload].to_s == "false"
+      UI.important("upload:false, leaving #{output_dir}/Conductore.ipa unuploaded")
+      next
+    end
+
+    upload_to_testflight(
+      api_key: api_key,
+      ipa: File.join(output_dir, "Conductore.ipa"),
+      # Internal testers get the build through the internal group's
+      # automatic distribution once Apple finishes processing it.
+      skip_waiting_for_build_processing: true,
+      skip_submission: true,
+      distribute_external: false
+    )
+  end
+
+  desc "Give an uploaded build to an external TestFlight group (starts Beta App Review when needed)"
+  lane :distribute_external do |options|
+    upload_to_testflight(
+      api_key: asc_api_key,
+      app_identifier: IOS_BUNDLE_ID,
+      distribute_only: true,
+      app_platform: "ios",
+      app_version: required_option(options, :app_version),
+      build_number: required_option(options, :build_number),
+      distribute_external: true,
+      groups: [required_option(options, :group)],
+      notify_external_testers: true,
+      changelog: options[:changelog].to_s.empty? ? nil : options[:changelog]
+    )
+  end
+
+  desc "Attach a processed build to the App Store version and submit it for review"
+  lane :submit_review do |options|
+    deliver(
+      api_key: asc_api_key,
+      app_identifier: IOS_BUNDLE_ID,
+      app_version: required_option(options, :app_version),
+      build_number: required_option(options, :build_number),
+      platform: "ios",
+      metadata_path: File.expand_path("metadata/ios", __dir__),
+      screenshots_path: File.expand_path("screenshots/ios", __dir__),
+      skip_binary_upload: true,
+      skip_metadata: true,
+      skip_screenshots: true,
+      submit_for_review: true,
+      # André releases by hand after approval.
+      automatic_release: false,
+      force: true,
+      run_precheck_before_submit: false,
+      submission_information: { add_id_info_uses_idfa: false }
+    )
+  end
+end
