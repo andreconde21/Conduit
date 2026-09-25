@@ -66,6 +66,7 @@ class TerminalSessionController extends ChangeNotifier {
   int _pixelWidth = 0;
   int _pixelHeight = 0;
   Timer? _resizeTimer;
+  Timer? _redrawTimer;
   bool _resizePending = false;
   int _pendingColumns = 0;
   int _pendingRows = 0;
@@ -295,6 +296,8 @@ class TerminalSessionController extends ChangeNotifier {
     _resizeTimer?.cancel();
     _resizeTimer = null;
     _resizePending = false;
+    _redrawTimer?.cancel();
+    _redrawTimer = null;
     await _stdoutSubscription?.cancel();
     await _stderrSubscription?.cancel();
     await _doneSubscription?.cancel();
@@ -690,15 +693,49 @@ class TerminalSessionController extends ChangeNotifier {
     unawaited(roaming.rehome().catchError(_handleStreamError));
   }
 
+  /// Makes the remote application repaint its whole screen.
+  ///
+  /// Sending the size the server already has changes nothing: the kernel
+  /// only raises SIGWINCH on an actual change, so a same-size window-change
+  /// never reaches Herdr, tmux or a TUI. This sends one row fewer and then
+  /// the real size, [redrawNudgeDelay] apart, which every full-screen app
+  /// answers with a full repaint. Used whenever a session's screen comes
+  /// back into view (the app resumes, the terminal page is reopened), so
+  /// the phone shows the remote state instead of trusting a local buffer
+  /// that may have missed or mis-applied updates while nobody looked.
   void forceResize() {
-    if (_session == null || _status != TerminalConnectionStatus.connected) {
+    final session = _session;
+    if (session == null || _status != TerminalConnectionStatus.connected) {
       return;
     }
-    _pendingColumns = terminal.viewWidth;
-    _pendingRows = terminal.viewHeight;
+    final columns = terminal.viewWidth;
+    final rows = terminal.viewHeight;
+    if (rows < 2) {
+      return;
+    }
     _resizeTimer?.cancel();
-    _flushResize();
+    _resizeTimer = null;
+    _resizePending = false;
+    _redrawTimer?.cancel();
+    session.resize(columns, rows - 1, _pixelWidth, _pixelHeight);
+    _sentColumns = columns;
+    _sentRows = rows - 1;
+    _redrawTimer = Timer(redrawNudgeDelay, () {
+      _redrawTimer = null;
+      if (_session != session ||
+          _status != TerminalConnectionStatus.connected ||
+          _disposed) {
+        return;
+      }
+      _pendingColumns = terminal.viewWidth;
+      _pendingRows = terminal.viewHeight;
+      _flushResize();
+    });
   }
+
+  /// Gap between the two halves of [forceResize], so they arrive as two
+  /// window changes rather than one the remote coalesces away.
+  static const redrawNudgeDelay = Duration(milliseconds: 60);
 
   /// How long resizes after one sent to the server are gathered into one
   /// (sent when the window closes). At most two sends per window.
@@ -751,6 +788,7 @@ class TerminalSessionController extends ChangeNotifier {
     _disposed = true;
     _connectionGeneration += 1;
     _resizeTimer?.cancel();
+    _redrawTimer?.cancel();
     unawaited(_stdoutSubscription?.cancel());
     unawaited(_stderrSubscription?.cancel());
     unawaited(_doneSubscription?.cancel());
