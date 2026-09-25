@@ -35,7 +35,11 @@ import 'package:conduit/features/agent_attention/domain/agent_command_runner.dar
 /// "paneId", "name"} | null, "state": "working|waiting_input|
 /// needs_permission|ended", "lastEvent", "lastToolName", "lastMessage",
 /// "startedAt", "updatedAt", "endedAt", "pending": [{"id", "toolName",
-/// "summary", "toolInput", "createdAt"}]}` (timestamps in epoch ms). An
+/// "summary", "toolInput", "createdAt"}]}` (timestamps in epoch ms), plus
+/// the optional `kind` (`claude`, `codex`, `opencode`...), `project` (git
+/// repository name) and `usage` (`{"contextUsedPct", "contextTokens",
+/// "windowLabel", "limits": [{"label", "usedPct", "resetsAt"}]}`, see
+/// `docs/usage-proposal.md`); a daemon without them still parses. An
 /// agent in `needs_permission` with an empty `pending` list has a prompt
 /// waiting in the terminal that the phone can no longer answer.
 class ConductoreHostAttentionProvider extends AgentAttentionProvider {
@@ -340,7 +344,7 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider {
     return AgentInfo(
       id: id,
       name: name,
-      kind: 'claude',
+      kind: _string(item['kind']) ?? 'claude',
       state: parseState(_string(item['state']), pending: pending),
       workspace: cwd,
       tab: tab,
@@ -348,7 +352,43 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider {
       stateChangedAt: _timestamp(item['updatedAt']),
       pendingRequests: pending,
       lastMessage: _string(item['lastMessage']),
+      project: _string(item['project']),
+      usage: parseUsage(item['usage']),
     );
+  }
+
+  /// Parses the optional `usage` record; anything malformed is dropped
+  /// field by field so a partial report still shows what it has.
+  static AgentUsage? parseUsage(Object? raw) {
+    if (raw is! Map) {
+      return null;
+    }
+    final limitsRaw = raw['limits'];
+    final usage = AgentUsage(
+      contextUsedPct: _percent(raw['contextUsedPct']),
+      contextTokens: _int(raw['contextTokens']),
+      windowLabel: _string(raw['windowLabel']),
+      limits: [
+        if (limitsRaw is List)
+          for (final entry in limitsRaw)
+            if (entry is Map &&
+                _string(entry['label']) != null &&
+                _percent(entry['usedPct'], max: 1000) != null)
+              AgentRateLimit(
+                label: _string(entry['label'])!,
+                usedPct: _percent(entry['usedPct'], max: 1000)!,
+                resetsAt: _timestamp(entry['resetsAt']),
+              ),
+      ],
+    );
+    return usage.isEmpty ? null : usage;
+  }
+
+  static double? _percent(Object? value, {double max = 100}) {
+    if (value is! num || value.isNaN) {
+      return null;
+    }
+    return value.toDouble().clamp(0, max).toDouble();
   }
 
   /// Maps the companion's states onto the shared attention states. A
