@@ -644,6 +644,7 @@ class _TerminalPageState extends State<TerminalPage>
     TerminalSessionController session,
     KeyEvent event,
   ) {
+    // Switcher and desktop shortcuts never reach the session.
     if (_keepFromSession(event)) return KeyEventResult.handled;
     final key = event.logicalKey;
     if (key != LogicalKeyboardKey.pageUp &&
@@ -2022,6 +2023,10 @@ class _TerminalPageState extends State<TerminalPage>
                             key: ValueKey('mux-tabs-${activeSession.host.id}'),
                             controller: muxTabs,
                             active: _muxLayout != MultiplexerTabsLayout.hidden,
+                            interval:
+                                _muxLayout == MultiplexerTabsLayout.compact
+                                ? MultiplexerTabsController.compactPollInterval
+                                : MultiplexerTabsController.listPollInterval,
                             child:
                                 !_fullscreen &&
                                     _muxLayout == MultiplexerTabsLayout.strip

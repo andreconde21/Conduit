@@ -65,8 +65,8 @@ Future<void> showMultiplexerTabActions(
   final index = controller.tabs.indexWhere((other) => other.id == tab.id);
   final last = controller.tabs.length - 1;
   final action = await showAdaptiveModal<_TabAction>(
-    kind: AdaptiveModalKind.menu,
     context: context,
+    kind: AdaptiveModalKind.menu,
     useSafeArea: true,
     builder: (context) => SafeArea(
       child: Column(
@@ -225,13 +225,16 @@ Future<void> showMultiplexerTabsSheet(
   VoidCallback? onDone,
 }) async {
   unawaited(controller.refresh());
+  // Livelier while the list is open; back to the caller's pace after.
+  final pace = controller.pollInterval;
+  controller.setPollInterval(MultiplexerTabsController.listPollInterval);
   final noun = multiplexerTabNoun(controller);
   // On desktop a popover at the session tab's label (the click that
   // opened it), like a tab overflow list.
   await showAdaptiveModal<void>(
+    context: context,
     kind: AdaptiveModalKind.menu,
     desktopMaxWidth: 360,
-    context: context,
     useSafeArea: true,
     isScrollControlled: true,
     sheetAnimationStyle: MediaQuery.maybeDisableAnimationsOf(context) ?? false
@@ -347,6 +350,7 @@ Future<void> showMultiplexerTabsSheet(
       ),
     ),
   );
+  controller.setPollInterval(pace);
   onDone?.call();
 }
 
