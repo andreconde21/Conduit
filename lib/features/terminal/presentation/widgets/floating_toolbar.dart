@@ -323,11 +323,16 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
       TerminalPillButton.chat => _PillButton(
         key: const ValueKey('toolbar-chat'),
         icon: Icons.chat_bubble_outline_rounded,
-        tooltip: 'Chat mode',
+        tooltip: widget.keyRows.onChatButton == null
+            ? 'Chat mode'
+            : 'Chat. Long-press for the composer',
         palette: _palette,
         brightness: _brightness,
         selected: widget.keyRows.composeActive,
-        onTap: widget.keyRows.onToggleCompose,
+        onTap: widget.keyRows.onChatButton ?? widget.keyRows.onToggleCompose,
+        onLongPress: widget.keyRows.onChatButton == null
+            ? null
+            : widget.keyRows.onToggleCompose,
       ),
       TerminalPillButton.keyboard => _PillButton(
         key: const ValueKey('toolbar-keyboard'),

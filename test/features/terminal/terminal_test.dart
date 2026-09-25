@@ -48,6 +48,36 @@ void main() {
       );
     });
 
+    testWidgets('sends the first resize at once and coalesces a burst', (
+      tester,
+    ) async {
+      final remote = TrackableTerminalSession();
+      final controller = TerminalSessionController(
+        host: buildHost('resize'),
+        repository: ImmediateTerminalRepository(remote),
+      );
+      addTearDown(controller.dispose);
+      await tester.runAsync(controller.connect);
+      remote.resizes.clear();
+
+      // A layout change: the remote app hears it straight away.
+      controller.terminal.resize(80, 20);
+      expect(remote.resizes, [(80, 20)]);
+
+      // A keyboard animation right after: gathered, the final size follows.
+      controller.terminal.resize(80, 18);
+      controller.terminal.resize(80, 15);
+      expect(remote.resizes, [(80, 20)]);
+      await tester.pump(TerminalSessionController.resizeCoalesce);
+      expect(remote.resizes, [(80, 20), (80, 15)]);
+
+      // Quiet again: an unchanged size is not re-sent.
+      await tester.pump(TerminalSessionController.resizeCoalesce);
+      controller.terminal.resize(80, 15);
+      expect(remote.resizes, [(80, 20), (80, 15)]);
+      await tester.pump(TerminalSessionController.resizeCoalesce);
+    });
+
     test('does not build a tmux startup command when disabled', () {
       final controller = TerminalSessionController(
         host: buildHost('tmux-off'),

@@ -95,6 +95,16 @@ void main() {
     provider: const HerdrAttentionProvider(),
     companionProvider: const ConductoreHostAttentionProvider(),
     notifier: const PlatformAgentAttentionNotifier(),
+    persistMonitoringEnabled: (savedHostId) async {
+      final host = hostsController.hosts
+          .where((host) => host.id == savedHostId)
+          .firstOrNull;
+      if (host != null && !host.agentAttentionEnabled) {
+        await hostsController.upsert(
+          host.copyWith(agentAttentionEnabled: true),
+        );
+      }
+    },
   );
   final recentDirectories = RecentDirectoriesController(
     const SecureRecentDirectoriesStore(secureStorage),
@@ -145,6 +155,7 @@ void main() {
   runApp(
     CompanionSetupScope(
       controller: companionSetup,
+      agentAttention: agentAttention,
       child: ConduitApp(
         themeController: themeController,
         lockController: lockController,

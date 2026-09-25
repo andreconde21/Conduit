@@ -634,6 +634,11 @@ void main() {
     const herdrPreferences = TerminalGesturePreferences(
       windowSwitchTarget: TerminalWindowSwitchTarget.herdr,
     );
+    // Pane zoom on pinch is opt-in; font size is the default.
+    const herdrZoomPreferences = TerminalGesturePreferences(
+      windowSwitchTarget: TerminalWindowSwitchTarget.herdr,
+      herdrPinch: HerdrPinchAction.zoomPane,
+    );
 
     Future<void> twoFingerSwipe(WidgetTester tester, Offset by) {
       return _twoFingerMove(
@@ -718,10 +723,24 @@ void main() {
         await control.close();
       });
 
-      testWidgets('pinch out zooms the focused pane, pinch in restores', (
+      testWidgets('by default a pinch changes the font size, not the pane', (
         tester,
       ) async {
         final harness = await pump(tester);
+
+        await pinch(tester, out: true);
+        await tester.pump();
+
+        expect(server.commands, isEmpty);
+        expect(harness.fontSizes.last, greaterThan(14));
+        expect(harness.session.log, isEmpty);
+        await control.close();
+      });
+
+      testWidgets('pinch out zooms the focused pane, pinch in restores', (
+        tester,
+      ) async {
+        final harness = await pump(tester, preferences: herdrZoomPreferences);
 
         await pinch(tester, out: true);
         await pinch(tester, out: false);
@@ -736,7 +755,7 @@ void main() {
       testWidgets('a pinch with one finger anchored still zooms', (
         tester,
       ) async {
-        await pump(tester);
+        await pump(tester, preferences: herdrZoomPreferences);
 
         await _twoFingerMove(
           tester,
@@ -838,8 +857,11 @@ void main() {
     });
 
     group('without the CLI (security-key hosts)', () {
-      Future<_Harness> pump(WidgetTester tester) async {
-        final harness = _Harness(preferences: herdrPreferences);
+      Future<_Harness> pump(
+        WidgetTester tester, {
+        TerminalGesturePreferences preferences = herdrPreferences,
+      }) async {
+        final harness = _Harness(preferences: preferences);
         addTearDown(harness.session.dispose);
         await tester.pumpWidget(harness.build());
         return harness;
@@ -875,7 +897,7 @@ void main() {
       testWidgets('pinch toggles zoom only when it should flip', (
         tester,
       ) async {
-        final harness = await pump(tester);
+        final harness = await pump(tester, preferences: herdrZoomPreferences);
 
         await pinch(tester, out: true);
         await pinch(tester, out: true);

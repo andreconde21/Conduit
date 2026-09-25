@@ -21,6 +21,7 @@ class ThemeController extends ChangeNotifier {
   bool _terminalMouseInput = false;
   TerminalEnterSequence _terminalEnterSequence = TerminalEnterSequence.cr;
   bool _touchModeHintSeen = false;
+  bool _chatButtonHintSeen = false;
   bool _composeSubmitEnter = false;
   TerminalToolbarStyle _terminalToolbarStyle =
       TerminalToolbarStyle.floatingPill;
@@ -43,6 +44,7 @@ class ThemeController extends ChangeNotifier {
   bool get terminalMouseInput => _terminalMouseInput;
   TerminalEnterSequence get terminalEnterSequence => _terminalEnterSequence;
   bool get touchModeHintSeen => _touchModeHintSeen;
+  bool get chatButtonHintSeen => _chatButtonHintSeen;
   bool get composeSubmitEnter => _composeSubmitEnter;
   TerminalToolbarStyle get terminalToolbarStyle => _terminalToolbarStyle;
   List<TerminalPillItem> get terminalPillItems =>
@@ -68,6 +70,7 @@ class ThemeController extends ChangeNotifier {
     _terminalMouseInput = preferences.terminalMouseInput;
     _terminalEnterSequence = preferences.terminalEnterSequence;
     _touchModeHintSeen = preferences.touchModeHintSeen;
+    _chatButtonHintSeen = preferences.chatButtonHintSeen;
     _composeSubmitEnter = preferences.composeSubmitEnter;
     _terminalToolbarStyle = preferences.terminalToolbarStyle;
     _terminalPillItems = List.of(preferences.terminalPillItems);
@@ -206,6 +209,15 @@ class ThemeController extends ChangeNotifier {
     await _save();
   }
 
+  Future<void> markChatButtonHintSeen() async {
+    if (_chatButtonHintSeen) {
+      return;
+    }
+    _chatButtonHintSeen = true;
+    notifyListeners();
+    await _save();
+  }
+
   Future<void> setComposeSubmitEnter(bool enabled) async {
     if (_composeSubmitEnter == enabled) {
       return;
@@ -283,6 +295,7 @@ class ThemeController extends ChangeNotifier {
         terminalMouseInput: _terminalMouseInput,
         terminalEnterSequence: _terminalEnterSequence,
         touchModeHintSeen: _touchModeHintSeen,
+        chatButtonHintSeen: _chatButtonHintSeen,
         composeSubmitEnter: _composeSubmitEnter,
         terminalToolbarStyle: _terminalToolbarStyle,
         terminalPillItems: _terminalPillItems,

@@ -11,6 +11,7 @@ import 'package:conduit/features/agent_attention/domain/agent_command_runner.dar
 import 'package:conduit/features/agent_attention/domain/agent_inbox.dart';
 import 'package:conduit/features/agent_attention/domain/agent_permission_actions.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:flutter/foundation.dart';
@@ -81,6 +82,7 @@ class AgentAttentionController extends ChangeNotifier {
     AgentAttentionNotifier? notifier,
     Duration pollInterval = const Duration(seconds: 15),
     Duration watchRestartDelay = const Duration(milliseconds: 500),
+    this.persistMonitoringEnabled,
   }) : _workspace = workspace,
        _runnerFactory = runnerFactory,
        _provider = provider,
@@ -108,6 +110,15 @@ class AgentAttentionController extends ChangeNotifier {
   final Duration _watchRestartDelay;
 
   final Map<String, _HostMonitor> _monitors = {};
+
+  /// Saves "Monitor coding agents: on" for a saved host id (the app wires
+  /// this to the hosts store). Null: [enableMonitoring] only lasts until
+  /// the app restarts.
+  final Future<void> Function(String savedHostId)? persistMonitoringEnabled;
+
+  /// Saved host ids turned on from the phone this run: open sessions keep
+  /// the host they were opened with, so this overrides their stale flag.
+  final Set<String> _enabledHostIds = {};
 
   /// Inbox rows swiped away on this phone; they come back when the agent
   /// changes. Kept here so they survive closing the panel.
@@ -148,6 +159,36 @@ class AgentAttentionController extends ChangeNotifier {
   ];
 
   bool isMonitoring(String hostId) => _monitors.containsKey(hostId);
+
+  /// Connected SSH machines with agent monitoring off, one session each,
+  /// so the Agents panel can offer to turn it on.
+  List<SavedHost> get unmonitoredHosts {
+    final seen = <String>{};
+    return [
+      for (final session in _workspace.sessions)
+        if (!session.host.isLocal &&
+            session.isConnected &&
+            !monitoringEnabled(session.host) &&
+            seen.add(baseHostId(session.host.id)))
+          session.host,
+    ];
+  }
+
+  /// Whether agent monitoring is on for [host] (its saved setting, or
+  /// turned on through [enableMonitoring] since).
+  bool monitoringEnabled(SavedHost host) =>
+      host.agentAttentionEnabled ||
+      _enabledHostIds.contains(baseHostId(host.id));
+
+  /// Turns agent monitoring on for [host]'s machine: its open sessions
+  /// start being monitored now, and the setting is saved.
+  Future<void> enableMonitoring(SavedHost host) async {
+    final savedId = baseHostId(host.id);
+    if (_enabledHostIds.add(savedId)) {
+      _syncMonitors();
+    }
+    await persistMonitoringEnabled?.call(savedId);
+  }
 
   /// A runner for extra commands on [host] (the chat view): the monitor's
   /// own connection while [host] is monitored, which the caller must not
@@ -474,7 +515,7 @@ class AgentAttentionController extends ChangeNotifier {
     }
     final wanted = <String, TerminalSessionController>{
       for (final session in _workspace.sessions)
-        if (session.host.agentAttentionEnabled &&
+        if (monitoringEnabled(session.host) &&
             !session.host.isLocal &&
             session.isConnected)
           session.host.id: session,

@@ -20,6 +20,7 @@ class ThemePreferences {
     this.terminalMouseInput = false,
     this.terminalEnterSequence = TerminalEnterSequence.cr,
     this.touchModeHintSeen = false,
+    this.chatButtonHintSeen = false,
     this.composeSubmitEnter = false,
     this.terminalToolbarStyle = TerminalToolbarStyle.floatingPill,
     this.terminalPillItems = defaultTerminalPillItems,
@@ -41,6 +42,9 @@ class ThemePreferences {
 
   /// Whether the one-time touch-mode discoverability hint has been shown.
   final bool touchModeHintSeen;
+
+  /// Whether the one-time hint for the pill's Chat button has been shown.
+  final bool chatButtonHintSeen;
 
   /// Whether the prompt composer presses Enter after inserting a prompt.
   /// Off by default so composed text lands in the TUI for review.
@@ -85,6 +89,7 @@ class ThemePreferencesRepository {
   static const _terminalMouseInputKey = 'conduit.terminal_mouse_input.v1';
   static const _terminalEnterSequenceKey = 'conduit.terminal_enter_sequence.v1';
   static const _touchModeHintSeenKey = 'conduit.touch_mode_hint_seen.v1';
+  static const _chatButtonHintSeenKey = 'conduit.chat_button_hint_seen.v1';
   static const _composeSubmitEnterKey = 'conduit.compose_submit_enter.v1';
   static const _terminalToolbarStyleKey = 'conduit.terminal_toolbar_style.v1';
   static const _terminalPillItemsKey = 'conduit.terminal_pill_items.v1';
@@ -120,6 +125,9 @@ class ThemePreferencesRepository {
     );
     final rawTouchModeHintSeen = await _storage.read(
       key: _touchModeHintSeenKey,
+    );
+    final rawChatButtonHintSeen = await _storage.read(
+      key: _chatButtonHintSeenKey,
     );
     final rawComposeSubmitEnter = await _storage.read(
       key: _composeSubmitEnterKey,
@@ -173,6 +181,7 @@ class ThemePreferencesRepository {
         orElse: () => TerminalEnterSequence.cr,
       ),
       touchModeHintSeen: rawTouchModeHintSeen == 'true',
+      chatButtonHintSeen: rawChatButtonHintSeen == 'true',
       composeSubmitEnter: rawComposeSubmitEnter == 'true',
       terminalToolbarStyle: TerminalToolbarStyle.values.firstWhere(
         (style) => style.name == rawTerminalToolbarStyle,
@@ -239,6 +248,10 @@ class ThemePreferencesRepository {
     await _storage.write(
       key: _touchModeHintSeenKey,
       value: preferences.touchModeHintSeen.toString(),
+    );
+    await _storage.write(
+      key: _chatButtonHintSeenKey,
+      value: preferences.chatButtonHintSeen.toString(),
     );
     await _storage.write(
       key: _composeSubmitEnterKey,
