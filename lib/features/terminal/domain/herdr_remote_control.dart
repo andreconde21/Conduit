@@ -197,6 +197,30 @@ class HerdrRemoteControl {
     return paneId != null && await run(commands.paneClose(paneId));
   }
 
+  /// [closeFocusedPane] over a runner someone else owns (the navigator's).
+  static Future<bool> closeFocusedPaneOn(
+    AgentCommandRunner runner, [
+    HerdrCommands commands = const HerdrCommands(),
+  ]) async {
+    try {
+      final list = await runner.run(commands.paneList, timeout: _timeout);
+      if (!_succeeded(list)) {
+        return false;
+      }
+      final paneId = focusedPaneId(list.stdout);
+      if (paneId == null) {
+        return false;
+      }
+      final close = await runner.run(
+        commands.paneClose(paneId),
+        timeout: _timeout,
+      );
+      return _succeeded(close);
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// The focused pane's id in `herdr pane list` output (the
   /// `{"result": {"panes": [...]}}` envelope of Herdr 0.9, or a bare
   /// `{"panes": [...]}` object); null when none is focused or the output is

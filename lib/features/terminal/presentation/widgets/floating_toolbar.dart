@@ -8,6 +8,7 @@ import 'package:conduit/features/agent_attention/domain/agent_command_runner.dar
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
 import 'package:conduit/features/terminal/domain/herdr_navigator.dart';
+import 'package:conduit/features/terminal/domain/herdr_remote_control.dart';
 import 'package:conduit/features/terminal/presentation/herdr_shortcuts.dart';
 import 'package:conduit/features/terminal/presentation/terminal_keyboard_bar.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
@@ -446,7 +447,24 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
       switch (pick) {
         case null:
           _focusTerminal();
+        case HerdrTabPick(:final number):
+          _controller.sendPrefix(widget.keyRows.tmuxPrefixKey);
+          _controller.sendText('$number');
+          _focusTerminal();
         case HerdrShortcutPick(:final shortcut):
+          if (shortcut.confirm && !await _confirmHerdrShortcut(shortcut)) {
+            _focusTerminal();
+            return;
+          }
+          // Kill pane goes through the CLI when it can: it does not depend
+          // on the server's bindings and skips Herdr's own confirm dialog
+          // (the app just asked).
+          if (shortcut == HerdrShortcut.closePane &&
+              runner != null &&
+              await HerdrRemoteControl.closeFocusedPaneOn(runner)) {
+            _focusTerminal();
+            return;
+          }
           _sendHerdrShortcut(shortcut);
         case HerdrPanePick(:final entry):
           final switched =
@@ -471,6 +489,37 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
     } finally {
       unawaited(runner?.close());
     }
+  }
+
+  Future<bool> _confirmHerdrShortcut(HerdrShortcut shortcut) async {
+    if (!mounted) {
+      return false;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('${shortcut.label}?'),
+        content: Text(switch (shortcut) {
+          HerdrShortcut.closePane =>
+            'The focused pane and whatever runs in it will be closed.',
+          HerdrShortcut.closeTab =>
+            'The focused tab and all of its panes will be closed.',
+          _ => 'The focused workspace and everything in it will be closed.',
+        }),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const ValueKey('herdr-confirm'),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(shortcut.label),
+          ),
+        ],
+      ),
+    );
+    return confirmed ?? false;
   }
 
   void _sendHerdrShortcut(HerdrShortcut shortcut) {

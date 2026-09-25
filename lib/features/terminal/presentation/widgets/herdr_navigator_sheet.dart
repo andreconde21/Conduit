@@ -24,6 +24,14 @@ class HerdrShortcutPick extends HerdrNavigatorPick {
   final HerdrShortcut shortcut;
 }
 
+/// Jump to tab [number] (1–9) of the focused workspace: Herdr's default
+/// `switch_tab = "prefix+1..9"` binding.
+class HerdrTabPick extends HerdrNavigatorPick {
+  const HerdrTabPick(this.number);
+
+  final int number;
+}
+
 /// Opens the Herdr navigator: the host's panes first (switch with a tap),
 /// then Herdr's shortcuts grouped by what they act on.
 ///
@@ -182,6 +190,10 @@ class _HerdrNavigatorSheetState extends State<HerdrNavigatorSheet> {
                 ),
               ],
             ),
+            const SizedBox(height: 10),
+            _quickTabs(theme),
+            const SizedBox(height: 10),
+            _quickActions(theme),
             for (final group in HerdrShortcutGroup.values) ...[
               const SizedBox(height: 10),
               Text(
@@ -196,14 +208,17 @@ class _HerdrNavigatorSheetState extends State<HerdrNavigatorSheet> {
                 runSpacing: 6,
                 children: [
                   for (final shortcut in HerdrShortcut.inGroup(group))
-                    ActionChip(
-                      key: ValueKey('herdr-shortcut-${shortcut.name}'),
-                      avatar: Icon(shortcut.icon, size: 16),
-                      label: Text(shortcut.label),
-                      visualDensity: VisualDensity.compact,
-                      onPressed: () => Navigator.of(
-                        context,
-                      ).pop(HerdrShortcutPick(shortcut)),
+                    Tooltip(
+                      message: shortcut.keyHint(widget.prefixLabel),
+                      child: ActionChip(
+                        key: ValueKey('herdr-shortcut-${shortcut.name}'),
+                        avatar: Icon(shortcut.icon, size: 16),
+                        label: Text(shortcut.label),
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () => Navigator.of(
+                          context,
+                        ).pop(HerdrShortcutPick(shortcut)),
+                      ),
                     ),
                 ],
               ),
@@ -211,6 +226,114 @@ class _HerdrNavigatorSheetState extends State<HerdrNavigatorSheet> {
           ],
         );
       },
+    );
+  }
+
+  /// Tab 1–9 buttons (`prefix 1` … `prefix 9`).
+  Widget _quickTabs(ThemeData theme) {
+    final muted = _palette.mutedForegroundFor(_brightness);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Jump to tab  ·  ${widget.prefixLabel} 1–9',
+          style: theme.textTheme.labelMedium?.copyWith(color: muted),
+        ),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            for (var number = 1; number <= 9; number += 1) ...[
+              if (number > 1) const SizedBox(width: 4),
+              Expanded(
+                child: SizedBox(
+                  height: 40,
+                  child: OutlinedButton(
+                    key: ValueKey('herdr-tab-$number'),
+                    style: OutlinedButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      minimumSize: const Size(0, 40),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    onPressed: () =>
+                        Navigator.of(context).pop(HerdrTabPick(number)),
+                    child: Text(
+                      '$number',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ],
+    );
+  }
+
+  /// One-tap actions, each labelled with the keys it sends.
+  Widget _quickActions(ThemeData theme) {
+    final muted = _palette.mutedForegroundFor(_brightness);
+    return GridView.count(
+      crossAxisCount: 3,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      mainAxisSpacing: 6,
+      crossAxisSpacing: 6,
+      childAspectRatio: 2.1,
+      children: [
+        for (final shortcut in HerdrShortcut.quick)
+          Material(
+            color: _palette.panelElevatedFor(_brightness),
+            borderRadius: BorderRadius.circular(12),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              key: ValueKey('herdr-quick-${shortcut.name}'),
+              onTap: () =>
+                  Navigator.of(context).pop(HerdrShortcutPick(shortcut)),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          shortcut.icon,
+                          size: 16,
+                          color: shortcut.confirm
+                              ? _palette.warning
+                              : _palette.accent,
+                        ),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            shortcut.label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.labelLarge,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      shortcut.keyHint(widget.prefixLabel),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: muted,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 

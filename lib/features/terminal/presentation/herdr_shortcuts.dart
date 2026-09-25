@@ -36,6 +36,7 @@ enum HerdrShortcut {
     Icons.disabled_by_default_rounded,
     'X',
     HerdrShortcutGroup.tabs,
+    confirm: true,
   ),
   splitRight(
     'Split right',
@@ -80,10 +81,11 @@ enum HerdrShortcut {
     HerdrShortcutGroup.panes,
   ),
   closePane(
-    'Close pane',
-    Icons.close_fullscreen_rounded,
+    'Kill pane',
+    Icons.cancel_presentation_rounded,
     'x',
     HerdrShortcutGroup.panes,
+    confirm: true,
   ),
   newWorkspace(
     'New workspace',
@@ -108,9 +110,10 @@ enum HerdrShortcut {
     Icons.folder_delete_rounded,
     'D',
     HerdrShortcutGroup.workspaces,
+    confirm: true,
   ),
   gotoPicker(
-    'Goto picker',
+    'Jump to…',
     Icons.explore_rounded,
     'g',
     HerdrShortcutGroup.workspaces,
@@ -143,6 +146,7 @@ enum HerdrShortcut {
     this.text,
     this.group, {
     this.entersScrollMode = false,
+    this.confirm = false,
   });
 
   final String label;
@@ -152,6 +156,30 @@ enum HerdrShortcut {
   final String text;
   final HerdrShortcutGroup group;
   final bool entersScrollMode;
+
+  /// Destructive: the app asks before sending it.
+  final bool confirm;
+
+  /// The keys as typed after [prefixLabel], e.g. `Ctrl+B c` or
+  /// `Ctrl+B Shift+X`.
+  String keyHint(String prefixLabel) {
+    final isUpper =
+        text.length == 1 &&
+        text.toUpperCase() == text &&
+        text.toLowerCase() != text;
+    return '$prefixLabel ${isUpper ? 'Shift+$text' : text}';
+  }
+
+  /// The one-tap row at the top of the navigator, in order (Moshi's
+  /// shortcut panel: new tab, workspaces, jump, zoom, kill pane, detach).
+  static const quick = [
+    newTab,
+    workspacePicker,
+    gotoPicker,
+    zoomPane,
+    closePane,
+    detach,
+  ];
 
   /// Shortcuts of [group], in declaration order.
   static List<HerdrShortcut> inGroup(HerdrShortcutGroup group) => [
