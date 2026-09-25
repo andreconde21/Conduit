@@ -7,10 +7,13 @@ import 'package:conduit/features/agent_attention/presentation/agent_attention_co
 import 'package:conduit/features/home_widget/domain/agent_status_snapshot.dart';
 import 'package:conduit/features/home_widget/presentation/agent_status_widget_pusher.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
+import 'package:conduit/features/usage/domain/usage_report.dart';
+import 'package:conduit/features/usage/presentation/usage_controller.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../support/test_doubles.dart';
+import '../usage/usage_fakes.dart';
 import 'fake_agent_status_widget_channel.dart';
 
 void main() {
@@ -160,6 +163,72 @@ void main() {
     expect(snapshot.agents.first.host, 'Dev');
     expect(snapshot.agents.first.state, AgentAttentionState.needsInput);
     expect(snapshot.agents.last.name, 'tester');
+  });
+
+  test('the widget limits are the 5h and weekly rings, 0 after a reset', () {
+    final now = DateTime.utc(2026, 9, 25, 12);
+    final limits = AgentStatusWidgetPusher.widgetLimits([
+      UsageLimit(
+        label: '5h',
+        usedPct: 82.6,
+        resetsAt: now.add(const Duration(hours: 1)),
+      ),
+      UsageLimit(
+        label: '7d',
+        usedPct: 40,
+        resetsAt: now.subtract(const Duration(minutes: 1)),
+      ),
+      const UsageLimit(label: 'spend', usedPct: 10),
+    ], now);
+    expect(limits.map((l) => (l.label, l.usedPct, l.level)), [
+      ('5h', 83, 'warning'),
+      ('7d', 0, 'normal'),
+    ]);
+  });
+
+  testWidgets('with usage, the snapshot carries the limits and a usage '
+      'change pushes', (tester) async {
+    final workspace = TerminalWorkspaceController(
+      ImmediateTerminalRepository(TrackableTerminalSession()),
+    );
+    final attention = AgentAttentionController(
+      workspace: workspace,
+      runnerFactory: (_) => ScriptedAgentCommandRunner(const []),
+      provider: const HerdrAttentionProvider(),
+      pollInterval: const Duration(days: 1),
+    );
+    final source = FakeUsageSource([usageHost('box')], {});
+    final usage = UsageController(source: source, observeLifecycle: false);
+    final channel = FakeAgentStatusWidgetChannel();
+    final pusher = AgentStatusWidgetPusher.forController(
+      attention,
+      usage: usage,
+      channel: channel,
+      debounce: const Duration(milliseconds: 10),
+    )..start();
+    addTearDown(() {
+      pusher.dispose();
+      usage.dispose();
+      attention.dispose();
+      workspace.dispose();
+    });
+    await tester.pump();
+    expect(channel.pushed.last.limits, isEmpty);
+
+    source
+      ..live['box'] = [
+        UsageLimit(
+          label: '5h',
+          usedPct: 96,
+          resetsAt: DateTime.now().add(const Duration(hours: 2)),
+        ),
+      ]
+      ..changed();
+    await tester.pump(const Duration(milliseconds: 20));
+    final limit = channel.pushed.last.limits.single;
+    expect(limit.label, '5h');
+    expect(limit.usedPct, 96);
+    expect(limit.level, 'critical');
   });
 }
 

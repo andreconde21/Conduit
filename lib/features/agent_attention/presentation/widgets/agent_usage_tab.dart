@@ -8,11 +8,14 @@ import 'package:flutter/material.dart';
 /// carries, then every agent's context window as a ring, or
 /// "Not reported" when the provider has no usage for it. [hostNotice]
 /// adds a line under a host's name (the update-for-usage hint).
+/// [showRateLimits] false leaves the limit bars to the usage breakdown
+/// above the list.
 List<Widget> buildAgentUsageChildren(
   BuildContext context,
   List<AgentInboxHostInput> hosts, {
   DateTime? now,
   Widget Function(String hostId)? hostNotice,
+  bool showRateLimits = true,
 }) {
   final theme = Theme.of(context);
   final anyAgents = hosts.any((host) => host.agents.isNotEmpty);
@@ -50,8 +53,9 @@ List<Widget> buildAgentUsageChildren(
           child: Text(host.hostName, style: theme.textTheme.titleSmall),
         ),
         ?hostNotice?.call(host.hostId),
-        if (_newestLimits(host.agents) case final limits?)
-          for (final limit in limits) _RateLimitBar(limit: limit, now: now),
+        if (showRateLimits)
+          if (_newestLimits(host.agents) case final limits?)
+            for (final limit in limits) _RateLimitBar(limit: limit, now: now),
         for (final agent in host.agents)
           _AgentUsageTile(
             key: ValueKey('usage-${host.hostId}/${agent.id}'),

@@ -9,8 +9,10 @@ import 'package:conduit/features/agent_attention/presentation/agent_attention_co
 import 'package:conduit/features/agent_attention/presentation/widgets/agent_inbox_widgets.dart';
 import 'package:conduit/features/agent_attention/presentation/widgets/agent_usage_tab.dart';
 import 'package:conduit/features/agent_attention/presentation/widgets/usage_update_hint.dart';
+import 'package:conduit/features/companion_setup/presentation/companion_setup_page.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_status_chip.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/usage/presentation/usage_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -184,14 +186,30 @@ class _AgentAttentionSheetState extends State<AgentAttentionSheet>
             ] else ...[
               if (_tabs.index == 0)
                 ..._inboxChildren(context, inbox, grouped: hosts.length > 1)
-              else
+              else ...[
+                // Tokens, cost and limits per machine (companion 0.6+),
+                // then each session's context.
+                if (UsageScope.maybeOf(context) case final usage?) ...[
+                  UsageBreakdown(
+                    controller: usage,
+                    onUpdateCompanion: (hostId) {
+                      final host = usage.hostFor(hostId);
+                      if (host != null) {
+                        unawaited(showCompanionSetup(context, host));
+                      }
+                    },
+                  ),
+                  const Divider(height: 24),
+                ],
                 ...buildAgentUsageChildren(
                   context,
                   inputs,
+                  showRateLimits: UsageScope.maybeOf(context) == null,
                   hostNotice: (hostId) => UsageUpdateHint(
                     host: hosts.firstWhere((host) => host.id == hostId),
                   ),
                 ),
+              ],
               _MachinesSection(
                 hosts: hosts,
                 controller: controller,

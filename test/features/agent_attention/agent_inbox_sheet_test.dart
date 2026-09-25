@@ -6,10 +6,13 @@ import 'package:conduit/features/agent_attention/presentation/agent_attention_sh
 import 'package:conduit/features/agent_attention/presentation/widgets/agent_inbox_widgets.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
+import 'package:conduit/features/usage/presentation/usage_controller.dart';
+import 'package:conduit/features/usage/presentation/usage_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../support/test_doubles.dart';
+import '../usage/usage_fakes.dart';
 
 typedef Harness = ({
   AgentAttentionController controller,
@@ -48,6 +51,7 @@ void main() {
     WidgetTester tester,
     Map<String, List<Object>> scripts, {
     bool withChat = false,
+    UsageController? usage,
   }) async {
     final workspace = TerminalWorkspaceController(FreshTerminalRepository());
     final runners = {
@@ -73,10 +77,13 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: AgentAttentionSheet(
-            controller: controller,
-            onOpenAgent: (host, agent) => opened.add(agent),
-            onOpenChat: withChat ? (host, agent) => chats.add(agent) : null,
+          body: _withUsage(
+            usage,
+            AgentAttentionSheet(
+              controller: controller,
+              onOpenAgent: (host, agent) => opened.add(agent),
+              onOpenChat: withChat ? (host, agent) => chats.add(agent) : null,
+            ),
           ),
         ),
       ),
@@ -258,6 +265,43 @@ void main() {
       expect(find.text('Not reported'), findsOneWidget);
     });
 
+    testWidgets('with the companion usage, the tab shows the breakdown and '
+        'leaves the limit bars to it', (tester) async {
+      final source = FakeUsageSource(
+        [usageHost('h', name: 'Dev')],
+        {
+          'h': FakeUsageRunner(
+            () => FakeUsageRunner.ok(
+              usageReplyJson(
+                limits: [
+                  {'label': '5h', 'usedPct': 23.5},
+                ],
+                rows: [usageRow('2026-09-25')],
+              ),
+            ),
+          ),
+        },
+      );
+      final usageController = UsageController(
+        source: source,
+        observeLifecycle: false,
+      );
+      addTearDown(usageController.dispose);
+      await pumpPanel(tester, {
+        'h': [
+          status([agentJson('s-1', usage: usage)]),
+        ],
+      }, usage: usageController);
+      await tester.tap(find.text('Usage'));
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.byKey(const ValueKey('usage-breakdown')), findsOneWidget);
+      expect(find.text('Claude · 5-hour'), findsOneWidget);
+      expect(find.text('5h limit'), findsNothing);
+      expect(find.text('85k tokens of 200k'), findsOneWidget);
+    });
+
     testWidgets('explains the source when nothing reports usage', (
       tester,
     ) async {
@@ -347,3 +391,6 @@ void main() {
     expect(lastRow.bottom, lessThanOrEqualTo(screenHeight - navBar));
   });
 }
+
+Widget _withUsage(UsageController? usage, Widget child) =>
+    usage == null ? child : UsageScope(controller: usage, child: child);
