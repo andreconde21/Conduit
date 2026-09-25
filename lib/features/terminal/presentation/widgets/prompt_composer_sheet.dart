@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/features/terminal/domain/prompt_image.dart';
 import 'package:conduit/features/voice/presentation/dictation_button.dart';
 import 'package:conduit/features/voice/presentation/dictation_controller.dart';
@@ -328,28 +329,31 @@ class _PromptComposerSheetState extends State<PromptComposerSheet> {
                             enabled: !_sending,
                             onSelected: (origin) =>
                                 unawaited(_attachImage(origin)),
-                            itemBuilder: (context) => const [
-                              PopupMenuItem(
+                            itemBuilder: (context) => [
+                              const PopupMenuItem(
                                 value: PromptImageOrigin.gallery,
                                 child: ListTile(
                                   leading: Icon(Icons.photo_library_outlined),
                                   title: Text('Gallery'),
                                 ),
                               ),
-                              PopupMenuItem(
+                              const PopupMenuItem(
                                 value: PromptImageOrigin.camera,
                                 child: ListTile(
                                   leading: Icon(Icons.photo_camera_outlined),
                                   title: Text('Camera'),
                                 ),
                               ),
-                              PopupMenuItem(
-                                value: PromptImageOrigin.clipboard,
-                                child: ListTile(
-                                  leading: Icon(Icons.content_paste_go_rounded),
-                                  title: Text('Paste image'),
+                              if (PlatformFeatures.clipboardImage)
+                                const PopupMenuItem(
+                                  value: PromptImageOrigin.clipboard,
+                                  child: ListTile(
+                                    leading: Icon(
+                                      Icons.content_paste_go_rounded,
+                                    ),
+                                    title: Text('Paste image'),
+                                  ),
                                 ),
-                              ),
                             ],
                           ),
                   IconButton(

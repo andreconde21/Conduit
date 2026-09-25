@@ -4,6 +4,7 @@ import 'package:conduit/features/companion_setup/presentation/companion_setup_co
 import 'package:conduit/features/companion_setup/presentation/companion_setup_page.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/host_form_page.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -64,6 +65,21 @@ void main() {
     expect(find.text('Auto'), findsOneWidget);
     expect(find.text('Set up companion'), findsNothing);
     expect(find.textContaining('Agent hooks'), findsNothing);
+  });
+
+  testWidgets('iOS hides the notification level, which only Android '
+      'can deliver', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    try {
+      await tester.pumpWidget(
+        MaterialApp(home: HostFormPage(host: buildHost('h'))),
+      );
+      await revealAgentSection(tester);
+      await scrollTo(tester, find.text('Agent monitor'));
+      expect(find.byKey(const ValueKey('agent-notify-level')), findsNothing);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
   });
 
   // The Agent hooks row that replaced "Set up companion" is covered in

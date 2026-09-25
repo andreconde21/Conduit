@@ -1,3 +1,4 @@
+import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_palette.dart';
@@ -13,7 +14,6 @@ import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/snippets/presentation/snippet_editor.dart';
 import 'package:conduit/features/terminal/presentation/gestures/terminal_gestures_settings.dart';
 import 'package:conduit/features/voice/presentation/speech_settings_controls.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -86,7 +86,7 @@ class _ThemeSheet extends StatelessWidget {
                   const ConduitSectionLabel('Gestures'),
                   const SizedBox(height: 10),
                   TerminalGesturesSettings(controller: controller),
-                  if (defaultTargetPlatform == TargetPlatform.android) ...[
+                  if (PlatformFeatures.homeWidget) ...[
                     const SizedBox(height: 22),
                     const ConduitSectionLabel('Home'),
                     const SizedBox(height: 10),

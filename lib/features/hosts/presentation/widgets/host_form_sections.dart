@@ -1,3 +1,4 @@
+import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/domain/ssh_key.dart';
 import 'package:conduit/features/hosts/presentation/widgets/auth_method_picker.dart';
@@ -519,37 +520,40 @@ class HostAdvancedSection extends StatelessWidget {
           ),
         ),
         if (agentAttentionEnabled) ...[
-          const SizedBox(height: 8),
           // One level stored as the two legacy flags (see AgentNotifyLevel).
-          Builder(
-            builder: (context) {
-              final level = AgentNotifyLevel.fromFlags(
-                input: agentNotifyInput,
-                finished: agentNotifyFinished,
-              );
-              return DropdownButtonFormField<AgentNotifyLevel>(
-                key: const ValueKey('agent-notify-level'),
-                initialValue: level,
-                decoration: InputDecoration(
-                  labelText: 'Agent notifications',
-                  helperText: level.description,
-                  helperMaxLines: 3,
-                  prefixIcon: const Icon(Icons.notifications_outlined),
-                ),
-                items: [
-                  for (final value in AgentNotifyLevel.values)
-                    DropdownMenuItem(value: value, child: Text(value.label)),
-                ],
-                onChanged: (value) {
-                  if (value == null) {
-                    return;
-                  }
-                  onAgentNotifyInputChanged(value.inputFlag);
-                  onAgentNotifyFinishedChanged(value.finishedFlag);
-                },
-              );
-            },
-          ),
+          // iOS has no native notification side, so the choice is hidden.
+          if (PlatformFeatures.agentNotifications) ...[
+            const SizedBox(height: 8),
+            Builder(
+              builder: (context) {
+                final level = AgentNotifyLevel.fromFlags(
+                  input: agentNotifyInput,
+                  finished: agentNotifyFinished,
+                );
+                return DropdownButtonFormField<AgentNotifyLevel>(
+                  key: const ValueKey('agent-notify-level'),
+                  initialValue: level,
+                  decoration: InputDecoration(
+                    labelText: 'Agent notifications',
+                    helperText: level.description,
+                    helperMaxLines: 3,
+                    prefixIcon: const Icon(Icons.notifications_outlined),
+                  ),
+                  items: [
+                    for (final value in AgentNotifyLevel.values)
+                      DropdownMenuItem(value: value, child: Text(value.label)),
+                  ],
+                  onChanged: (value) {
+                    if (value == null) {
+                      return;
+                    }
+                    onAgentNotifyInputChanged(value.inputFlag);
+                    onAgentNotifyFinishedChanged(value.finishedFlag);
+                  },
+                );
+              },
+            ),
+          ],
           const SizedBox(height: 12),
           DropdownButtonFormField<AgentMonitorKind>(
             initialValue: agentMonitor,
