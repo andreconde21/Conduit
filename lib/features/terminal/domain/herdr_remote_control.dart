@@ -285,6 +285,16 @@ class HerdrRemoteControl {
     return await focusWorkspace(target.id) ? target.id : null;
   }
 
+  /// The pane Herdr has focused right now (`herdr pane list`); null when
+  /// that could not be read.
+  Future<HerdrFocusedPane?> readFocusedPane() async {
+    final result = await _enqueue(commands.paneList);
+    if (result == null || !_succeeded(result)) {
+      return null;
+    }
+    return focusedPane(result.stdout);
+  }
+
   /// Closes the focused pane (looked up with `herdr pane list`).
   Future<bool> closeFocusedPane() async {
     final result = await _enqueue(commands.paneList);

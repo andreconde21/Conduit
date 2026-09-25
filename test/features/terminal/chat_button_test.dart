@@ -15,6 +15,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:wakelock_plus_platform_interface/wakelock_plus_platform_interface.dart';
 
 import '../../support/test_doubles.dart';
+import '../chat_view/live_status_fixture.dart';
 import '../companion_setup/companion_fakes.dart' as fakes;
 
 /// The floating pill's Chat button: Chat View for a Claude session the
@@ -108,15 +109,25 @@ void main() {
       final host = companion(
         const ConnectTarget.herdr(
           workspaceId: 'w1',
-          tabId: 't2',
+          tabId: 'w1:t2',
         ).apply(buildHost('h')),
       );
       final (controller, _) = await monitor(
         tester,
         host,
         status([
-          agent('a', extra: ',"herdr":{"tabId":"t1","paneId":"p1"}'),
-          agent('b', extra: ',"herdr":{"tabId":"t2","paneId":"p2"}'),
+          agent(
+            'a',
+            extra:
+                ',"herdr":{"workspaceId":"w1","tabId":"w1:t1",'
+                '"paneId":"w1:p1"}',
+          ),
+          agent(
+            'b',
+            extra:
+                ',"herdr":{"workspaceId":"w1","tabId":"w1:t2",'
+                '"paneId":"w1:p2"}',
+          ),
         ]),
       );
       expect(chatAgentForSession(controller, host)?.id, 'b');
@@ -266,6 +277,151 @@ void main() {
       await tester.pump();
       expect(find.text(hint), findsNothing);
       await drainSnackBars(tester);
+    });
+
+    String? openedSession(WidgetTester tester) {
+      final pages = find.byType(ChatViewPage);
+      if (pages.evaluate().isEmpty) return null;
+      return tester.widget<ChatViewPage>(pages).controller.sessionId;
+    }
+
+    Future<void> settle(WidgetTester tester) async {
+      for (var i = 0; i < 5; i += 1) {
+        await tester.runAsync(pumpEventQueue);
+        await tester.pump(const Duration(milliseconds: 200));
+      }
+    }
+
+    SavedHost herdrSession(String workspace) => companion(
+      ConnectTarget.herdr(workspaceId: workspace).apply(buildHost('h')),
+    );
+
+    testWidgets('a Herdr workspace session opens its own Claude on a machine '
+        'running several', (tester) async {
+      final (controller, workspace) = await monitor(
+        tester,
+        herdrSession('w7'),
+        liveHerdrStatusJson(),
+      );
+      await pumpPage(tester, workspace, attention: controller);
+
+      await tester.tap(chatButton);
+      await settle(tester);
+
+      expect(openedSession(tester), 's-api');
+      expect(find.byTooltip('Close chat mode'), findsNothing);
+      await drainSnackBars(tester);
+    });
+
+    testWidgets('two Claudes in the workspace: asks which, then opens it', (
+      tester,
+    ) async {
+      final (controller, workspace) = await monitor(
+        tester,
+        herdrSession('w5'),
+        liveHerdrStatusJson(),
+      );
+      await pumpPage(tester, workspace, attention: controller);
+
+      await tester.tap(chatButton);
+      await settle(tester);
+      expect(find.text('Open chat for…'), findsOneWidget);
+      expect(find.byKey(const ValueKey('chat-agent-s-left')), findsOneWidget);
+      expect(find.byKey(const ValueKey('chat-agent-s-api')), findsNothing);
+      expect(find.byTooltip('Close chat mode'), findsNothing);
+
+      await tester.tap(find.byKey(const ValueKey('chat-agent-s-right')));
+      await settle(tester);
+      expect(openedSession(tester), 's-right');
+      await drainSnackBars(tester);
+    });
+
+    testWidgets('no Claude session: the composer opens and says why', (
+      tester,
+    ) async {
+      final (controller, workspace) = await monitor(
+        tester,
+        herdrSession('w7'),
+        status([agent('old', state: 'ended')]),
+      );
+      await pumpPage(tester, workspace, attention: controller);
+
+      await tester.tap(chatButton);
+      await settle(tester);
+
+      expect(find.byType(ChatViewPage), findsNothing);
+      expect(find.byTooltip('Close chat mode'), findsOneWidget);
+      expect(
+        find.textContaining('No Claude session is running on'),
+        findsOneWidget,
+      );
+      await drainSnackBars(tester);
+    });
+
+    testWidgets('monitoring off: asks the companion directly and opens the '
+        'session\'s own Claude', (tester) async {
+      final runner = fakes.MatchingRunner({
+        ...fakes.healthyResponses(),
+        'conductore-hostd status': fakes.ok(liveHerdrStatusJson()),
+      });
+      final host = ConnectTarget.herdr(workspaceId: 'w4').apply(buildHost('h'));
+      final workspace = TerminalWorkspaceController(
+        ImmediateTerminalRepository(TrackableTerminalSession()),
+      );
+      final attention = AgentAttentionController(
+        workspace: workspace,
+        runnerFactory: (_) => runner,
+        provider: const ConductoreHostAttentionProvider(),
+        pollInterval: const Duration(days: 1),
+      );
+      attention.setAppForeground(false);
+      final session = workspace.open(host);
+      await tester.runAsync(session.connect);
+      expect(attention.isMonitoring(host.id), isFalse);
+      await pumpPage(tester, workspace, attention: attention);
+
+      await tester.tap(chatButton);
+      await settle(tester);
+
+      expect(runner.ran('conductore-hostd status'), isTrue);
+      expect(openedSession(tester), 's-root');
+
+      await tester.pumpWidget(const SizedBox());
+      attention.dispose();
+      workspace.dispose();
+      await tester.pump(const Duration(days: 2));
+    });
+
+    testWidgets('a machine without the companion gets the composer and a '
+        'note why', (tester) async {
+      final runner = fakes.MatchingRunner({'conductore-hostd': fakes.notFound});
+      final host = ConnectTarget.herdr(workspaceId: 'w4').apply(buildHost('h'));
+      final workspace = TerminalWorkspaceController(
+        ImmediateTerminalRepository(TrackableTerminalSession()),
+      );
+      final attention = AgentAttentionController(
+        workspace: workspace,
+        runnerFactory: (_) => runner,
+        provider: const ConductoreHostAttentionProvider(),
+        pollInterval: const Duration(days: 1),
+      );
+      attention.setAppForeground(false);
+      final session = workspace.open(host);
+      await tester.runAsync(session.connect);
+      await pumpPage(tester, workspace, attention: attention);
+
+      await tester.tap(chatButton);
+      await settle(tester);
+
+      expect(find.byType(ChatViewPage), findsNothing);
+      expect(find.byTooltip('Close chat mode'), findsOneWidget);
+      expect(find.textContaining('No Conductore companion on'), findsOneWidget);
+
+      await drainSnackBars(tester);
+      await tester.pumpWidget(const SizedBox());
+      attention.dispose();
+      workspace.dispose();
+      await tester.pump(const Duration(days: 2));
     });
 
     testWidgets('monitoring off but a working companion still opens Chat '

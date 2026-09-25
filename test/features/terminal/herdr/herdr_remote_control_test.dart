@@ -130,6 +130,29 @@ void main() {
       await closer.close();
     });
 
+    test('readFocusedPane reads the focused pane with its workspace and '
+        'tab', () async {
+      final panes = FakeHerdrRunner(
+        (command) => const AgentCommandResult(
+          stdout:
+              '{"id":"cli:pane:list","result":{"panes":['
+              '{"pane_id":"w5:p3","tab_id":"w5:t3","workspace_id":"w5",'
+              '"focused":false},'
+              '{"pane_id":"w5:p5","tab_id":"w5:t3","workspace_id":"w5",'
+              '"focused":true,"cwd":"/home/user/x"}]}}',
+          stderr: '',
+          exitCode: 0,
+        ),
+      );
+      final control = HerdrRemoteControl(runnerFactory: () => panes);
+      final pane = await control.readFocusedPane();
+      expect(pane?.paneId, 'w5:p5');
+      expect(pane?.tabId, 'w5:t3');
+      expect(pane?.workspaceId, 'w5');
+      expect(panes.commands.single, contains('pane list'));
+      await control.close();
+    });
+
     test('reports failure and stays usable when the channel throws', () async {
       var calls = 0;
       final flaky = HerdrRemoteControl(

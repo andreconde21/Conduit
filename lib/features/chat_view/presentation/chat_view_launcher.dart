@@ -28,33 +28,174 @@ List<AgentInfo> _live(Iterable<AgentInfo> agents) => [
     if (agent.state != AgentAttentionState.finished) agent,
 ];
 
+/// Where a terminal session is inside its multiplexer, as far as the app
+/// knows beyond its connect target: the Herdr workspace it was moved to and
+/// the pane Herdr has focused (the one on screen).
+class ChatSessionLocation {
+  const ChatSessionLocation({
+    this.herdrWorkspaceId = '',
+    this.herdrTabId = '',
+    this.herdrPaneId = '',
+  });
+
+  final String herdrWorkspaceId;
+  final String herdrTabId;
+  final String herdrPaneId;
+
+  bool get hasPane => herdrPaneId.isNotEmpty;
+}
+
+/// Which Claude session a terminal session is showing.
+sealed class ChatAgentMatch {
+  const ChatAgentMatch();
+}
+
+/// Exactly one live Claude session fits.
+class ChatAgentMatched extends ChatAgentMatch {
+  const ChatAgentMatched(this.agent);
+
+  final AgentInfo agent;
+}
+
+/// Several fit and nothing tells them apart: the user picks one of
+/// [candidates].
+class ChatAgentAmbiguous extends ChatAgentMatch {
+  const ChatAgentAmbiguous(this.candidates, {this.elsewhere = false});
+
+  final List<AgentInfo> candidates;
+
+  /// None of [candidates] is where the session is (its Herdr workspace or
+  /// tmux session runs no Claude): ask even when there is only one.
+  final bool elsewhere;
+}
+
+/// No live Claude session on the machine.
+class ChatAgentNone extends ChatAgentMatch {
+  const ChatAgentNone();
+}
+
+/// One agent per pane: a pane runs one Claude at a time, so when the
+/// companion still lists an older session for the same pane, the most
+/// recently updated one is the one on screen.
+List<AgentInfo> _latestPerPane(List<AgentInfo> agents) {
+  final byPane = <String, AgentInfo>{};
+  final result = <AgentInfo>[];
+  for (final agent in agents) {
+    final pane = agent.pane;
+    if (pane == null || pane.isEmpty) {
+      result.add(agent);
+      continue;
+    }
+    final seen = byPane[pane];
+    if (seen == null) {
+      byPane[pane] = agent;
+      result.add(agent);
+    } else if (_newer(agent, seen)) {
+      byPane[pane] = agent;
+      result[result.indexOf(seen)] = agent;
+    }
+  }
+  return result;
+}
+
+bool _newer(AgentInfo a, AgentInfo b) {
+  final at = a.stateChangedAt;
+  final bt = b.stateChangedAt;
+  if (at == null) return false;
+  if (bt == null) return true;
+  return at.isAfter(bt);
+}
+
+/// Narrows [candidates] step by step: the first filter that leaves exactly
+/// one agent wins; a filter that leaves several narrows the rest; one that
+/// leaves none is skipped.
+List<AgentInfo> _narrow(
+  List<AgentInfo> candidates,
+  List<bool Function(AgentInfo)> filters,
+) {
+  var current = candidates;
+  for (final filter in filters) {
+    final next = current.where(filter).toList();
+    if (next.isEmpty) continue;
+    current = next;
+    if (current.length == 1) break;
+  }
+  return current;
+}
+
 /// The Claude session among [agents] that the terminal session on [host]
-/// is showing: the live agent in the session's own tmux session or Herdr
-/// tab, else the only live agent. Null when there is none or the choice is
-/// ambiguous.
-AgentInfo? matchChatAgent(SavedHost host, Iterable<AgentInfo> agents) {
-  final live = _live(agents);
+/// is showing.
+///
+/// A Herdr session matches on Herdr's own ids, as the companion reports
+/// them (`herdr.workspaceId` like `w7`, `tabId` like `w7:t1`, `paneId`
+/// like `w7:p1`): the focused pane when [location] knows it, else the
+/// session's tab, else its workspace ([location]'s, which follows moves
+/// inside Herdr, else the connect target's). A tmux session matches on its
+/// session name. When that leaves several agents, or the session says
+/// nothing about where it is and the machine runs several, the result is
+/// [ChatAgentAmbiguous] so the caller can ask.
+ChatAgentMatch resolveChatAgent(
+  SavedHost host,
+  Iterable<AgentInfo> agents, {
+  ChatSessionLocation location = const ChatSessionLocation(),
+}) {
+  final live = _latestPerPane(_live(agents));
   if (live.isEmpty) {
-    return null;
+    return const ChatAgentNone();
   }
   final target = ConnectTarget.fromSessionHostId(host.id);
-  final Iterable<AgentInfo> matches;
-  if (target?.kind == ConnectTargetKind.herdr && target!.tabId.isNotEmpty) {
-    matches = live.where((agent) => agent.tab == target.tabId);
+  List<AgentInfo> scoped = const [];
+  var located = false;
+  if (target?.kind == ConnectTargetKind.herdr) {
+    final workspace = location.herdrWorkspaceId.isNotEmpty
+        ? location.herdrWorkspaceId
+        : target!.name;
+    final tab = location.herdrTabId.isNotEmpty
+        ? location.herdrTabId
+        : target!.tabId;
+    located = workspace.isNotEmpty;
+    final inWorkspace = workspace.isEmpty
+        ? live
+        : live.where((agent) => agent.workspace == workspace).toList();
+    scoped = inWorkspace.isEmpty
+        ? const []
+        : _narrow(inWorkspace, [
+            if (tab.isNotEmpty) (agent) => agent.tab == tab,
+            if (location.hasPane) (agent) => agent.pane == location.herdrPaneId,
+          ]);
   } else if (host.startTmuxOnConnect && host.tmuxSessionName.isNotEmpty) {
     final name = host.tmuxSessionName;
-    matches = live.where(
-      (agent) =>
-          agent.tab == name || (agent.tab?.startsWith('$name:') ?? false),
-    );
-  } else {
-    matches = const [];
+    located = true;
+    scoped = live
+        .where(
+          (agent) =>
+              agent.tab == name || (agent.tab?.startsWith('$name:') ?? false),
+        )
+        .toList();
   }
-  if (matches.length == 1) {
-    return matches.single;
+  if (scoped.length == 1) {
+    return ChatAgentMatched(scoped.single);
   }
-  return live.length == 1 ? live.single : null;
+  if (scoped.length > 1) {
+    return ChatAgentAmbiguous(scoped);
+  }
+  if (located) {
+    return ChatAgentAmbiguous(live, elsewhere: true);
+  }
+  return live.length == 1
+      ? ChatAgentMatched(live.single)
+      : ChatAgentAmbiguous(live);
 }
+
+/// [resolveChatAgent]'s agent when exactly one fits, else null.
+AgentInfo? matchChatAgent(
+  SavedHost host,
+  Iterable<AgentInfo> agents, {
+  ChatSessionLocation location = const ChatSessionLocation(),
+}) => switch (resolveChatAgent(host, agents, location: location)) {
+  ChatAgentMatched(:final agent) => agent,
+  _ => null,
+};
 
 /// [matchChatAgent] over what the agent monitor already knows; null when
 /// [host] is not monitored through the companion (see
@@ -78,12 +219,14 @@ class ChatViewAccess {
   const ChatViewAccess.ready({required this.agents, required this.monitored})
     : title = null,
       problem = null,
-      canSetUp = false;
+      canSetUp = false,
+      companionMissing = false;
 
   const ChatViewAccess.blocked({
     required String this.title,
     required String this.problem,
     this.canSetUp = true,
+    this.companionMissing = false,
   }) : agents = const [],
        monitored = false;
 
@@ -100,6 +243,10 @@ class ChatViewAccess {
 
   /// Whether the Agent hooks screen can fix it.
   final bool canSetUp;
+
+  /// The machine has no companion at all (a plain SSH box, most likely),
+  /// as opposed to a companion that is broken or out of date.
+  final bool companionMissing;
 
   bool get ready => problem == null;
 }
@@ -174,6 +321,7 @@ ChatViewAccess _blockedBy(CompanionStatus status, SavedHost host) {
   final name = host.name;
   return switch (status.state) {
     CompanionState.notInstalled => ChatViewAccess.blocked(
+      companionMissing: true,
       title: 'Chat view needs the companion',
       problem:
           '"conductore-hostd" was not found on $name'
@@ -321,6 +469,8 @@ Future<AgentInfo?> pickChatAgent(
   BuildContext context, {
   required SavedHost host,
   required List<AgentInfo> agents,
+  String title = 'Open chat for…',
+  bool alwaysAsk = false,
 }) async {
   agents = _live(agents);
   if (agents.isEmpty) {
@@ -334,7 +484,7 @@ Future<AgentInfo?> pickChatAgent(
     );
     return null;
   }
-  if (agents.length == 1) {
+  if (agents.length == 1 && !alwaysAsk) {
     return agents.single;
   }
   return showModalBottomSheet<AgentInfo>(
@@ -344,9 +494,13 @@ Future<AgentInfo?> pickChatAgent(
       child: ListView(
         shrinkWrap: true,
         children: [
-          const ListTile(title: Text('Open chat for…')),
+          ListTile(
+            key: const ValueKey('chat-agent-picker-title'),
+            title: Text(title),
+          ),
           for (final agent in agents)
             ListTile(
+              key: ValueKey('chat-agent-${agent.id}'),
               leading: const Icon(Icons.forum_outlined),
               title: Text(agent.name),
               subtitle: Text(
@@ -456,6 +610,7 @@ Future<void> openChatViewForHost({
   required SavedHost host,
   required ValueChanged<AgentInfo> onOpenTerminal,
   DictationController? dictation,
+  ChatSessionLocation location = const ChatSessionLocation(),
 }) async {
   if (attention == null) {
     await showChatViewUnavailable(context, host: host);
@@ -473,9 +628,16 @@ Future<void> openChatViewForHost({
     await showChatViewUnavailable(context, host: host, access: access);
     return;
   }
-  final agent =
-      matchChatAgent(host, access.agents) ??
-      await pickChatAgent(context, host: host, agents: access.agents);
+  final match = resolveChatAgent(host, access.agents, location: location);
+  final agent = match is ChatAgentMatched
+      ? match.agent
+      : await pickChatAgent(
+          context,
+          host: host,
+          agents: match is ChatAgentAmbiguous && !match.elsewhere
+              ? match.candidates
+              : access.agents,
+        );
   if (agent == null || !context.mounted) {
     return;
   }
