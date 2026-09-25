@@ -411,12 +411,14 @@ class _ConnectPickerSheetState extends State<ConnectPickerSheet> {
                             ),
                           ),
                           if (workspace.tabs.length > 1)
-                            for (final tab in workspace.tabs)
+                            for (final (position, tab)
+                                in workspace.tabs.indexed)
                               _TargetTile(
-                                title: tab.label.isEmpty
-                                    ? 'Tab ${tab.number ?? tab.id}'
-                                    : tab.label,
-                                subtitle: 'tab ${tab.id}',
+                                key: ValueKey('herdr-tab-${tab.id}'),
+                                title: tab.displayLabel(position + 1),
+                                subtitle: tab.summary.isEmpty
+                                    ? null
+                                    : tab.summary,
                                 indented: true,
                                 active: widget.activeTargetKeys.contains(
                                   ConnectTarget.herdr(

@@ -157,10 +157,12 @@ class HerdrAttentionProvider extends AgentAttentionProvider {
     if (id.isEmpty) {
       return null;
     }
+    // Never the pane id: the kind and directory ("claude in api"), else the
+    // kind alone.
     final name = liveName.isNotEmpty
         ? liveName
         : _string(item, const ['terminal_title_stripped', 'terminal_title']) ??
-              id;
+              _fallbackName(item);
     return AgentInfo(
       id: id,
       name: name,
@@ -195,6 +197,13 @@ class HerdrAttentionProvider extends AgentAttentionProvider {
       'idle' || 'ready' => AgentAttentionState.idle,
       _ => AgentAttentionState.unknown,
     };
+  }
+
+  static String _fallbackName(Map<Object?, Object?> item) {
+    final kind = _string(item, const ['agent', 'kind']) ?? 'Agent';
+    final cwd = _string(item, const ['foreground_cwd', 'cwd']) ?? '';
+    final folder = cwd.split('/').where((part) => part.isNotEmpty).lastOrNull;
+    return folder == null ? kind : '$kind in $folder';
   }
 
   static String? _string(Map<Object?, Object?> item, List<String> keys) {

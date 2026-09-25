@@ -295,7 +295,8 @@ abstract final class HerdrNavigator {
       return tab.label;
     }
     final number = tab.number;
-    return number == null ? tab.id : 'Tab $number';
+    // Never Herdr's id: "Tab 3", or just "Tab".
+    return number == null ? 'Tab' : 'Tab $number';
   }
 
   /// Switches Herdr to [entry]. Returns false when the CLI could not do it

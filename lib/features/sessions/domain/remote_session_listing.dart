@@ -41,14 +41,58 @@ class HerdrTabInfo {
     this.number,
     this.agentStatus = '',
     this.focused = false,
+    this.paneCount,
+    this.paneTitle = '',
+    this.paneAgent = '',
   });
 
+  /// Herdr's id (`w1:t2`): for commands only, never shown to the user.
   final String id;
   final String workspaceId;
   final String label;
   final int? number;
   final String agentStatus;
   final bool focused;
+
+  /// `pane_count`, when Herdr reported it.
+  final int? paneCount;
+
+  /// What the tab shows, from `herdr pane list`: its focused (else first)
+  /// pane's terminal title, else that pane's directory name. Empty when
+  /// the panes were not listed.
+  final String paneTitle;
+
+  /// The agent running in that pane (`claude`, `codex`), or empty.
+  final String paneAgent;
+
+  /// The label to show: Herdr's own, else "Tab N".
+  String displayLabel(int position) =>
+      label.isNotEmpty ? label : 'Tab ${number ?? position}';
+
+  /// One human line about the tab (never its id): the agent and what its
+  /// pane shows, else the pane count.
+  String get summary {
+    final panes = paneCount;
+    final what = [
+      if (paneAgent.isNotEmpty) paneAgent,
+      if (paneTitle.isNotEmpty) paneTitle,
+    ].join(': ');
+    final count = panes == null || panes <= 1 ? '' : '$panes panes';
+    return [if (what.isNotEmpty) what, if (count.isNotEmpty) count].join(' · ');
+  }
+
+  HerdrTabInfo withPane({required String title, String agent = ''}) =>
+      HerdrTabInfo(
+        id: id,
+        workspaceId: workspaceId,
+        label: label,
+        number: number,
+        agentStatus: agentStatus,
+        focused: focused,
+        paneCount: paneCount,
+        paneTitle: title,
+        paneAgent: agent,
+      );
 
   @override
   bool operator ==(Object other) =>
@@ -58,11 +102,23 @@ class HerdrTabInfo {
       other.label == label &&
       other.number == number &&
       other.agentStatus == agentStatus &&
-      other.focused == focused;
+      other.focused == focused &&
+      other.paneCount == paneCount &&
+      other.paneTitle == paneTitle &&
+      other.paneAgent == paneAgent;
 
   @override
-  int get hashCode =>
-      Object.hash(id, workspaceId, label, number, agentStatus, focused);
+  int get hashCode => Object.hash(
+    id,
+    workspaceId,
+    label,
+    number,
+    agentStatus,
+    focused,
+    paneCount,
+    paneTitle,
+    paneAgent,
+  );
 }
 
 /// One named Herdr session as reported by `herdr session list --json`.
@@ -389,7 +445,10 @@ abstract final class RemoteSessionListing {
       workspaces.add(
         HerdrWorkspaceInfo(
           id: id,
-          label: _string(item, const ['label', 'name']) ?? id,
+          // Never the id: Herdr's number, as its sidebar shows it.
+          label:
+              _string(item, const ['label', 'name']) ??
+              'Workspace ${_int(item['number']) ?? ''}'.trim(),
           number: _int(item['number']),
           agentStatus: _string(item, const ['agent_status', 'status']) ?? '',
           focused: item['focused'] == true,
@@ -422,10 +481,64 @@ abstract final class RemoteSessionListing {
           number: _int(item['number']),
           agentStatus: _string(item, const ['agent_status', 'status']) ?? '',
           focused: item['focused'] == true,
+          paneCount: _int(item['pane_count']),
         ),
       );
     }
     return tabs;
+  }
+
+  /// `herdr pane list` (JSON), for what each tab shows.
+  static String herdrPaneListFor(String session) =>
+      HerdrAttentionProvider.remoteCommand(
+        session.isEmpty
+            ? 'pane list'
+            : '--session ${shellQuoteArgument(session)} pane list',
+      );
+
+  /// Gives each of [tabs] what its focused (else first) pane shows, from
+  /// `herdr pane list` output ([raw]): the pane's stripped terminal title,
+  /// else its directory's name, and the agent running there. Unreadable
+  /// output leaves the tabs as they are.
+  static List<HerdrTabInfo> attachPanes(List<HerdrTabInfo> tabs, String raw) {
+    final List<Object?> panes;
+    try {
+      panes = _decodeList(raw, 'panes');
+    } on FormatException {
+      return tabs;
+    }
+    final best = <String, Map<Object?, Object?>>{};
+    for (final pane in panes) {
+      if (pane is! Map) continue;
+      final tabId = _string(pane, const ['tab_id']);
+      if (tabId == null) continue;
+      final seen = best[tabId];
+      if (seen == null ||
+          (pane['focused'] == true && seen['focused'] != true)) {
+        best[tabId] = pane;
+      }
+    }
+    return [
+      for (final tab in tabs)
+        if (best[tab.id] case final pane?)
+          tab.withPane(
+            title: _paneTitle(pane),
+            agent: _string(pane, const ['agent']) ?? '',
+          )
+        else
+          tab,
+    ];
+  }
+
+  static String _paneTitle(Map<Object?, Object?> pane) {
+    final title = _string(pane, const [
+      'terminal_title_stripped',
+      'terminal_title',
+    ]);
+    if (title != null) return title;
+    final cwd = _string(pane, const ['foreground_cwd', 'cwd']) ?? '';
+    final parts = cwd.split('/').where((part) => part.isNotEmpty);
+    return parts.isEmpty ? '' : parts.last;
   }
 
   /// Attaches tab records to their workspaces, keeping workspace order and

@@ -320,7 +320,14 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider {
       return null;
     }
     final cwd = _string(item['cwd']);
-    final name = _string(item['name']) ?? _basename(cwd) ?? id;
+    // Never the session UUID.
+    final name =
+        _string(item['name']) ??
+        _basename(cwd) ??
+        switch (_string(item['kind'])) {
+          final kind? => kind,
+          null => 'Claude session',
+        };
     final tmux = item['tmux'];
     final herdr = item['herdr'];
     // `workspace` is a Herdr workspace id (the home board and deep links

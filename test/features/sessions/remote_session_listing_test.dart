@@ -124,7 +124,8 @@ void main() {
         RemoteSessionListing.parseHerdrWorkspaces(
           '{"workspaces":[{"workspace_id":"w1"}]}',
         ).single.label,
-        'w1',
+        // Never the id.
+        'Workspace',
       );
       expect(RemoteSessionListing.parseHerdrWorkspaces(''), isEmpty);
       expect(

@@ -179,6 +179,67 @@ void main() {
     expect(picked.single.remember, isTrue);
   });
 
+  testWidgets('Herdr tabs read as what they show, never as ids', (
+    tester,
+  ) async {
+    // Shaped like Herdr 0.9.1's `workspace list`, `tab list`, `pane list`.
+    const workspaces = AgentCommandResult(
+      stdout:
+          '{"id":"cli:workspace:list","result":{"type":"workspace_list",'
+          '"workspaces":[{"active_tab_id":"w1:t1","agent_status":"idle",'
+          '"focused":true,"label":"TheCalendar","number":1,"pane_count":3,'
+          '"tab_count":3,"workspace_id":"w1"}]}}',
+      stderr: '',
+      exitCode: 0,
+    );
+    const tabs = AgentCommandResult(
+      stdout:
+          '{"id":"cli:tab:list","result":{"tabs":['
+          '{"agent_status":"idle","focused":true,"label":"","number":1,'
+          '"pane_count":1,"tab_id":"w1:t1","workspace_id":"w1"},'
+          '{"agent_status":"working","focused":false,"label":"api",'
+          '"number":2,"pane_count":2,"tab_id":"w1:t2","workspace_id":"w1"},'
+          '{"agent_status":"idle","focused":false,"label":"","number":3,'
+          '"pane_count":1,"tab_id":"w1:t3","workspace_id":"w1"}]}}',
+      stderr: '',
+      exitCode: 0,
+    );
+    const panes = AgentCommandResult(
+      stdout:
+          '{"id":"cli:pane:list","result":{"panes":['
+          '{"agent":"claude","agent_status":"idle",'
+          '"cwd":"/root/Projects/TheCalendar","focused":true,'
+          '"pane_id":"w1:p1","tab_id":"w1:t1",'
+          '"terminal_title":"✳ Tasks PR review",'
+          '"terminal_title_stripped":"Tasks PR review","workspace_id":"w1"},'
+          '{"agent_status":"idle","cwd":"/srv/api","focused":false,'
+          '"pane_id":"w1:p2","tab_id":"w1:t2","terminal_title":"",'
+          '"workspace_id":"w1"},'
+          '{"agent":"codex","agent_status":"working","cwd":"/srv/api",'
+          '"focused":false,"pane_id":"w1:p3","tab_id":"w1:t2",'
+          '"terminal_title_stripped":"Fix login","workspace_id":"w1"}]}}',
+      stderr: '',
+      exitCode: 0,
+    );
+    final (runner, _) = await pumpPicker(tester, [
+      tmuxOutput,
+      notInstalled,
+      workspaces,
+      tabs,
+      panes,
+    ], initialTab: ConnectPickerTab.herdr);
+    expect(runner.commands.last, contains('exec herdr pane list'));
+    expect(find.text('Tab 1'), findsOneWidget);
+    expect(find.text('claude: Tasks PR review'), findsOneWidget);
+    expect(find.text('api'), findsOneWidget);
+    // No focused pane in the tab: its first pane, named by its folder.
+    expect(find.text('api · 2 panes'), findsOneWidget);
+    expect(find.text('Tab 3'), findsOneWidget);
+    for (final id in ['w1:t1', 'w1:t2', 'w1:t3', 'w1:p1']) {
+      expect(find.textContaining(id), findsNothing, reason: id);
+    }
+  });
+
   testWidgets('lists several Herdr sessions as session ‧ workspace', (
     tester,
   ) async {
