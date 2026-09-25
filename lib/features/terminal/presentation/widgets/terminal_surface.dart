@@ -24,6 +24,7 @@ class TerminalSurface extends StatefulWidget {
     this.onLinkTap,
     this.onLinkLongPress,
     this.autoConnect = true,
+    this.onKeyEvent,
     super.key,
   });
 
@@ -54,6 +55,10 @@ class TerminalSurface extends StatefulWidget {
   /// built. False for a background tab that waits to be shown (a session
   /// restored from the last app run); it connects when this turns true.
   final bool autoConnect;
+
+  /// Sees each hardware key before the terminal does; a result other than
+  /// ignored keeps the key from the session (app shortcuts like Ctrl+K).
+  final FocusOnKeyEventCallback? onKeyEvent;
 
   @override
   State<TerminalSurface> createState() => _TerminalSurfaceState();
@@ -296,6 +301,7 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
                   controller: _terminalController,
                   onTapUp: _handleTapUp,
                   focusNode: widget.focusNode,
+                  onKeyEvent: widget.onKeyEvent,
                   autofocus: widget.focusNode != null,
                   deleteDetection: true,
                   keyboardType: TextInputType.visiblePassword,

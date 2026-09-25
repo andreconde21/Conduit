@@ -26,6 +26,9 @@ import 'package:conduit/features/local_shell/domain/local_shell_instance.dart';
 import 'package:conduit/features/local_shell/presentation/local_shell_controller.dart';
 import 'package:conduit/features/local_shell/presentation/local_shell_instance_page.dart';
 import 'package:conduit/features/local_shell/presentation/local_shell_setup_page.dart';
+import 'package:conduit/features/session_navigation/presentation/quick_switcher_actions.dart';
+import 'package:conduit/features/session_navigation/presentation/quick_switcher_sheet.dart';
+import 'package:conduit/features/session_navigation/presentation/quick_switcher_shortcut.dart';
 import 'package:conduit/features/session_navigation/presentation/session_view_controller.dart';
 import 'package:conduit/features/session_navigation/presentation/session_view_launcher.dart';
 import 'package:conduit/features/session_navigation/presentation/session_view_widgets.dart';
@@ -377,46 +380,91 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final palette = widget.themeController.palette;
     final boards = _boards;
-    return Scaffold(
-      body: ConduitBackdrop(
-        palette: palette,
-        child: SafeArea(
-          bottom: shouldApplyBottomSafeArea(context),
-          child: RefreshIndicator(
-            color: Theme.of(context).colorScheme.primary,
-            onRefresh: _refreshAll,
-            child: ListenableBuilder(
-              listenable: Listenable.merge([
-                widget.hostsController,
-                widget.workspaceController,
-                widget.themeController,
-                widget.agentAttention,
-                ?boards,
-              ]),
-              builder: (context, _) {
-                return CustomScrollView(
-                  key: const ValueKey('home-scroll'),
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  slivers: [
-                    SliverToBoxAdapter(
-                      child: HomeTopBar(
-                        onLock: _lock,
-                        onSettings: _openSettings,
-                        machine: _machineChip(),
+    return QuickSwitcherShortcut(
+      onInvoke: () => unawaited(_openSwitcher(fromKeyboard: true)),
+      child: Scaffold(
+        body: ConduitBackdrop(
+          palette: palette,
+          child: SafeArea(
+            bottom: shouldApplyBottomSafeArea(context),
+            child: RefreshIndicator(
+              color: Theme.of(context).colorScheme.primary,
+              onRefresh: _refreshAll,
+              child: ListenableBuilder(
+                listenable: Listenable.merge([
+                  widget.hostsController,
+                  widget.workspaceController,
+                  widget.themeController,
+                  widget.agentAttention,
+                  ?boards,
+                ]),
+                builder: (context, _) {
+                  return CustomScrollView(
+                    key: const ValueKey('home-scroll'),
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    slivers: [
+                      SliverToBoxAdapter(
+                        child: HomeTopBar(
+                          onLock: _lock,
+                          onSettings: _openSettings,
+                          onSwitcher: () => unawaited(_openSwitcher()),
+                          machine: _machineChip(),
+                        ),
                       ),
-                    ),
-                    ..._buildMain(context),
-                    const SliverToBoxAdapter(
-                      child: SizedBox(key: ValueKey('home-end'), height: 24),
-                    ),
-                  ],
-                );
-              },
+                      ..._buildMain(context),
+                      const SliverToBoxAdapter(
+                        child: SizedBox(key: ValueKey('home-end'), height: 24),
+                      ),
+                    ],
+                  );
+                },
+              ),
             ),
           ),
         ),
       ),
     );
+  }
+
+  bool _switcherOpen = false;
+
+  /// The quick switcher from home (the top bar's button, Ctrl+K): what is
+  /// picked opens in the terminal (or Chat View, per session).
+  Future<void> _openSwitcher({bool fromKeyboard = false}) async {
+    if (_switcherOpen) return;
+    _switcherOpen = true;
+    final source = QuickSwitcherSource(
+      workspace: widget.workspaceController,
+      attention: widget.agentAttention,
+      connectFlow: widget.connectFlow,
+      homeBoards: _boards,
+    );
+    final QuickSwitcherChoice? choice;
+    try {
+      choice = await showQuickSwitcher(
+        context,
+        source: source,
+        fontFamily: widget.themeController.terminalFont.fontFamily,
+        fromKeyboard: fromKeyboard,
+        canCreate: true,
+      );
+    } finally {
+      _switcherOpen = false;
+    }
+    if (!mounted) return;
+    switch (choice) {
+      case QuickSwitcherOpen(:final item):
+        await openSwitcherItem(
+          context,
+          item,
+          source: source,
+          showTerminal: () => unawaited(_openTerminalWorkspace()),
+        );
+      case QuickSwitcherNewSession():
+        await _newSession();
+      case QuickSwitcherShowGrid() || null:
+        break;
+    }
   }
 
   Widget _machineChip() {
@@ -1309,6 +1357,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
           agentAttention: widget.agentAttention,
           hostKeyVerifier: widget.hostKeyVerifier,
           connectFlow: widget.connectFlow,
+          homeBoards: _boards,
         ),
       ),
     );
