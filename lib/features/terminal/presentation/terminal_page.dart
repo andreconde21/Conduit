@@ -114,6 +114,8 @@ class _TerminalPageState extends State<TerminalPage> {
   int _composeRevision = 0;
   DictationController? _dictation;
   ShareTargetController? _shareTarget;
+  final Map<TerminalSessionController, StreamSubscription<String>>
+  _clipboardSubscriptions = {};
 
   @override
   void initState() {
@@ -137,6 +139,7 @@ class _TerminalPageState extends State<TerminalPage> {
       _promptSecurityKeySelection,
     );
     widget.workspace.addListener(_handleWorkspaceChanged);
+    _syncRemoteClipboardSubscriptions();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _focusedSession = widget.workspace.activeSession;
       _focusNode.requestFocus();
@@ -199,6 +202,10 @@ class _TerminalPageState extends State<TerminalPage> {
       _promptSecurityKeySelection,
     );
     widget.workspace.removeListener(_handleWorkspaceChanged);
+    for (final subscription in _clipboardSubscriptions.values) {
+      unawaited(subscription.cancel());
+    }
+    _clipboardSubscriptions.clear();
     _focusNode.dispose();
     _fileTabs.dispose();
     super.dispose();
@@ -220,7 +227,43 @@ class _TerminalPageState extends State<TerminalPage> {
     return showSecurityKeyPickerDialog(context, request);
   }
 
+  /// Follows every open session's OSC 52 copies, background tabs
+  /// included, so a copy made in one tab is not lost while another shows.
+  void _syncRemoteClipboardSubscriptions() {
+    final sessions = widget.workspace.sessions.toSet();
+    _clipboardSubscriptions.removeWhere((session, subscription) {
+      if (sessions.contains(session)) {
+        return false;
+      }
+      unawaited(subscription.cancel());
+      return true;
+    });
+    for (final session in sessions) {
+      _clipboardSubscriptions[session] ??= session.remoteClipboardWrites
+          .listen((text) => _handleRemoteClipboardWrite(session, text));
+    }
+  }
+
+  void _handleRemoteClipboardWrite(
+    TerminalSessionController session,
+    String text,
+  ) {
+    if (!mounted || !widget.themeController.remoteClipboardEnabled) {
+      return;
+    }
+    unawaited(Clipboard.setData(ClipboardData(text: text)));
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text('Copied from ${session.host.name}'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+  }
+
   void _handleWorkspaceChanged() {
+    _syncRemoteClipboardSubscriptions();
     final active = widget.workspace.activeSession;
     if (active == null || active == _focusedSession) return;
     _focusedSession = active;

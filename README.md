@@ -82,6 +82,12 @@ Dart implementation of the protocol, and the terminal is
   notifications on Android and one-tap focus of an agent's pane.
 - Saved global and per-machine snippets from the key row, with hidden snippets
   for passwords or secrets and optional per-machine run-on-connect snippets.
+- Remote clipboard (OSC 52): text a program on the host copies (vim, Neovim,
+  Claude Code, tmux) lands on the phone clipboard with a "Copied from <host>"
+  note. Capped at 1 MB; the host can never read the phone clipboard. Turn it
+  off under Appearance. Inside tmux, forward copies with
+  `set -g set-clipboard on` in `~/.tmux.conf` (tmux 3.3+ may also need
+  `set -g allow-passthrough on` for programs that wrap OSC 52 themselves).
 - Optional device-auth app lock for protecting saved machines and credentials.
 - Built-in terminal themes, font sizing, palette choices, and appearance controls.
 - On-device **local Arch Linux shell** (Android, arm64) with `pacman`, running

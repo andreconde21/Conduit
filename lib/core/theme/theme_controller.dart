@@ -26,6 +26,7 @@ class ThemeController extends ChangeNotifier {
       TerminalToolbarStyle.floatingPill;
   List<TerminalPillItem> _terminalPillItems = defaultTerminalPillItems;
   bool _menuButtonsEnabled = true;
+  bool _remoteClipboardEnabled = true;
   TerminalGesturePreferences _terminalGestures =
       TerminalGesturePreferences.defaults;
   String _speechLanguage = '';
@@ -47,6 +48,9 @@ class ThemeController extends ChangeNotifier {
   List<TerminalPillItem> get terminalPillItems =>
       List.unmodifiable(_terminalPillItems);
   bool get menuButtonsEnabled => _menuButtonsEnabled;
+
+  /// Whether OSC 52 copies from the remote reach the phone clipboard.
+  bool get remoteClipboardEnabled => _remoteClipboardEnabled;
   TerminalGesturePreferences get terminalGestures => _terminalGestures;
 
   /// BCP-47 tag dictation listens in; empty means the device locale.
@@ -68,6 +72,7 @@ class ThemeController extends ChangeNotifier {
     _terminalToolbarStyle = preferences.terminalToolbarStyle;
     _terminalPillItems = List.of(preferences.terminalPillItems);
     _menuButtonsEnabled = preferences.menuButtonsEnabled;
+    _remoteClipboardEnabled = preferences.remoteClipboardEnabled;
     _terminalGestures = preferences.terminalGestures;
     _speechLanguage = preferences.speechLanguage;
     notifyListeners();
@@ -237,6 +242,15 @@ class ThemeController extends ChangeNotifier {
     await _save();
   }
 
+  Future<void> setRemoteClipboardEnabled(bool enabled) async {
+    if (_remoteClipboardEnabled == enabled) {
+      return;
+    }
+    _remoteClipboardEnabled = enabled;
+    notifyListeners();
+    await _save();
+  }
+
   Future<void> setTerminalGestures(TerminalGesturePreferences gestures) async {
     if (_terminalGestures == gestures) {
       return;
@@ -275,6 +289,7 @@ class ThemeController extends ChangeNotifier {
         menuButtonsEnabled: _menuButtonsEnabled,
         terminalGestures: _terminalGestures,
         speechLanguage: _speechLanguage,
+        remoteClipboardEnabled: _remoteClipboardEnabled,
       ),
     );
   }

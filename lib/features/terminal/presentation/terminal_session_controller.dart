@@ -5,6 +5,7 @@ import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/terminal/domain/network_connectivity.dart';
+import 'package:conduit/features/terminal/domain/osc52_clipboard.dart';
 import 'package:conduit/features/terminal/domain/predictive_echo.dart';
 import 'package:conduit/features/terminal/domain/predictive_terminal_session.dart';
 import 'package:conduit/features/terminal/domain/roaming_terminal_session.dart';
@@ -73,6 +74,7 @@ class TerminalSessionController extends ChangeNotifier {
   int _connectionGeneration = 0;
   int? _lastIosEnterOutputMs;
   String _terminalTitle = '';
+  final _remoteClipboardWrites = StreamController<String>.broadcast();
 
   static const _iosDuplicateEnterWindow = Duration(milliseconds: 80);
   static const _gracefulMoshCloseTimeout = Duration(milliseconds: 1500);
@@ -85,6 +87,11 @@ class TerminalSessionController extends ChangeNotifier {
   /// The window title the remote application last set (OSC 0/2), empty
   /// until one arrives. Herdr and tmux both keep it current.
   String get terminalTitle => _terminalTitle;
+  /// Text the remote asked to put on the clipboard with OSC 52 (vim, tmux
+  /// `set-clipboard on`, Claude Code's copy). Already decoded, capped at
+  /// [osc52MaxBytes]; read requests are never answered. Whether it reaches
+  /// the phone clipboard is the listener's decision (a user setting).
+  Stream<String> get remoteClipboardWrites => _remoteClipboardWrites.stream;
   bool get isConnected => _status == TerminalConnectionStatus.connected;
   bool get predictiveEchoEnabled => _predictiveEchoEnabled;
   TerminalEnterSequence get enterSequence => _enterSequence;
@@ -506,6 +513,20 @@ class TerminalSessionController extends ChangeNotifier {
       _terminalTitle = title;
       notifyListeners();
     };
+    terminal.onPrivateOSC = _handlePrivateOsc;
+  }
+
+  void _handlePrivateOsc(String code, List<String> args) {
+    if (_disposed) {
+      return;
+    }
+    switch (code) {
+      case '52':
+        final text = decodeOsc52Payload(args);
+        if (text != null) {
+          _remoteClipboardWrites.add(text);
+        }
+    }
   }
 
   void _sendTerminalOutput(String data) {
@@ -679,6 +700,7 @@ class TerminalSessionController extends ChangeNotifier {
     }
     keyboard.dispose();
     _terminalPaintNotifier.dispose();
+    unawaited(_remoteClipboardWrites.close());
     super.dispose();
   }
 }
