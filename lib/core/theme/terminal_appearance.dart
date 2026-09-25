@@ -28,6 +28,21 @@ extension TerminalToolbarStyleDetails on TerminalToolbarStyle {
   };
 }
 
+/// When the terminal shows the multiplexer's own tabs (Herdr tabs, tmux
+/// windows) under the top row.
+enum MultiplexerTabsVisibility {
+  /// With two tabs or more on a phone; always on a desktop.
+  auto,
+  always,
+  never;
+
+  String get label => switch (this) {
+    MultiplexerTabsVisibility.auto => 'Auto',
+    MultiplexerTabsVisibility.always => 'Always',
+    MultiplexerTabsVisibility.never => 'Never',
+  };
+}
+
 const terminalFontSizeDefault = 13.5;
 const terminalFontSizeMin = 4.0;
 const terminalFontSizeMax = 30.0;

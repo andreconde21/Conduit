@@ -40,6 +40,7 @@ class ThemeController extends ChangeNotifier {
   bool _remoteClipboardEnabled = true;
   bool _pasteImagesAsFiles = true;
   bool _restoreSessionsOnLaunch = true;
+  MultiplexerTabsVisibility _multiplexerTabs = MultiplexerTabsVisibility.auto;
   TerminalGesturePreferences _terminalGestures =
       TerminalGesturePreferences.defaults;
   String _speechLanguage = '';
@@ -100,6 +101,9 @@ class ThemeController extends ChangeNotifier {
 
   /// Whether the open sessions come back after the app restarts.
   bool get restoreSessionsOnLaunch => _restoreSessionsOnLaunch;
+
+  /// When the terminal shows the multiplexer's tabs.
+  MultiplexerTabsVisibility get multiplexerTabs => _multiplexerTabs;
   TerminalGesturePreferences get terminalGestures => _terminalGestures;
 
   /// BCP-47 tag dictation listens in; empty means the device locale.
@@ -128,6 +132,7 @@ class ThemeController extends ChangeNotifier {
     _remoteClipboardEnabled = preferences.remoteClipboardEnabled;
     _pasteImagesAsFiles = preferences.pasteImagesAsFiles;
     _restoreSessionsOnLaunch = preferences.restoreSessionsOnLaunch;
+    _multiplexerTabs = preferences.multiplexerTabs;
     _terminalGestures = preferences.terminalGestures;
     _speechLanguage = preferences.speechLanguage;
     _voice = preferences.voice;
@@ -367,6 +372,15 @@ class ThemeController extends ChangeNotifier {
     await _save();
   }
 
+  Future<void> setMultiplexerTabs(MultiplexerTabsVisibility value) async {
+    if (_multiplexerTabs == value) {
+      return;
+    }
+    _multiplexerTabs = value;
+    notifyListeners();
+    await _save();
+  }
+
   Future<void> setRestoreSessionsOnLaunch(bool enabled) async {
     if (_restoreSessionsOnLaunch == enabled) {
       return;
@@ -428,6 +442,7 @@ class ThemeController extends ChangeNotifier {
         remoteClipboardEnabled: _remoteClipboardEnabled,
         pasteImagesAsFiles: _pasteImagesAsFiles,
         restoreSessionsOnLaunch: _restoreSessionsOnLaunch,
+        multiplexerTabs: _multiplexerTabs,
         omarchySyncHostId: _omarchySyncHostId,
         omarchySyncedTheme: _omarchySyncedTheme,
       ),
