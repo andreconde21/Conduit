@@ -91,7 +91,9 @@ Dart implementation of the protocol, and the terminal is
   under Appearance > Gestures. The Herdr navigator adds tab 1-9 buttons and
   new tab, workspaces, jump, zoom, kill pane and detach. Notifications, the
   home board and the agent sheet open an agent at its exact workspace, tab and
-  pane, and each app tab keeps its own Herdr workspace when you switch.
+  pane, and each app tab keeps its own Herdr workspace when you switch. Herdr
+  keys follow the machine's own `~/.config/herdr/config.toml` (read-only),
+  falling back to Herdr's defaults when it cannot be read.
 - Saved global and per-machine snippets from the key row, with hidden snippets
   for passwords or secrets and optional per-machine run-on-connect snippets.
 - Recent directories per machine (last 20): collected from the shell's OSC 7

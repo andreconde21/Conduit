@@ -36,6 +36,7 @@ import 'package:conduit/features/share_target/presentation/share_target_controll
 import 'package:conduit/features/share_target/presentation/share_target_scope.dart';
 import 'package:conduit/features/terminal/data/platform_prompt_image_source.dart';
 import 'package:conduit/features/terminal/data/prompt_image_preparer.dart';
+import 'package:conduit/features/terminal/domain/herdr_remote_control.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:conduit/features/terminal/domain/prompt_image.dart';
 import 'package:conduit/features/terminal/domain/recent_directories.dart';
@@ -684,6 +685,25 @@ class _TerminalPageState extends State<TerminalPage> {
     _showTerminal();
   }
 
+  /// The Herdr command channel for [session]'s gestures. For a session
+  /// that drives Herdr it also has the machine's Herdr keymap read (once,
+  /// read-only), so key-labelled shortcuts and key fallbacks use its own
+  /// bindings.
+  HerdrRemoteControl? _herdrControlFor(TerminalSessionController session) {
+    final herdr = widget.connectFlow?.herdr;
+    if (herdr == null) {
+      return null;
+    }
+    final drivesHerdr =
+        (_gestureTargetFor(session) ??
+            widget.themeController.terminalGestures.windowSwitchTarget) ==
+        TerminalWindowSwitchTarget.herdr;
+    if (drivesHerdr) {
+      herdr.ensureKeymap(session);
+    }
+    return herdr.controlFor(session);
+  }
+
   /// The multiplexer a session's gestures drive: the one it was opened on,
   /// or null (the Gestures preference) for plain shells.
   static TerminalWindowSwitchTarget? _gestureTargetFor(
@@ -982,8 +1002,7 @@ class _TerminalPageState extends State<TerminalPage> {
                                     TerminalGestureLayer(
                                       key: ValueKey(session.host.id),
                                       target: _gestureTargetFor(session),
-                                      herdrControl: widget.connectFlow?.herdr
-                                          .controlFor(session),
+                                      herdrControl: _herdrControlFor(session),
                                       onHerdrWorkspaceFocused: (workspaceId) =>
                                           widget.connectFlow?.herdr
                                               .noteWorkspace(

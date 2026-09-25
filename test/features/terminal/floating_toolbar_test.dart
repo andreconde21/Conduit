@@ -1,9 +1,12 @@
+import 'dart:io';
+
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/terminal_pill_items.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
+import 'package:conduit/features/terminal/domain/herdr_keymap.dart';
 import 'package:conduit/features/terminal/domain/herdr_navigator.dart';
 import 'package:conduit/features/terminal/presentation/terminal_keyboard_bar.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
@@ -706,6 +709,7 @@ void main() {
       tester.view.devicePixelRatio = 2.625;
       addTearDown(tester.view.reset);
       HerdrPaneListingCache.instance.clear();
+      HerdrKeymapCache.instance.clear();
       final controller = _RecordingTerminalSessionController();
       final focusNode = FocusNode();
       addTearDown(focusNode.dispose);
@@ -788,6 +792,7 @@ void main() {
       tester.view.devicePixelRatio = 2.625;
       addTearDown(tester.view.reset);
       HerdrPaneListingCache.instance.clear();
+      HerdrKeymapCache.instance.clear();
       final controller = _RecordingTerminalSessionController();
       final focusNode = FocusNode();
       addTearDown(focusNode.dispose);
@@ -836,6 +841,7 @@ void main() {
       tester.view.devicePixelRatio = 2.625;
       addTearDown(tester.view.reset);
       HerdrPaneListingCache.instance.clear();
+      HerdrKeymapCache.instance.clear();
       final controller = _RecordingTerminalSessionController();
       final focusNode = FocusNode();
       addTearDown(focusNode.dispose);
@@ -868,6 +874,7 @@ void main() {
       tester.view.devicePixelRatio = 2.625;
       addTearDown(tester.view.reset);
       HerdrPaneListingCache.instance.clear();
+      HerdrKeymapCache.instance.clear();
       final controller = _RecordingTerminalSessionController();
       final focusNode = FocusNode();
       addTearDown(focusNode.dispose);
@@ -909,6 +916,7 @@ void main() {
       tester.view.devicePixelRatio = 2.625;
       addTearDown(tester.view.reset);
       HerdrPaneListingCache.instance.clear();
+      HerdrKeymapCache.instance.clear();
       final controller = _RecordingTerminalSessionController();
       final focusNode = FocusNode();
       addTearDown(focusNode.dispose);
@@ -1040,6 +1048,52 @@ void main() {
 
       expect(controller.sentControlKeys, [TerminalKey.keyB]);
       expect(controller.sentText, ['x']);
+    });
+
+    testWidgets('the navigator reads the machine\'s Herdr keymap and uses '
+        'it for labels and keys', (tester) async {
+      final config = File(
+        'test/features/terminal/herdr/fixtures/herdr_config_dev_central.toml',
+      ).readAsStringSync();
+      final runners = <FakeHerdrRunner>[];
+      var controller = await openNavigator(
+        tester,
+        runnerFactory: (host) {
+          final runner = FakeHerdrRunner(
+            (command) => command.contains('herdr/config.toml')
+                ? AgentCommandResult(stdout: config, stderr: '', exitCode: 0)
+                : FakeHerdrRunner.panesResponse(command),
+          );
+          runners.add(runner);
+          return runner;
+        },
+      );
+
+      expect(runners.single.commands.first, contains('herdr/config.toml'));
+      // The machine's prefix (ctrl+space) and bindings, not the defaults.
+      expect(find.text('Ctrl+Space d'), findsOneWidget);
+      expect(find.text('Ctrl+Space f'), findsOneWidget);
+      expect(find.text('Ctrl+Space q'), findsNothing);
+      expect(find.text('Jump to tab  ·  Ctrl+Space 1–9'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('herdr-quick-detach')));
+      await tester.pumpAndSettle();
+      expect(controller.sentControlKeys, [TerminalKey.space]);
+      expect(controller.sentText, ['d']);
+
+      // Read once per machine: the next open does not ask again.
+      controller = _RecordingTerminalSessionController();
+      addTearDown(controller.dispose);
+      await tester.tap(find.byKey(const ValueKey('toolbar-herdr')));
+      await tester.pumpAndSettle();
+      expect(
+        runners.last.commands.where((c) => c.contains('config.toml')),
+        isEmpty,
+      );
+      await tester.tap(
+        find.byKey(const ValueKey('herdr-quick-workspacePicker')),
+      );
+      await tester.pumpAndSettle();
     });
 
     testWidgets('the key rows style bypasses the pill entirely', (

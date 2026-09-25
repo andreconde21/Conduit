@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
+import 'package:conduit/features/terminal/domain/herdr_keymap.dart';
 import 'package:conduit/features/terminal/domain/herdr_remote_control.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
@@ -82,6 +83,31 @@ class HerdrSessionFocus {
       runnerFactory: () => runnerFactory(session.host),
       session: herdrTargetOf(session)?.session ?? '',
     );
+  }
+
+  /// When each machine's keymap was last asked for (by saved host id).
+  final _keymapAttempts = <String, DateTime>{};
+
+  /// How long a failed keymap read waits before it is tried again.
+  static const keymapRetryInterval = Duration(minutes: 5);
+
+  /// Reads the Herdr key bindings of [session]'s machine once (read-only),
+  /// for every key-labelled shortcut and key fallback; until then, and when
+  /// the read fails, Herdr's defaults apply. Cheap to call on every build.
+  void ensureKeymap(TerminalSessionController session) {
+    final hostId = baseHostId(session.host.id);
+    if (HerdrKeymapCache.instance.has(hostId)) {
+      return;
+    }
+    final control = controlFor(session);
+    final last = _keymapAttempts[hostId];
+    final now = DateTime.now();
+    if (control == null ||
+        (last != null && now.difference(last) < keymapRetryInterval)) {
+      return;
+    }
+    _keymapAttempts[hostId] = now;
+    unawaited(HerdrKeymapCache.instance.loadWith(hostId, control.readKeymap));
   }
 
   /// The workspace [session] is on, as far as the app knows.

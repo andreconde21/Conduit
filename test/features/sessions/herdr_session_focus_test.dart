@@ -1,6 +1,7 @@
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/presentation/herdr_session_focus.dart';
+import 'package:conduit/features/terminal/domain/herdr_keymap.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -195,5 +196,40 @@ void main() {
         expect(paneFocuses, 2);
       },
     );
+  });
+
+  group('keymap', () {
+    setUp(HerdrKeymapCache.instance.clear);
+    tearDown(HerdrKeymapCache.instance.clear);
+
+    test('is read once per machine over the Herdr channel', () async {
+      final one = openTarget(const ConnectTarget.herdr(workspaceId: 'w1'));
+      final two = openTarget(const ConnectTarget.herdr(workspaceId: 'w2'));
+      focus
+        ..ensureKeymap(one)
+        ..ensureKeymap(two)
+        ..ensureKeymap(one);
+      await settle();
+      await settle();
+
+      final reads = server.commands.where((c) => c.contains('config.toml'));
+      expect(reads, hasLength(1));
+      expect(HerdrKeymapCache.instance.has('dev'), isTrue);
+    });
+
+    test('security-key hosts keep the defaults without asking', () async {
+      final keyHost = host.copyWith(
+        authMethod: SshAuthMethod.hardwareKey,
+        privateKey: 'stub',
+      );
+      final session = openTarget(
+        const ConnectTarget.herdr(workspaceId: 'w1'),
+        keyHost,
+      );
+      focus.ensureKeymap(session);
+      await settle();
+      expect(server.runnersOpened, 0);
+      expect(HerdrKeymapCache.instance.has('dev'), isFalse);
+    });
   });
 }

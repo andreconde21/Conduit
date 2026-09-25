@@ -6,6 +6,7 @@ import 'package:conduit/features/agent_attention/data/herdr_attention_provider.d
 import 'package:conduit/features/agent_attention/data/remote_tool_command.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/sessions/domain/remote_session_listing.dart';
+import 'package:conduit/features/terminal/domain/herdr_keymap.dart';
 
 /// A neighbour direction for `herdr pane focus --direction`.
 enum HerdrDirection { left, right, up, down }
@@ -146,6 +147,10 @@ class HerdrRemoteControl {
     }
     return workspaceId.isNotEmpty && await focusWorkspace(workspaceId);
   }
+
+  /// Reads the machine's Herdr keymap (read-only); null when that failed.
+  Future<HerdrKeymap?> readKeymap() async =>
+      HerdrKeymapReader.interpret(await _enqueue(HerdrKeymapReader.command));
 
   /// Lists the server's workspaces in Herdr's order; null when that failed.
   Future<List<HerdrWorkspaceInfo>?> workspaces() async {

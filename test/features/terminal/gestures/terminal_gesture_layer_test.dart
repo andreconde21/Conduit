@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/terminal/domain/herdr_keymap.dart';
 import 'package:conduit/features/terminal/domain/herdr_remote_control.dart';
 import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
 import 'package:conduit/features/terminal/presentation/gestures/terminal_gesture_layer.dart';
@@ -898,6 +901,65 @@ void main() {
       await twoFingerSwipe(tester, const Offset(-120, 0));
 
       expect(harness.session.log, isEmpty);
+    });
+  });
+
+  group('with the machine\'s Herdr keymap', () {
+    setUp(() {
+      HerdrKeymapCache.instance.put(
+        'gestures',
+        HerdrKeymap.parseConfig(
+          File(
+            'test/features/terminal/herdr/fixtures/'
+            'herdr_config_dev_central.toml',
+          ).readAsStringSync(),
+        ),
+      );
+    });
+    tearDown(HerdrKeymapCache.instance.clear);
+
+    Future<_Harness> pump(WidgetTester tester) async {
+      final harness = _Harness(
+        preferences: const TerminalGesturePreferences(
+          windowSwitchTarget: TerminalWindowSwitchTarget.herdr,
+        ),
+      );
+      addTearDown(harness.session.dispose);
+      await tester.pumpWidget(harness.build());
+      return harness;
+    }
+
+    testWidgets('tab swipes use its prefix', (tester) async {
+      final harness = await pump(tester);
+      await _swipe(tester, _center, const Offset(-120, 0));
+      expect(harness.session.log, ['ctrl:space', 'text:n']);
+    });
+
+    testWidgets('pane swipes without the CLI use its ctrl+alt+arrows, not '
+        'prefix+h (a split there)', (tester) async {
+      final harness = await pump(tester);
+      await _twoFingerMove(
+        tester,
+        firstFrom: _center.translate(-30, 0),
+        firstTo: _center.translate(-150, 0),
+        secondFrom: _center.translate(30, 0),
+        secondTo: _center.translate(-90, 0),
+      );
+      expect(harness.session.log, ['text:\x1b[1;7C']);
+    });
+
+    testWidgets('the workspace fallback opens its workspace picker', (
+      tester,
+    ) async {
+      final harness = await pump(tester);
+      await _twoFingerMove(
+        tester,
+        firstFrom: _center.translate(-30, 0),
+        firstTo: _center.translate(-30, -120),
+        secondFrom: _center.translate(30, 0),
+        secondTo: _center.translate(30, -120),
+      );
+      expect(harness.session.log, ['ctrl:space', 'text:f']);
     });
   });
 }

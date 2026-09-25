@@ -47,6 +47,7 @@ class TerminalKeyboardBar extends StatelessWidget {
   final VoidCallback? onToggleCompose;
   final VoidCallback onEnterTmuxScrollMode;
   final VoidCallback onExitTmuxScrollMode;
+
   /// The host's multiplexer prefix, sent by the Tmux key and before every
   /// Tmux+ and Herdr binding.
   final MultiplexerPrefixKey tmuxPrefixKey;
@@ -437,9 +438,13 @@ class TerminalKeyboardBar extends StatelessWidget {
   }
 
   void _triggerHerdrAction(HerdrShortcut action) {
-    controller.sendPrefix(tmuxPrefixKey);
-    controller.sendText(action.text);
-    if (action.entersScrollMode) {
+    // The machine's own Herdr binding (Herdr's default until it is read).
+    final sent = sendHerdrAction(
+      controller,
+      action.action,
+      hostPrefix: tmuxPrefixKey,
+    );
+    if (sent && action.entersScrollMode) {
       onEnterTmuxScrollMode();
     }
     _focusTerminal();

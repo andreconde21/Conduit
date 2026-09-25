@@ -22,6 +22,14 @@ class FakeHerdrRunner implements AgentCommandRunner {
   bool closed = false;
 
   static AgentCommandResult panesResponse(String command) {
+    if (command.contains('herdr/config.toml')) {
+      // Tests that care about the machine's keymap script it themselves.
+      return const AgentCommandResult(
+        stdout: '',
+        stderr: 'cat: Permission denied',
+        exitCode: 1,
+      );
+    }
     if (command.contains('workspace list')) {
       return const AgentCommandResult(
         stdout:

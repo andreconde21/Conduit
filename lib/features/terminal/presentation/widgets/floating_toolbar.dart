@@ -8,6 +8,7 @@ import 'package:conduit/features/agent_attention/domain/agent_command_runner.dar
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
+import 'package:conduit/features/terminal/domain/herdr_keymap.dart';
 import 'package:conduit/features/terminal/domain/herdr_navigator.dart';
 import 'package:conduit/features/terminal/domain/herdr_remote_control.dart';
 import 'package:conduit/features/terminal/presentation/herdr_shortcuts.dart';
@@ -437,13 +438,20 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
         context: context,
         palette: _palette,
         brightness: _brightness,
-        prefixLabel: widget.keyRows.tmuxPrefixKey.label,
+        hostPrefix: widget.keyRows.tmuxPrefixKey,
+        keymapHostId: baseHostId(host.id),
         cached: cache[host.id],
         paneListUnavailableReason: reason,
         showCdTo: widget.keyRows.onOpenRecentDirectories != null,
         load: runner == null
             ? null
             : () async {
+                // The machine's own Herdr bindings label the shortcuts
+                // (read once per app run, read-only).
+                final keymaps = HerdrKeymapCache.instance;
+                if (!keymaps.has(baseHostId(host.id))) {
+                  await keymaps.load(baseHostId(host.id), runner);
+                }
                 final listing = await HerdrNavigator.load(
                   runner,
                   session: herdrSession,
@@ -458,8 +466,11 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
         case null:
           _focusTerminal();
         case HerdrTabPick(:final number):
-          _controller.sendPrefix(widget.keyRows.tmuxPrefixKey);
-          _controller.sendText('$number');
+          sendHerdrTab(
+            _controller,
+            number,
+            hostPrefix: widget.keyRows.tmuxPrefixKey,
+          );
           _focusTerminal();
         case HerdrShortcutPick(:final shortcut):
           if (shortcut.confirm && !await _confirmHerdrShortcut(shortcut)) {
@@ -538,10 +549,23 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
     return confirmed ?? false;
   }
 
+  /// Types [shortcut] with the machine's Herdr binding for it.
   void _sendHerdrShortcut(HerdrShortcut shortcut) {
-    _controller.sendPrefix(widget.keyRows.tmuxPrefixKey);
-    _controller.sendText(shortcut.text);
-    if (shortcut.entersScrollMode) {
+    final sent = sendHerdrAction(
+      _controller,
+      shortcut.action,
+      hostPrefix: widget.keyRows.tmuxPrefixKey,
+    );
+    if (!sent) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(
+          content: Text(
+            '${shortcut.label} has no key binding in this machine\'s Herdr '
+            'config.',
+          ),
+        ),
+      );
+    } else if (shortcut.entersScrollMode) {
       widget.keyRows.onEnterTmuxScrollMode();
     }
     _focusTerminal();

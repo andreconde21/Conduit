@@ -5,6 +5,7 @@ import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/terminal/domain/herdr_remote_control.dart';
 import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
 import 'package:conduit/features/terminal/presentation/gestures/terminal_gesture_recognizers.dart';
+import 'package:conduit/features/terminal/presentation/herdr_shortcuts.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit_vt/conduit_vt.dart';
 import 'package:flutter/gestures.dart';
@@ -44,14 +45,26 @@ class TerminalGestureCommands {
     session.sendText(binding);
   }
 
-  /// `prefix n`: next window in tmux, next tab in Herdr.
-  void nextWindow() => _prefixed('n');
+  bool get _isHerdr => target == TerminalWindowSwitchTarget.herdr;
+
+  /// A Herdr config action with the machine's binding (Herdr's default
+  /// until the machine's keymap is read). Nothing is typed when the
+  /// machine unbound the action: a default key may mean something else
+  /// there.
+  void _herdrAction(String action) {
+    sendHerdrAction(session, action, hostPrefix: prefixKey);
+  }
+
+  /// `prefix n`: next window in tmux, next tab in Herdr (its `next_tab`).
+  void nextWindow() => _isHerdr ? _herdrAction('next_tab') : _prefixed('n');
 
   /// `prefix p`: previous window in tmux, previous tab in Herdr.
-  void previousWindow() => _prefixed('p');
+  void previousWindow() =>
+      _isHerdr ? _herdrAction('previous_tab') : _prefixed('p');
 
   /// `prefix [`: copy (scrollback) mode in both tmux and Herdr.
-  void enterScrollback() => _prefixed('[');
+  void enterScrollback() =>
+      _isHerdr ? _herdrAction('copy_mode') : _prefixed('[');
 
   /// `q` leaves copy mode in both tmux and Herdr.
   void exitScrollback() => session.sendText('q');
@@ -64,12 +77,18 @@ class TerminalGestureCommands {
       unawaited(control.focusPane(direction));
       return;
     }
-    _prefixed(switch (direction) {
-      HerdrDirection.left => 'h',
-      HerdrDirection.down => 'j',
-      HerdrDirection.up => 'k',
-      HerdrDirection.right => 'l',
-    });
+    // The machine's binding: on some hosts prefix+h splits and panes are
+    // focused with ctrl+alt+arrows.
+    switch (direction) {
+      case HerdrDirection.left:
+        _herdrAction('focus_pane_left');
+      case HerdrDirection.down:
+        _herdrAction('focus_pane_down');
+      case HerdrDirection.up:
+        _herdrAction('focus_pane_up');
+      case HerdrDirection.right:
+        _herdrAction('focus_pane_right');
+    }
   }
 
   /// Herdr: zoom the focused pane full-screen or restore it
@@ -81,7 +100,7 @@ class TerminalGestureCommands {
       unawaited(control.setZoom(on: on));
       return;
     }
-    _prefixed('z');
+    _herdrAction('zoom');
   }
 
   /// Herdr: focus the next ([delta] 1) or previous (-1) workspace. Herdr
@@ -90,7 +109,7 @@ class TerminalGestureCommands {
   void focusAdjacentHerdrWorkspace(int delta) {
     final control = herdr;
     if (control == null) {
-      _prefixed('w');
+      _herdrAction('workspace_picker');
       return;
     }
     unawaited(
