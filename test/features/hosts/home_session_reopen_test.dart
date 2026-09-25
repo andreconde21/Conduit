@@ -6,6 +6,7 @@ import 'package:conduit/features/agent_attention/data/herdr_attention_provider.d
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
+import 'package:conduit/features/companion_setup/presentation/companion_setup_controller.dart';
 import 'package:conduit/features/hosts/domain/home_preferences.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/home_board_controller.dart';
@@ -14,12 +15,16 @@ import 'package:conduit/features/hosts/presentation/hosts_page.dart';
 import 'package:conduit/features/local_shell/presentation/local_shell_controller.dart';
 import 'package:conduit/features/sessions/domain/connect_preferences.dart';
 import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
+import 'package:conduit/features/terminal/domain/predictive_terminal_session.dart';
+import 'package:conduit/features/terminal/domain/roaming_terminal_session.dart';
 import 'package:conduit/features/terminal/domain/ssh_terminal_repository.dart';
 import 'package:conduit/features/terminal/domain/ssh_terminal_session.dart';
 import 'package:conduit/features/terminal/presentation/host_key_prompt_coordinator.dart';
 import 'package:conduit/features/terminal/presentation/terminal_page.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
+import 'package:conduit/features/terminal/presentation/widgets/terminal_header.dart';
+import 'package:conduit/main.dart';
 import 'package:conduit_vt/conduit_vt.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -32,7 +37,11 @@ import 'home_board_fakes.dart';
 /// really changes (the kernel sends no SIGWINCH for a same-size
 /// window-change). [screen] is what the server shows; the phone only knows
 /// what was drawn to it.
-class _HerdrClient implements SshTerminalSession {
+class _HerdrClient
+    implements
+        SshTerminalSession,
+        PredictiveTerminalSession,
+        RoamingTerminalSession {
   _HerdrClient(this.columns, this.rows);
 
   int columns;
@@ -78,6 +87,23 @@ class _HerdrClient implements SshTerminalSession {
   }
 
   @override
+  Stream<int> get echoAcks => const Stream.empty();
+
+  @override
+  Duration? get smoothedRtt => const Duration(milliseconds: 80);
+
+  var _inputs = 0;
+
+  @override
+  int sendWithInputState(List<int> data) {
+    unawaited(send(data));
+    return ++_inputs;
+  }
+
+  @override
+  Future<void> rehome() async {}
+
+  @override
   Future<void> send(List<int> data) async {
     if (utf8.decode(data).contains('herdr')) {
       attached = true;
@@ -106,14 +132,18 @@ void main() {
   late TerminalWorkspaceController workspace;
   late SessionConnectFlow flow;
 
-  Future<void> pumpHome(WidgetTester tester) async {
+  Future<void> pumpHome(WidgetTester tester, {bool mosh = false}) async {
     tester.view.physicalSize = const Size(1080, 2400);
     tester.view.devicePixelRatio = 2.6;
     addTearDown(tester.view.reset);
     final themeController = ThemeController(InMemoryThemePreferences());
     await themeController.load();
     final runner = HerdrFakeRunner();
-    final host = buildHost('a').copyWith(lastConnectedAt: DateTime.utc(2026));
+    final host = buildHost('a').copyWith(
+      lastConnectedAt: DateTime.utc(2026),
+      useMosh: mosh,
+      predictiveEchoEnabled: mosh,
+    );
     final hostsController = HostsController(
       FakeHostsRepository()..persisted = [host],
     );
@@ -193,7 +223,11 @@ void main() {
 
   /// The terminal on screen: one view, showing [session]'s terminal.
   void expectShowing(WidgetTester tester, TerminalSessionController session) {
+    expect(tester.takeException(), isNull);
     expect(find.byType(TerminalPage), findsOneWidget);
+    expect(find.byType(ErrorWidget), findsNothing);
+    expect(find.byType(TerminalHeader), findsOneWidget);
+    expect(find.byKey(const ValueKey('toolbar-chat')), findsOneWidget);
     final view = tester.widget<TerminalView>(find.byType(TerminalView));
     expect(identical(view.terminal, session.terminal), isTrue);
     final state = tester.state<TerminalViewState>(find.byType(TerminalView));
@@ -202,9 +236,10 @@ void main() {
   }
 
   Future<TerminalSessionController> openWorkspaceAndGoHome(
-    WidgetTester tester,
-  ) async {
-    await pumpHome(tester);
+    WidgetTester tester, {
+    bool mosh = false,
+  }) async {
+    await pumpHome(tester, mosh: mosh);
     await tester.tap(find.byKey(const ValueKey('other-herdr-a-w1')));
     await settle(tester);
     final session = workspace.sessions.single;
@@ -252,6 +287,107 @@ void main() {
     expect(session.status, TerminalConnectionStatus.connected);
     expect(repository.clients, hasLength(2));
     expect(screenText(session.terminal), contains('HERDR workspace w1'));
+    await unmount(tester);
+  });
+
+  testWidgets('a Mosh session with predictive echo reopens from its tile '
+      'with the whole page', (tester) async {
+    final session = await openWorkspaceAndGoHome(tester, mosh: true);
+    // Typing while the page is open leaves predictions on screen.
+    session.sendText('ls');
+    await tester.pump();
+
+    await tester.tap(find.byKey(const ValueKey('home-session-a#herdr:w1')));
+    await settle(tester);
+
+    expectShowing(tester, session);
+    await unmount(tester);
+  });
+
+  testWidgets('in the whole app: open a Mosh Herdr workspace, go home, '
+      'tap its tile, and the whole terminal page is there', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 2.6;
+    addTearDown(tester.view.reset);
+    final errors = <FlutterErrorDetails>[];
+    final previous = FlutterError.onError;
+    FlutterError.onError = (details) {
+      errors.add(details);
+      previous?.call(details);
+    };
+    addTearDown(() => FlutterError.onError = previous);
+    final themeController = ThemeController(InMemoryThemePreferences());
+    await themeController.load();
+    final runner = HerdrFakeRunner();
+    final host = buildHost('a').copyWith(
+      lastConnectedAt: DateTime.utc(2026),
+      useMosh: true,
+      predictiveEchoEnabled: true,
+    );
+    final hostsController = HostsController(
+      FakeHostsRepository()..persisted = [host],
+    );
+    repository = _HerdrRepository();
+    workspace = TerminalWorkspaceController(repository);
+    final attention = AgentAttentionController(
+      workspace: workspace,
+      runnerFactory: (_) => ScriptedAgentCommandRunner([StateError('none')]),
+      provider: const HerdrAttentionProvider(),
+      pollInterval: const Duration(days: 1),
+    );
+    flow = SessionConnectFlow(
+      hostsController: hostsController,
+      workspace: workspace,
+      runnerFactory: (_) => runner,
+      preferences: InMemoryConnectPreferencesRepository(),
+    );
+    final companion = CompanionSetupController(
+      runnerFactory: (_) => runner,
+      sftpRepository: NoNetworkSftpRepository(),
+    );
+    final verifier = NoopVerifier();
+    await tester.pumpWidget(
+      CompanionSetupScope(
+        controller: companion,
+        agentAttention: attention,
+        child: ConduitApp(
+          lockController: AppLockController(AlwaysAuthenticates()),
+          themeController: themeController,
+          hostsController: hostsController,
+          terminalRepository: NoNetworkTerminalRepository(),
+          workspaceController: workspace,
+          localShellController: LocalShellController(),
+          hostKeyVerifier: verifier,
+          promptCoordinator: HostKeyPromptCoordinator(),
+          sftpRepository: NoNetworkSftpRepository(),
+          sftpBookmarksRepository: InMemorySftpBookmarks(),
+          agentAttention: attention,
+          backupService: AppBackupService(
+            hostsController: hostsController,
+            themeController: themeController,
+            hostKeyVerifier: verifier,
+          ),
+          fileExport: RecordingFileExport(),
+          connectFlow: flow,
+        ),
+      ),
+    );
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('other-herdr-a-w1')));
+    await settle(tester);
+    final session = workspace.sessions.single;
+    expectShowing(tester, session);
+    session.sendText('ls');
+    await tester.pump();
+
+    tester.state<NavigatorState>(find.byType(Navigator)).pop();
+    await settle(tester);
+    expect(find.byType(TerminalPage), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('home-session-a#herdr:w1')));
+    await settle(tester);
+    expectShowing(tester, session);
+    expect(errors, isEmpty, reason: errors.map((e) => '$e').join('\n'));
     await unmount(tester);
   });
 }

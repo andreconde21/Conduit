@@ -1,3 +1,4 @@
+import 'package:conduit/core/diagnostics/app_error_log.dart';
 import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
@@ -1487,7 +1488,43 @@ class _AboutControls extends StatelessWidget {
             label: const Text('Open-source licenses'),
           ),
         ),
+        const _ErrorLogButton(),
       ],
+    );
+  }
+}
+
+/// Copies the errors the app caught this run, for a bug report; hidden
+/// while there are none.
+class _ErrorLogButton extends StatelessWidget {
+  const _ErrorLogButton();
+
+  @override
+  Widget build(BuildContext context) {
+    final log = AppErrorLog.instance;
+    return ListenableBuilder(
+      listenable: log,
+      builder: (context, _) {
+        if (log.isEmpty) return const SizedBox.shrink();
+        final count = log.entries.length;
+        return Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            key: const ValueKey('about-copy-error-log'),
+            onPressed: () async {
+              await log.copyReport();
+              if (!context.mounted) return;
+              ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                const SnackBar(content: Text('Error log copied')),
+              );
+            },
+            icon: const Icon(Icons.bug_report_outlined, size: 18),
+            label: Text(
+              'Copy error log ($count ${count == 1 ? 'error' : 'errors'})',
+            ),
+          ),
+        );
+      },
     );
   }
 }
