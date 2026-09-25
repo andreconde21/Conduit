@@ -219,6 +219,13 @@ Future<void> saveShot(
   String name, {
   double pixelRatio = shotPixelRatio,
 }) async {
+  // flutter_test draws elevation as a solid black outline; repaint with
+  // real shadows for the capture, then restore the test default.
+  debugDisableShadows = false;
+  for (final view in tester.binding.renderViews) {
+    view.reassemble();
+  }
+  await tester.pump();
   final boundary = tester.renderObject<RenderRepaintBoundary>(
     find.byKey(shotKey),
   );
@@ -230,6 +237,11 @@ Future<void> saveShot(
       ..createSync(recursive: true)
       ..writeAsBytesSync(bytes!.buffer.asUint8List());
   });
+  debugDisableShadows = true;
+  for (final view in tester.binding.renderViews) {
+    view.reassemble();
+  }
+  await tester.pump();
 }
 
 /// Pumps a few frames without waiting for spinners to settle.
