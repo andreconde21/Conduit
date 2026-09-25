@@ -10,6 +10,8 @@ const paths = require('./paths')
 const client = require('./client')
 const settings = require('./settings')
 const state = require('./state')
+const transcript = require('./transcript')
+const pane = require('./pane')
 const { log } = require('./log')
 
 const USAGE = `usage: conductore-hostd <command>
@@ -19,6 +21,13 @@ const USAGE = `usage: conductore-hostd <command>
                                   long-poll: one JSON line per change
   decide <requestId> allow|deny|always [--message "..."]
   focus <sessionId>               select the agent's tmux window / Herdr pane
+  transcript <sessionId> [--since <offset> | --before <offset>]
+             [--tail-bytes N] [--max-bytes 262144]
+                                  chat entries from the session's transcript
+  send <sessionId> [--text "..." | --text-b64 <base64>] [--no-enter]
+                                  type a prompt into the agent's pane (text
+                                  from stdin when neither flag is given)
+  interrupt <sessionId>           press Escape in the agent's pane
   install | uninstall             register / remove the Claude Code hooks
   doctor | stop | version
 `
@@ -109,15 +118,25 @@ function run (cmd, args) {
   })
 }
 
+// The agent record for sessionId from the daemon, else the snapshot file.
+// Resolves { agent } or { error }.
+async function findAgent (sessionId) {
+  let snap
+  try { [snap] = await client.request({ op: 'status' }, { timeoutMs: 5000 }) } catch {}
+  if (!snap || snap.error) {
+    try { snap = readSnapshotFile() } catch { return { error: 'no state available' } }
+  }
+  const agent = (snap.agents || []).find(a => a.sessionId === sessionId)
+  if (!agent) return { error: `unknown session ${sessionId}` }
+  return { agent }
+}
+
 async function focus (args) {
   const [sessionId] = args
   if (!sessionId) return fail('usage: focus <sessionId>')
-  let snap
-  try { [snap] = await client.request({ op: 'status' }, { timeoutMs: 5000 }) } catch {
-    try { snap = readSnapshotFile() } catch { return fail('no state available') }
-  }
-  const agent = (snap.agents || []).find(a => a.sessionId === sessionId)
-  if (!agent) return fail(`unknown session ${sessionId}`)
+  const found = await findAgent(sessionId)
+  if (found.error) return fail(found.error)
+  const agent = found.agent
   if (agent.herdr && agent.herdr.paneId) {
     const r = await run('herdr', ['agent', 'focus', agent.herdr.paneId])
     if (!r.err) return out({ ok: true, via: 'herdr', paneId: agent.herdr.paneId })
@@ -134,6 +153,97 @@ async function focus (args) {
     return out({ ok: true, via: 'tmux', target, paneId: agent.tmux.paneId || null })
   }
   return fail('agent has no tmux or Herdr location')
+}
+
+const optNumber = (flags, name) => {
+  if (flags[name] === undefined) return undefined
+  const n = Number(flags[name])
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : NaN
+}
+
+async function transcriptCmd (args) {
+  const { flags, positional } = parseFlags(args)
+  const [sessionId] = positional
+  if (!sessionId) return fail('usage: transcript <sessionId> [--since <offset> | --before <offset>] [--tail-bytes N] [--max-bytes N]')
+  const opts = {}
+  for (const [flag, key] of [['since', 'since'], ['before', 'before'], ['tail-bytes', 'tailBytes'], ['max-bytes', 'maxBytes']]) {
+    const n = optNumber(flags, flag)
+    if (Number.isNaN(n)) return fail(`--${flag} must be a non-negative number`)
+    if (n !== undefined) opts[key] = n
+  }
+  if (opts.since !== undefined && opts.before !== undefined) return fail('use --since or --before, not both')
+  const found = await findAgent(sessionId)
+  if (found.error) return fail(found.error)
+  const file = found.agent.transcriptPath
+  if (!file) return fail('no transcript recorded for this session yet (it appears with the next hook event)')
+  if (!path.isAbsolute(file) || !file.endsWith('.jsonl')) return fail('transcript path is not an absolute .jsonl file')
+  try {
+    return out({ sessionId, ...transcript.readTranscript(file, opts) })
+  } catch (err) {
+    if (err.code === 'ENOENT') return fail(`transcript not found: ${file}`)
+    return fail(`cannot read transcript: ${err.message}`)
+  }
+}
+
+function readStdin () {
+  return new Promise((resolve, reject) => {
+    if (process.stdin.isTTY) return resolve('')
+    let data = ''
+    process.stdin.setEncoding('utf8')
+    process.stdin.on('data', d => {
+      data += d
+      if (data.length > pane.MAX_TEXT * 4) { process.stdin.destroy(); reject(new Error('text too long')) }
+    })
+    process.stdin.on('end', () => resolve(data))
+    process.stdin.on('error', reject)
+  })
+}
+
+// An agent that can take typed input: known, alive, in tmux or Herdr.
+async function inputAgent (sessionId, { allowPermission = false } = {}) {
+  const found = await findAgent(sessionId)
+  if (found.error) return found
+  const agent = found.agent
+  if (agent.state === 'ended') return { error: 'session has ended' }
+  if (!allowPermission && agent.state === 'needs_permission') {
+    return { error: 'agent is waiting for a permission decision; answer it first' }
+  }
+  if (!pane.targets(agent).length) return { error: 'session not in tmux or Herdr' }
+  return { agent }
+}
+
+async function send (args) {
+  const { flags, positional } = parseFlags(args)
+  const [sessionId] = positional
+  if (!sessionId) return fail('usage: send <sessionId> [--text "..." | --text-b64 <base64>] [--no-enter]')
+  let text
+  if (typeof flags['text-b64'] === 'string') text = Buffer.from(flags['text-b64'], 'base64').toString('utf8')
+  else if (typeof flags.text === 'string') text = flags.text
+  else if (flags.text === true) text = ''
+  else {
+    try { text = await readStdin() } catch (err) { return fail(err.message) }
+    text = text.replace(/\r?\n$/, '')
+  }
+  text = text.replace(/\r\n?/g, '\n')
+  const enter = !flags['no-enter']
+  if (!text.length && !enter) return fail('nothing to send')
+  if (text.length > pane.MAX_TEXT) return fail(`text too long (${text.length} > ${pane.MAX_TEXT} characters)`)
+  const found = await inputAgent(sessionId)
+  if (found.error) return fail(found.error)
+  const r = await pane.sendText(found.agent, text, { enter })
+  if (r.error) return fail(r.error)
+  return out({ ok: true, sessionId, via: r.via, paneId: r.paneId, chars: text.length, enter })
+}
+
+async function interrupt (args) {
+  const [sessionId] = parseFlags(args).positional
+  if (!sessionId) return fail('usage: interrupt <sessionId>')
+  // Escape also dismisses a permission prompt, so it is allowed then.
+  const found = await inputAgent(sessionId, { allowPermission: true })
+  if (found.error) return fail(found.error)
+  const r = await pane.sendKey(found.agent, 'escape')
+  if (r.error) return fail(r.error)
+  return out({ ok: true, sessionId, via: r.via, paneId: r.paneId, key: 'Escape' })
 }
 
 function install () {
@@ -216,6 +326,9 @@ async function main (argv) {
     case 'events': return events(args)
     case 'decide': return decide(args)
     case 'focus': return focus(args)
+    case 'transcript': return transcriptCmd(args)
+    case 'send': return send(args)
+    case 'interrupt': return interrupt(args)
     case 'install': return install()
     case 'uninstall': return uninstall()
     case 'doctor': return doctor()

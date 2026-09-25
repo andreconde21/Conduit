@@ -163,3 +163,12 @@ test('snapshot sorts by most recent and each change carries a full agent copy', 
   assert.equal(st.agents.b.name, 'b')
   assert.deepEqual(state.snapshot(st).agents.map(a => a.sessionId), ['b', 'a'])
 })
+
+test('transcript_path is recorded and kept when later events omit it', () => {
+  const st = fresh(
+    ev('SessionStart', { transcript_path: '/home/u/.claude/projects/p/s1.jsonl' }),
+    ev('UserPromptSubmit', { prompt: 'x' })
+  )
+  assert.equal(st.agents.s1.transcriptPath, '/home/u/.claude/projects/p/s1.jsonl')
+  assert.equal(fresh(ev('Stop')).agents.s1.transcriptPath, null)
+})

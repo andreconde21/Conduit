@@ -4,7 +4,7 @@
 //
 // State shape (also what `status` prints):
 //   { version: 1, seq: N, agents: { [sessionId]: Agent } }
-//   Agent = { sessionId, name, cwd, tmux, herdr, state, lastEvent, lastToolName,
+//   Agent = { sessionId, name, cwd, transcriptPath, tmux, herdr, state, lastEvent, lastToolName,
 //             lastMessage, startedAt, updatedAt, endedAt, pending: [PendingRequest] }
 //   PendingRequest = { id, toolName, summary, toolInput, createdAt }
 //
@@ -34,6 +34,7 @@ function newAgent (sessionId, now) {
     sessionId,
     name: null,
     cwd: null,
+    transcriptPath: null,
     tmux: null,
     herdr: null,
     state: 'working',
@@ -81,6 +82,7 @@ function pickName (event, cwd) {
 
 function applyContext (agent, event) {
   if (event.cwd) agent.cwd = event.cwd
+  if (typeof event.transcript_path === 'string' && event.transcript_path) agent.transcriptPath = event.transcript_path
   if (event.tmux) agent.tmux = { session: event.tmux.session, window: event.tmux.window, paneId: event.tmux.paneId, windowName: event.tmux.windowName || null }
   if (event.herdr) agent.herdr = event.herdr
   const name = pickName(event, agent.cwd)
