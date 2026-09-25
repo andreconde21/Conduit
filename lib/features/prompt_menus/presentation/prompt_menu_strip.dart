@@ -108,12 +108,26 @@ class _PromptMenuStripState extends State<PromptMenuStrip> {
       return;
     }
     final terminal = widget.session.terminal;
-    final menu = widget.session.isConnected
-        ? detectPromptMenu(
-            visibleRows(terminal),
-            cursorRow: terminal.buffer.cursorY,
-          )
-        : null;
+    PromptMenu? menu;
+    if (widget.session.isConnected) {
+      try {
+        menu = detectPromptMenu(
+          visibleRows(terminal),
+          cursorRow: terminal.buffer.cursorY,
+        );
+      } catch (error, stack) {
+        // Menu buttons are a convenience: an unexpected screen must never
+        // take the terminal page down. Report it and show no strip.
+        FlutterError.reportError(
+          FlutterErrorDetails(
+            exception: error,
+            stack: stack,
+            library: 'prompt menus',
+            context: ErrorDescription('while detecting a prompt menu'),
+          ),
+        );
+      }
+    }
     if (_answered != null && menu != _answered) {
       // The screen moved on from the menu that was answered.
       _answered = null;

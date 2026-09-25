@@ -277,6 +277,11 @@ class _Screen {
     if (_boxEdges.contains(inner[0])) {
       text = inner.substring(1);
     }
+    // A row that is only a box edge (a lone │, e.g. a pane border) is
+    // empty once the edge is gone.
+    if (text.isEmpty) {
+      return '';
+    }
     if (_boxEdges.contains(text[text.length - 1])) {
       text = text.substring(0, text.length - 1).trimRight();
     }
