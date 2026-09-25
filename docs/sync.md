@@ -81,7 +81,7 @@ now**. Leaving the app pushes a pending change at once.
 
 1. On a syncing device: **Add a device**, name it, confirm. The app
    generates an ed25519 key and appends it to the hub's `authorized_keys`
-   (`# conductore-device <name>` as the key comment).
+   (key comment `conductore-device <name>`).
 2. It shows a QR code (and **Copy setup code** for desktops) with the hub's
    address, its host key fingerprint and a sealed secret: the new key's seed
    and the sync key, under Argon2id (19 MiB, 2 passes) of **six words** from
