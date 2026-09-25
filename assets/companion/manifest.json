@@ -1,0 +1,18 @@
+{
+  "version": "0.1.0",
+  "files": [
+    "README.md",
+    "bin/conductore-hook",
+    "bin/conductore-hostd",
+    "install.sh",
+    "lib/cli.js",
+    "lib/client.js",
+    "lib/daemon.js",
+    "lib/hook.js",
+    "lib/log.js",
+    "lib/paths.js",
+    "lib/settings.js",
+    "lib/state.js",
+    "package.json"
+  ]
+}
