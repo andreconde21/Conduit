@@ -85,12 +85,15 @@ void main() {
     );
   });
 
-  test('suggestedPort falls back to 3000 and then to the remembered port', () async {
-    expect(await controller.suggestedPort(), livePreviewDefaultPort);
-    await controller.start(5173);
-    expect(await controller.suggestedPort(), 5173);
-    expect(store.ports['h'], 5173);
-  });
+  test(
+    'suggestedPort falls back to 3000 and then to the remembered port',
+    () async {
+      expect(await controller.suggestedPort(), livePreviewDefaultPort);
+      await controller.start(5173);
+      expect(await controller.suggestedPort(), 5173);
+      expect(store.ports['h'], 5173);
+    },
+  );
 
   test('start opens the forward and exposes the loopback URL', () async {
     final phases = <LivePreviewPhase>[];
@@ -112,19 +115,22 @@ void main() {
     expect(controller.url, isNull);
   });
 
-  test('a connection failure shows why the host could not be reached', () async {
-    forwarder.failure = const AppFailure(
-      'Could not reach Host h.',
-      'Authentication failed. Check the username and key.',
-    );
-    await controller.start(3000);
-    expect(controller.phase, LivePreviewPhase.failed);
-    expect(
-      controller.error,
-      'Could not reach Host h.\n'
-      'Authentication failed. Check the username and key.',
-    );
-  });
+  test(
+    'a connection failure shows why the host could not be reached',
+    () async {
+      forwarder.failure = const AppFailure(
+        'Could not reach Host h.',
+        'Authentication failed. Check the username and key.',
+      );
+      await controller.start(3000);
+      expect(controller.phase, LivePreviewPhase.failed);
+      expect(
+        controller.error,
+        'Could not reach Host h.\n'
+        'Authentication failed. Check the username and key.',
+      );
+    },
+  );
 
   test('out-of-range ports are rejected without touching the host', () async {
     await controller.start(70000);
@@ -153,7 +159,13 @@ void main() {
     gate.complete();
     await slow;
     expect(controller.remotePort, 8080);
-    expect(forwarder.opened.where((forward) => forward.remotePort == 3000).single.closed, isTrue);
+    expect(
+      forwarder.opened
+          .where((forward) => forward.remotePort == 3000)
+          .single
+          .closed,
+      isTrue,
+    );
   });
 
   test('restart re-opens the current port after a failure', () async {

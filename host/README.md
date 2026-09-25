@@ -12,7 +12,7 @@ relay, nothing listening on the network.
                                                           ▼
                                                    conductore-hostd (Node daemon)
                                                           ▲ unix socket
-    phone ──ssh user@host "conductore-hostd status|events|decide|transcript|send"
+    phone ──ssh user@host "conductore-hostd status|events|decide|transcript|send|ports"
 
 Built to cost nothing while agents work: a hook event is one `cat` and one
 `ln` (about 2.5 ms and 2 MB, no Node start), and the daemon sleeps until a
@@ -64,6 +64,7 @@ starts it when the spool is not empty. `conductore-hostd stop` stops it;
 | `~/.conductore/node` | node binary the sh clients start the daemon with |
 | `~/.conductore/spawn.at` | time of the last start attempt |
 | `~/.conductore/state.json` | atomic snapshot of the state, read by `status` when the daemon is down |
+| `~/.conductore/ports.json` | listening ports and the seq each first appeared at (`ports`) |
 | `~/.conductore/hostd.log` | log, rotated once at 1 MB to `hostd.log.1` |
 | `~/.conductore/always-rules.json` | record of every rule added through an "always" decision |
 
@@ -313,6 +314,34 @@ Presses Escape in the agent's pane (`herdr pane send-keys <pane> esc`, else
 turn. Allowed while a permission prompt is up (Escape dismisses it).
 Prints `{"ok":true,"sessionId":"…","via":"tmux","paneId":"%5","key":"Escape"}`.
 
+### `conductore-hostd ports [--since <seq>]`
+
+The TCP ports the user's own processes listen on, for the phone's "Preview
+ready" chip (Live preview). Nothing watches in the background: the list is
+computed when asked, from `ss -ltnpH` (else `lsof -nP -iTCP -sTCP:LISTEN`,
+else `/proc/net/tcp`), and a result younger than 2 s is reused. The table
+lives in `~/.conductore/ports.json` so each port keeps the `seq` at which
+it first appeared; a port that closes is dropped, and when it opens again
+(a restarted dev server, a new pid) it gets a new `seq`.
+
+```json
+{"seq":7,"source":"ss","cached":false,"ports":[
+  {"port":5173,"address":"127.0.0.1","pid":4242,"process":"node","label":"vite",
+   "cwd":"/home/andre/app","seq":7,"firstSeenAt":1790340104253,"url":"http://localhost:5173/"}]}
+```
+
+* Without `--since`: every current port. With it: only ports whose `seq` is
+  greater (the phone polls with the last `seq` it saw).
+* `label`: the dev server read from the command line (`vite`, `next`,
+  `create-react-app`, `webpack`, `astro`, `nuxt`, `django`, `flask`,
+  `uvicorn`, `python http.server`, `rails`, …), else the process name.
+* Left out: SSH, mail, DNS, portmapper, CUPS and LLMNR ports (22, 25, 53,
+  111, 631, 5355), 80/443 owned by root or `docker-proxy`, system daemons
+  (`sshd`, `docker-proxy`, `mosh-server`, `tailscaled`, …), other users'
+  sockets (unless running as root), and ports from 32768 up (debuggers,
+  language servers) unless the command line is a known dev server.
+* `source`: `ss`, `lsof`, `proc` (no process details) or `none`.
+
 ### `conductore-hostd statusline [--chain '<cmd>']`
 
 Not for the phone: the Node statusline of 0.3, kept so a not yet migrated
@@ -322,12 +351,12 @@ instead. See Usage.
 ### Others
 
 * `install` / `uninstall`: `{"ok":true,"settings":"…/settings.json","hook":"…/conductore-hook","statusline":"…/conductore-statusline","events":[…],"statusLine":"set|wrapped|updated|unchanged"}` / `{"ok":true,"removed":[…],"statusLineRestored":true,"daemonStopped":true}`
-* `doctor`: `{"ok":true,"user":"andre","checks":[{"name":"hooks registered","ok":true,"detail":"9 events"},{"name":"statusline (usage)","ok":true,"detail":"wired, wrapping: ~/bin/my-line"},{"name":"hook latency","ok":true,"detail":"3.1 ms per event (median of 5, no-op event)"},{"name":"daemon memory","ok":true,"detail":"45.9 MB RSS, 180 ms CPU in 3600 s, version 0.4.0"}, …]}`
+* `doctor`: `{"ok":true,"user":"andre","checks":[{"name":"hooks registered","ok":true,"detail":"9 events"},{"name":"statusline (usage)","ok":true,"detail":"wired, wrapping: ~/bin/my-line"},{"name":"hook latency","ok":true,"detail":"3.1 ms per event (median of 5, no-op event)"},{"name":"daemon memory","ok":true,"detail":"45.9 MB RSS, 180 ms CPU in 3600 s, version 0.5.0"}, …]}`
   (a missing statusline, daemon or latency does not make `ok` false; the
   latency is measured around the spawn from Node, so it includes a little
   process start-up; with no daemon running, it starts one)
 * `stop`: `{"ok":true,"running":true,"stopped":true}` or `{"ok":true,"running":false}`
-* `version`: `{"version":"0.4.0","protocol":1,"node":"22.23.1"}`
+* `version`: `{"version":"0.5.0","protocol":1,"node":"22.23.1"}`
 * `daemon [--detach]`: runs the daemon (what the clients start;
   `--detach` starts it in its own session with the flags from Footprint).
 

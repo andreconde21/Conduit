@@ -66,6 +66,11 @@ class MainActivity : FlutterFragmentActivity() {
             flutterEngine.dartExecutor.binaryMessenger,
             ClipboardImageBridge.CHANNEL,
         ).setMethodCallHandler { call, result -> clipboardImage.handle(call, result) }
+        val screenCapture = ScreenCaptureBridge(this) // Live preview screenshot
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            ScreenCaptureBridge.CHANNEL,
+        ).setMethodCallHandler { call, result -> screenCapture.handle(call, result) }
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             BACKGROUND_KEEPALIVE_CHANNEL,

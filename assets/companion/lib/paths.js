@@ -17,7 +17,7 @@ const os = require('os')
 const path = require('path')
 
 const PROTOCOL_VERSION = 1
-const VERSION = '0.4.0'
+const VERSION = '0.5.0'
 
 // V8 flags the daemon runs with (measured in README "Footprint"). It holds a
 // few hundred KB of state: small heap limits keep V8 from growing, lite mode
@@ -94,5 +94,7 @@ module.exports = {
   tmpDir: () => path.join(homeDir(), 'tmp'),
   usageDir: () => path.join(homeDir(), 'usage'),
   spawnStampPath: () => path.join(homeDir(), 'spawn.at'),
-  nodePathFile: () => path.join(homeDir(), 'node')
+  nodePathFile: () => path.join(homeDir(), 'node'),
+  // `ports`: listening ports with the seq each first appeared at.
+  portsPath: () => path.join(homeDir(), 'ports.json')
 }
