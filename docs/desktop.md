@@ -3,8 +3,10 @@
 Conductore runs on Linux, Windows and macOS from the same Flutter code as
 the phone apps. The desktop builds are **test builds**: unsigned, not in any
 store, meant for trying the app with a real keyboard and a big screen. The
-goal is one experience across phone and desktop. For now the desktops get
-the phone UI with a keyboard-first terminal and a centred home screen.
+goal is one experience across phone and desktop: the same sessions, agents
+and settings, laid out for a window instead of a phone. Desktops get the
+desktop shell (a sidebar, tabs and splits, a dashboard; see below) and a
+keyboard-first terminal.
 
 ## Getting a build
 
@@ -77,6 +79,51 @@ Outputs: `build/linux/x64/release/bundle/`,
 Desktop icons come from `tools/render_launcher_icon.py --desktop` (the
 Windows `.ico`, the macOS AppIcon set and the Linux window icon).
 
+## The desktop shell
+
+On a desktop (and on a tablet at least 900 dp wide) the home screen and
+the terminal are one window instead of two pages. Phones, and tablets
+narrower than 900 dp, keep the phone layout.
+
+- **Sidebar** (left, drag its edge between 220 and 420 px, or collapse it
+  to icons). A tree of every machine, *This computer* first: its Herdr
+  workspaces and tmux sessions, then their tabs or windows, then the agent
+  panes. Each row has its logo (tmux, Herdr, or the agent's badge), a
+  human name, a state dot (working, needs you, done, idle), the agent
+  kind, and a tab mark when a session in the app shows it. A *Needs you*
+  group on top lists what waits on you. The filter field narrows the tree.
+  Click a row to open it; the chevron opens it in the tree (a tmux
+  session lists its windows then). Right-click (or long-press) for *Open
+  in a split*, *Mark as read / unread*, *Pin*, groups and the machine's
+  actions. Drag machines, workspaces and pins to reorder them; drop a
+  machine on a group to move it there. Groups ("Clients", "Infra") are
+  made from a machine's menu (*New group…*).
+- **Unread.** A row turns bold with a dot when something happened that you
+  have not seen: new output in a session that is not on screen (tmux
+  `session_activity`, or the terminal of an open session), an agent that
+  finished, or one that needs you. Looking at it clears it; parents count
+  their unread rows. Ctrl+Shift+U (Cmd+Shift+U) opens the next one.
+- **Tabs and splits.** The tabs across the top hold every open view:
+  terminal sessions, Chat View, files, git diffs and live previews. Drag a
+  tab onto the left, right, top or bottom edge of a pane to split it, or
+  onto its middle to show it there (up to four panes). Drag the dividers to
+  resize. A tab's right-click menu splits too. A split can mix views: a
+  terminal next to the agent's Chat View, Claude next to its live
+  preview. Alt+arrows move between panes. Ctrl+Shift+\ splits right and
+  Ctrl+Shift+- splits down, with the most recent view that is not on
+  screen, or a new session when every view is. The layout is saved and
+  comes back with the sessions (*Restore sessions on launch*).
+- **Dashboard.** With no view open, or after the home button at the left
+  of the tabs, the main area shows columns: *Needs you* cards (with
+  Allow / Deny for approvals the companion relays), a usage slot, the
+  open sessions as live previews, and the other workspaces per machine.
+- **Right panel.** The Agents button (the pulse icon) opens the agent
+  inbox with approvals on the right; the globe opens the live preview of
+  the focused session. Drag its edge to resize it.
+- Sidebar width, collapsed state, groups, pins, order, the split layout
+  and the unread markers are kept per device (secure storage, key
+  `conduit.desktop_shell.v1`). They are not synced or backed up.
+
 ## Using it on a desktop
 
 - **Keyboard.** Keys go straight to the remote shell. Ctrl+C, Ctrl+A,
@@ -108,20 +155,27 @@ Windows `.ico`, the macOS AppIcon set and the Linux window icon).
   | Go to session 1 to 9 | Alt+1 to Alt+9 | Cmd+1 to Cmd+9 |
   | Fullscreen terminal | F11 | Ctrl+Cmd+F or F11 |
   | Keyboard shortcuts | Ctrl+Shift+/ | Cmd+/ |
+  | Split right / down | Ctrl+Shift+\ / Ctrl+Shift+- | Cmd+D / Cmd+Shift+D |
+  | Move between splits | Alt+arrows | Cmd+Option+arrows |
+  | Next unread | Ctrl+Shift+U | Cmd+Shift+U |
 
   None of these reach the shell. Two choices avoid clashes with shells and
   TUIs. Go to session uses Alt+digit, because Ctrl+2 to Ctrl+8 are control
   characters (Ctrl+6 is vim's alternate file). The price is readline's
   rarely used Alt+digit argument. Help is Ctrl+Shift+/ because Ctrl+/ sends
-  ^_ (undo) and F1 belongs to htop and mc. Ctrl+Shift+- (Ctrl+_, undo)
-  still reaches the shell. Close asks first when the session is a plain
+  ^_ (undo) and F1 belongs to htop and mc. Ctrl+Shift+- used to send
+  Ctrl+_ (undo) to the shell; it now splits down, and Ctrl+/ still sends
+  the same ^_. Alt+arrows only move between splits when a split lies that
+  way; otherwise they reach the shell as before (word motion). Close asks
+  first when the session is a plain
   shell, because closing it ends what runs there. tmux and Herdr sessions
   just detach. Fullscreen hides the app's chrome, not the OS window
   decorations. There is no scrollback search yet (conduit_vt has none).
 - **Menus and sheets.** Nothing slides up from the bottom on desktop.
   Action menus open as popovers at the click. Pickers and forms, such as
-  the connect picker, open as centred dialogs. The agent inbox and the
-  Herdr and tmux navigators slide in from the right. The quick switcher
+  the connect picker, open as centred dialogs. The Herdr and tmux
+  navigators slide in from the right; the agent inbox opens in the
+  shell's right panel. The quick switcher
   and snippets open as a command palette at the top. Esc closes any of
   them, and the first field has the focus. Phones keep the bottom sheets.
   All of these go through `lib/core/presentation/adaptive_modal.dart`.
@@ -130,7 +184,8 @@ Windows `.ico`, the macOS AppIcon set and the Linux window icon).
   multiplexer shortcuts, snippets and the chat button. It resets for each
   terminal screen.
 - **Window.** It opens at 1280x800, shrinks to 900x600 at the smallest, and
-  the terminal reflows on resize. The home screen is centred at 960 px.
+  the terminal reflows on resize. F11 hides the sidebar and the right
+  panel with the terminal's own chrome.
 
 ## What each platform supports
 
@@ -185,8 +240,9 @@ Gating lives in `lib/core/platform_features.dart`. Every flag reads
 - Linux and Windows builds are x64 only. There is no ARM64 Linux or Windows
   build yet.
 - The on-screen keys toggle is per screen and not remembered.
-- The UI is the phone UI with a centred home screen. Settings and sheets are
-  full width. A real desktop layout, such as a side-by-side host list and
-  terminal, comes later.
+- The prompt menu buttons, the on-screen keys and the compose bar sit
+  under all panes and act on the focused one.
+- On macOS a live preview shown in a pane and in the right panel at once
+  runs two web views of the same page.
 - No scrollback search (Ctrl+Shift+F) yet, and the shortcuts are not
   configurable.

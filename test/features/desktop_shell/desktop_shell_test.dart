@@ -1,8 +1,15 @@
+import 'dart:async';
+
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
+import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
+import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
+import 'package:conduit/features/chat_view/presentation/chat_view_launcher.dart';
+import 'package:conduit/features/chat_view/presentation/chat_view_page.dart';
 import 'package:conduit/features/desktop_shell/data/desktop_shell_store.dart';
 import 'package:conduit/features/desktop_shell/domain/shell_layout.dart';
 import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
 import 'package:conduit/features/desktop_shell/presentation/desktop_home.dart';
+import 'package:conduit/features/desktop_shell/presentation/desktop_shell_controller.dart';
 import 'package:conduit/features/desktop_shell/presentation/terminal_shell_embedding.dart';
 import 'package:conduit/features/desktop_shell/presentation/widgets/shell_tab_strip.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
@@ -530,6 +537,82 @@ void main() {
     await settleShell(tester);
     final badge = _home(tester).embedding.badgeFor!(sessionViewId(session));
     expect(badge.dot, SidebarDot.needsYou);
+    await tearDownShell(tester);
+  }, variant: _linux);
+
+  testWidgets('Chat View opens as a tab and splits next to its terminal', (
+    tester,
+  ) async {
+    final h = await pumpShell(tester);
+    final session = await h.open(
+      tester,
+      workstation,
+      const ConnectTarget.tmux('main'),
+    );
+    h.shell.showHome = false;
+    await settleShell(tester);
+    var toTerminal = 0;
+    unawaited(
+      openChatView(
+        context: tester.element(find.byType(DesktopHome)),
+        attention: h.attention,
+        host: session.host,
+        agent: const AgentInfo(
+          id: 's1',
+          name: 'todo-api',
+          state: AgentAttentionState.needsInput,
+          kind: 'claude',
+        ),
+        onOpenTerminal: () => toTerminal += 1,
+      ),
+    );
+    await settleShell(tester);
+    final chat = 'chat:${session.host.id}:s1';
+    expect(_tab(chat), findsOneWidget);
+    expect(find.byType(ChatViewPage), findsOneWidget);
+    // No route was pushed: the chat lives in the shell's pane.
+    expect(find.byType(DesktopHome), findsOneWidget);
+    expect(h.shell.layout.value.focusedView, chat);
+
+    await tester.tap(_tab(chat), buttons: kSecondaryButton);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Split right'));
+    await settleShell(tester);
+    expect(h.shell.layout.value.panes.map((pane) => pane.view), [
+      _view(session.host.id),
+      chat,
+    ]);
+    // The chat's Terminal button hands over to the terminal.
+    await tester.tap(find.text('Terminal'));
+    await tester.pump();
+    expect(toTerminal, 1);
+
+    // Closing the tab closes its pane.
+    await tester.tap(find.byKey(ValueKey('shell-tab-close-$chat')));
+    await settleShell(tester);
+    expect(_tab(chat), findsNothing);
+    expect(h.shell.layout.value.panes.single.view, _view(session.host.id));
+    await tearDownShell(tester);
+  }, variant: _linux);
+
+  testWidgets('the right panel toggles the agents inbox and the preview', (
+    tester,
+  ) async {
+    final h = await pumpShell(tester);
+    await tester.tap(find.byKey(const ValueKey('shell-toggle-agents')));
+    await tester.pump();
+    expect(h.shell.rightPanel, ShellRightPanel.agents);
+    expect(find.byType(AgentAttentionSheet), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('shell-toggle-preview')));
+    await tester.pump();
+    expect(find.byType(AgentAttentionSheet), findsNothing);
+    expect(find.text('Open a session to preview its web app.'), findsOneWidget);
+    await tester.tap(find.byTooltip('Close the panel'));
+    await tester.pump();
+    expect(h.shell.rightPanel, ShellRightPanel.none);
+    // Saved with the rest of the shell.
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(h.store.state!['rightPanel'], 'none');
     await tearDownShell(tester);
   }, variant: _linux);
 }
