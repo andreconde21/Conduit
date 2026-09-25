@@ -155,6 +155,7 @@ class AppBackupService {
       ),
       'menuButtonsEnabled': _themeController.menuButtonsEnabled,
       'remoteClipboardEnabled': _themeController.remoteClipboardEnabled,
+      'pasteImagesAsFiles': _themeController.pasteImagesAsFiles,
       'restoreSessionsOnLaunch': _themeController.restoreSessionsOnLaunch,
       'terminalGestures': _themeController.terminalGestures.toJson(),
       'speechLanguage': _themeController.speechLanguage,
@@ -242,6 +243,10 @@ class AppBackupService {
     final remoteClipboardEnabled = json['remoteClipboardEnabled'];
     if (remoteClipboardEnabled is bool) {
       await _themeController.setRemoteClipboardEnabled(remoteClipboardEnabled);
+    }
+    final pasteImagesAsFiles = json['pasteImagesAsFiles'];
+    if (pasteImagesAsFiles is bool) {
+      await _themeController.setPasteImagesAsFiles(pasteImagesAsFiles);
     }
     final restoreSessionsOnLaunch = json['restoreSessionsOnLaunch'];
     if (restoreSessionsOnLaunch is bool) {

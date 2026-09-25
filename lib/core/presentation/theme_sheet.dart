@@ -474,6 +474,30 @@ class _TerminalAppearanceControls extends StatelessWidget {
           ),
           clipBehavior: Clip.antiAlias,
           child: SwitchListTile(
+            key: const ValueKey('paste-images-as-files'),
+            secondary: const Icon(Icons.image_outlined),
+            title: const Text('Paste images as uploaded files'),
+            subtitle: Text(
+              'Pasting an image uploads it to the machine\'s share inbox '
+              'and pastes its path, which Claude Code reads as an image. '
+              'Off: paste text only.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+            value: controller.pasteImagesAsFiles,
+            onChanged: controller.setPasteImagesAsFiles,
+          ),
+        ),
+        const SizedBox(height: 14),
+        Material(
+          color: colorScheme.surface,
+          shape: RoundedRectangleBorder(
+            side: BorderSide(color: colorScheme.outlineVariant),
+            borderRadius: AppTheme.borderRadius,
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: SwitchListTile(
             key: const ValueKey('restore-sessions-switch'),
             secondary: const Icon(Icons.restore_page_rounded),
             title: const Text('Restore sessions on launch'),

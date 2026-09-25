@@ -38,6 +38,7 @@ class ThemeController extends ChangeNotifier {
   List<TerminalPillItem> _terminalPillItems = defaultTerminalPillItems;
   bool _menuButtonsEnabled = true;
   bool _remoteClipboardEnabled = true;
+  bool _pasteImagesAsFiles = true;
   bool _restoreSessionsOnLaunch = true;
   TerminalGesturePreferences _terminalGestures =
       TerminalGesturePreferences.defaults;
@@ -94,6 +95,9 @@ class ThemeController extends ChangeNotifier {
   /// Whether OSC 52 copies from the remote reach the phone clipboard.
   bool get remoteClipboardEnabled => _remoteClipboardEnabled;
 
+  /// Whether a pasted image is uploaded to the host and pasted as a path.
+  bool get pasteImagesAsFiles => _pasteImagesAsFiles;
+
   /// Whether the open sessions come back after the app restarts.
   bool get restoreSessionsOnLaunch => _restoreSessionsOnLaunch;
   TerminalGesturePreferences get terminalGestures => _terminalGestures;
@@ -122,6 +126,7 @@ class ThemeController extends ChangeNotifier {
     _terminalPillItems = List.of(preferences.terminalPillItems);
     _menuButtonsEnabled = preferences.menuButtonsEnabled;
     _remoteClipboardEnabled = preferences.remoteClipboardEnabled;
+    _pasteImagesAsFiles = preferences.pasteImagesAsFiles;
     _restoreSessionsOnLaunch = preferences.restoreSessionsOnLaunch;
     _terminalGestures = preferences.terminalGestures;
     _speechLanguage = preferences.speechLanguage;
@@ -353,6 +358,15 @@ class ThemeController extends ChangeNotifier {
     await _save();
   }
 
+  Future<void> setPasteImagesAsFiles(bool enabled) async {
+    if (_pasteImagesAsFiles == enabled) {
+      return;
+    }
+    _pasteImagesAsFiles = enabled;
+    notifyListeners();
+    await _save();
+  }
+
   Future<void> setRestoreSessionsOnLaunch(bool enabled) async {
     if (_restoreSessionsOnLaunch == enabled) {
       return;
@@ -412,6 +426,7 @@ class ThemeController extends ChangeNotifier {
         speechLanguage: _speechLanguage,
         voice: _voice,
         remoteClipboardEnabled: _remoteClipboardEnabled,
+        pasteImagesAsFiles: _pasteImagesAsFiles,
         restoreSessionsOnLaunch: _restoreSessionsOnLaunch,
         omarchySyncHostId: _omarchySyncHostId,
         omarchySyncedTheme: _omarchySyncedTheme,
