@@ -51,7 +51,7 @@ void main() {
     agentMonitor: AgentMonitorKind.companion,
   );
 
-  testWidgets('the Agents sheet offers Chat for live companion agents', (
+  testWidgets('the Agents sheet row opens the chat for its agent', (
     tester,
   ) async {
     final (controller, _) = await monitor(tester, companionHost());
@@ -68,9 +68,20 @@ void main() {
       ),
     );
     await tester.pump();
-    // The ended session gets no Chat button.
-    expect(find.widgetWithText(TextButton, 'Chat'), findsOneWidget);
-    await tester.tap(find.widgetWithText(TextButton, 'Chat'));
+    final apiRow = find.ancestor(
+      of: find.text('api'),
+      matching: find.byWidgetPredicate(
+        (widget) =>
+            widget.key is ValueKey<String> &&
+            (widget.key! as ValueKey<String>).value.startsWith('agent-row-'),
+      ),
+    );
+    final chat = find.descendant(
+      of: apiRow,
+      matching: find.widgetWithText(TextButton, 'Chat'),
+    );
+    expect(chat, findsOneWidget);
+    await tester.tap(chat);
     expect(opened, ['h/s-1']);
   });
 
