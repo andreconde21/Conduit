@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:conduit/core/app_failure.dart';
+import 'package:conduit/core/theme/app_palette.dart';
+import 'package:conduit/core/theme/theme_preferences_repository.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sessions/data/secure_session_snapshot_repository.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
@@ -11,6 +13,7 @@ import 'package:conduit/features/terminal/domain/ssh_terminal_repository.dart';
 import 'package:conduit/features/terminal/domain/ssh_terminal_session.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -182,6 +185,19 @@ void main() {
       );
       expect(await secure.load(), SessionSnapshot.empty);
     });
+  });
+
+  test('the restore setting defaults on and persists', () async {
+    final repository = ThemePreferencesRepository(InMemorySecureStorage());
+    expect((await repository.load()).restoreSessionsOnLaunch, isTrue);
+    await repository.save(
+      const ThemePreferences(
+        themeMode: ThemeMode.dark,
+        palette: AppPalette.everforest,
+        restoreSessionsOnLaunch: false,
+      ),
+    );
+    expect((await repository.load()).restoreSessionsOnLaunch, isFalse);
   });
 
   group('saving', () {

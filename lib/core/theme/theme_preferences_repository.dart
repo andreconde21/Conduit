@@ -29,6 +29,7 @@ class ThemePreferences {
     this.terminalGestures = TerminalGesturePreferences.defaults,
     this.speechLanguage = '',
     this.remoteClipboardEnabled = true,
+    this.restoreSessionsOnLaunch = true,
     this.omarchySyncHostId,
     this.omarchySyncedTheme,
   });
@@ -74,6 +75,10 @@ class ThemePreferences {
   /// clipboard. On by default, like most desktop terminals.
   final bool remoteClipboardEnabled;
 
+  /// Whether the open sessions come back after the app restarts (their
+  /// list is kept in secure storage). On by default.
+  final bool restoreSessionsOnLaunch;
+
   /// The saved machine whose Omarchy theme the app follows; null when the
   /// app uses [palette].
   final String? omarchySyncHostId;
@@ -117,6 +122,8 @@ class ThemePreferencesRepository {
   static const _speechLanguageKey = 'conduit.speech_language.v1';
   static const _remoteClipboardEnabledKey =
       'conduit.remote_clipboard_enabled.v1';
+  static const _restoreSessionsOnLaunchKey =
+      'conductore.restore_sessions_on_launch.v1';
 
   final FlutterSecureStorage _storage;
 
@@ -175,6 +182,9 @@ class ThemePreferencesRepository {
     final rawRemoteClipboardEnabled = await _storage.read(
       key: _remoteClipboardEnabledKey,
     );
+    final rawRestoreSessionsOnLaunch = await _storage.read(
+      key: _restoreSessionsOnLaunchKey,
+    );
     final terminalFontSize = double.tryParse(rawTerminalFontSize ?? '');
     final terminalKeyboardRows = _appendUnseenBuiltIns(
       _parseTerminalKeyboardRows(
@@ -217,6 +227,9 @@ class ThemePreferencesRepository {
       remoteClipboardEnabled:
           rawRemoteClipboardEnabled == null ||
           rawRemoteClipboardEnabled == 'true',
+      restoreSessionsOnLaunch:
+          rawRestoreSessionsOnLaunch == null ||
+          rawRestoreSessionsOnLaunch == 'true',
       omarchySyncHostId: (rawOmarchySyncHost?.trim().isEmpty ?? true)
           ? null
           : rawOmarchySyncHost!.trim(),
@@ -331,6 +344,10 @@ class ThemePreferencesRepository {
     await _storage.write(
       key: _remoteClipboardEnabledKey,
       value: preferences.remoteClipboardEnabled.toString(),
+    );
+    await _storage.write(
+      key: _restoreSessionsOnLaunchKey,
+      value: preferences.restoreSessionsOnLaunch.toString(),
     );
     await _storage.write(
       key: _omarchySyncHostKey,

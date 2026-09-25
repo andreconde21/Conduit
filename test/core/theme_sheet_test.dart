@@ -92,6 +92,46 @@ void main() {
     expect(controller.terminalMouseInput, isTrue);
   });
 
+  testWidgets('appearance sheet toggles restoring sessions on launch', (
+    tester,
+  ) async {
+    final controller = ThemeController(InMemoryThemePreferences());
+    await controller.load();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) {
+            return Scaffold(
+              body: Center(
+                child: FilledButton(
+                  onPressed: () {
+                    showThemeSheet(context: context, controller: controller);
+                  },
+                  child: const Text('Appearance'),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Appearance'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Restore sessions on launch'),
+      120,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.pumpAndSettle();
+
+    expect(controller.restoreSessionsOnLaunch, isTrue);
+    await tester.tap(find.text('Restore sessions on launch'));
+    await tester.pumpAndSettle();
+    expect(controller.restoreSessionsOnLaunch, isFalse);
+  });
+
   testWidgets('appearance sheet switches the toolbar style', (tester) async {
     final controller = ThemeController(InMemoryThemePreferences());
     await controller.load();
