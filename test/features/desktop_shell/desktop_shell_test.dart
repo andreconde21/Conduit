@@ -615,4 +615,72 @@ void main() {
     expect(h.store.state!['rightPanel'], 'none');
     await tearDownShell(tester);
   }, variant: _linux);
+
+  testWidgets('the terminal shortcuts keep working inside the shell', (
+    tester,
+  ) async {
+    final h = await pumpShell(tester);
+    final a = await h.open(
+      tester,
+      workstation,
+      const ConnectTarget.tmux('main'),
+    );
+    final b = await h.open(tester, buildBox, const ConnectTarget.tmux('ci'));
+    h.shell.showHome = false;
+    await settleShell(tester);
+    expect(h.workspace.activeSession, b);
+
+    // Ctrl+Tab and Alt+1 switch sessions in the focused pane.
+    await _keys(tester, [
+      LogicalKeyboardKey.controlLeft,
+    ], LogicalKeyboardKey.tab);
+    expect(h.workspace.activeSession, a);
+    await _keys(tester, [
+      LogicalKeyboardKey.altLeft,
+    ], LogicalKeyboardKey.digit2);
+    expect(h.workspace.activeSession, b);
+    expect(h.shell.layout.value.focusedView, _view(b.host.id));
+
+    // Zoom.
+    final size = h.theme.terminalFontSize;
+    await _keys(tester, [
+      LogicalKeyboardKey.controlLeft,
+    ], LogicalKeyboardKey.equal);
+    await tester.pump();
+    expect(h.theme.terminalFontSize, greaterThan(size));
+
+    // F11 hides the sidebar with the terminal's chrome.
+    await _keys(tester, const [], LogicalKeyboardKey.f11);
+    expect(find.byKey(const ValueKey('shell-sidebar')), findsNothing);
+    await _keys(tester, const [], LogicalKeyboardKey.f11);
+    expect(find.byKey(const ValueKey('shell-sidebar')), findsOneWidget);
+
+    // The quick switcher opens once (the shell's, not the page's too).
+    await _keys(tester, [
+      LogicalKeyboardKey.controlLeft,
+      LogicalKeyboardKey.shiftLeft,
+    ], LogicalKeyboardKey.keyK);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('quick-switcher')), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+
+    // Ctrl+Shift+W closes the focused session (tmux detaches, no ask);
+    // the last one leaves the dashboard.
+    await _keys(tester, [
+      LogicalKeyboardKey.controlLeft,
+      LogicalKeyboardKey.shiftLeft,
+    ], LogicalKeyboardKey.keyW);
+    await settleShell(tester);
+    expect(h.workspace.sessions, [a]);
+    await _keys(tester, [
+      LogicalKeyboardKey.controlLeft,
+      LogicalKeyboardKey.shiftLeft,
+    ], LogicalKeyboardKey.keyW);
+    await settleShell(tester);
+    expect(h.workspace.sessions, isEmpty);
+    expect(_home(tester).terminalVisible, isFalse);
+    expect(find.byType(DesktopHome), findsOneWidget);
+    await tearDownShell(tester);
+  }, variant: _linux);
 }

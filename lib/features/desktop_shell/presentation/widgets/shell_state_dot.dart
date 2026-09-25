@@ -54,7 +54,8 @@ class ShellStateDot extends StatelessWidget {
   }
 }
 
-/// The unread marker: a small accent dot, with the count when above one.
+/// The unread marker: a small dot in the text colour (state dots carry
+/// the status colours), with the count when above one.
 class ShellUnreadBadge extends StatelessWidget {
   const ShellUnreadBadge({required this.count, super.key});
 
@@ -64,34 +65,38 @@ class ShellUnreadBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     if (count <= 0) return const SizedBox.shrink();
     final palette = AppPalette.of(context);
+    final color = palette.foreground;
     if (count == 1) {
-      return Container(
-        key: const ValueKey('unread-dot'),
-        width: 7,
-        height: 7,
-        decoration: BoxDecoration(
-          color: palette.accent,
-          shape: BoxShape.circle,
+      return Semantics(
+        label: 'unread',
+        child: Container(
+          key: const ValueKey('unread-dot'),
+          width: 7,
+          height: 7,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
       );
     }
-    return Container(
-      key: const ValueKey('unread-count'),
-      padding: const EdgeInsets.symmetric(horizontal: 5),
-      constraints: const BoxConstraints(minWidth: 16),
-      height: 16,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: palette.accent,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Text(
-        count > 99 ? '99+' : '$count',
-        style: TextStyle(
-          color: palette.onAccent,
-          fontSize: 10,
-          fontWeight: FontWeight.w800,
-          height: 1.1,
+    return Semantics(
+      label: '$count unread',
+      child: Container(
+        key: const ValueKey('unread-count'),
+        padding: const EdgeInsets.symmetric(horizontal: 5),
+        constraints: const BoxConstraints(minWidth: 16),
+        height: 16,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          count > 99 ? '99+' : '$count',
+          style: TextStyle(
+            color: palette.canvas,
+            fontSize: 10,
+            fontWeight: FontWeight.w800,
+            height: 1.1,
+          ),
         ),
       ),
     );

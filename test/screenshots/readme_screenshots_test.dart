@@ -11,6 +11,7 @@ import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/core/theme/theme_preferences_repository.dart';
 import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
 import 'package:conduit/features/agent_attention/data/herdr_attention_provider.dart';
+import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
@@ -18,11 +19,14 @@ import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart'
 import 'package:conduit/features/backup/data/app_backup_service.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_controller.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_page.dart';
+import 'package:conduit/features/chat_view/presentation/chat_view_presenter.dart';
 import 'package:conduit/features/companion_setup/data/companion_bundle.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_controller.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_page.dart';
 import 'package:conduit/features/desktop_shell/data/desktop_shell_store.dart';
 import 'package:conduit/features/desktop_shell/domain/shell_layout.dart';
+import 'package:conduit/features/desktop_shell/domain/sidebar_prefs.dart';
+import 'package:conduit/features/desktop_shell/presentation/desktop_home.dart';
 import 'package:conduit/features/desktop_shell/presentation/desktop_shell_controller.dart';
 import 'package:conduit/features/hosts/domain/home_preferences.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
@@ -1236,6 +1240,103 @@ void main() {
       );
       await pumpFrames(tester, 6);
       await saveShot(tester, '23-desktop-shell-split', pixelRatio: 1);
+      await tearDownPage(tester);
+    });
+  });
+
+  testWidgets('24 desktop shell chat split', (tester) async {
+    await asDesktop(() async {
+      final shell = await pumpShellHome(tester);
+      // A group, a pin and a couple of unread rows in the sidebar.
+      shell.updatePrefs(
+        (prefs) => prefs
+            .addGroup(
+              const SidebarGroup(
+                id: 'clients',
+                name: 'Clients',
+                machineIds: ['build-box'],
+              ),
+            )
+            .togglePin('m/workstation/h/w3'),
+      );
+      shell
+        ..markUnread('m/workstation/h/w2')
+        ..markUnread('m/build-box/t/ci');
+      final thread = [
+        stamped(
+          userLine('u1', 'Add a due date to todos and cover it with tests'),
+          const Duration(minutes: 12),
+        ),
+        assistantLine('a1', [
+          text(
+            "I'll add an optional **`dueDate`** to the todo schema, then "
+            'validate it as an ISO date and sort overdue todos first.',
+          ),
+          toolUse('t1', 'Bash', {
+            'command': 'npm test -- due-date',
+            'description': 'Run the due date tests',
+          }),
+        ]),
+      ];
+      final controller = ChatViewController(
+        runner: ScriptedAgentCommandRunner([
+          ok(
+            livePage(
+              thread,
+              state: 'needs_permission',
+              started: const Duration(minutes: 12),
+              pending: [
+                {
+                  'id': 'req-1',
+                  'toolName': 'Bash',
+                  'summary': 'npm test -- due-date',
+                  'toolInput': {
+                    'command': 'npm test -- due-date',
+                    'description': 'Run the due date tests',
+                  },
+                },
+              ],
+            ),
+          ),
+        ]),
+        sessionId: 's-api',
+        fallbackName: 'todo-api',
+        decide: (_, _) async {},
+        pollInterval: const Duration(days: 1),
+      );
+      final home = tester.state<DesktopHomeState>(find.byType(DesktopHome));
+      final api = const ConnectTarget.herdr(
+        workspaceId: 'w1',
+        label: 'api',
+      ).apply(workstation);
+      home.embedding.host!.presentChat(
+        ChatViewRequest(
+          host: api,
+          agent: const AgentInfo(
+            id: 's-api',
+            name: 'todo-api',
+            state: AgentAttentionState.needsInput,
+            kind: 'claude',
+          ),
+          controller: controller,
+          onOpenTerminal: () {},
+          onDispose: () {},
+        ),
+      );
+      await pumpFrames(tester, 4);
+      final views = home.embedding.host!.viewIds.toSet();
+      shell.editLayout(
+        views,
+        (layout) => layout
+            .showIn(layout.focusedPane.id, 'session:${api.id}')
+            .split(
+              layout.focusedPane.id,
+              ShellEdge.right,
+              'chat:${api.id}:s-api',
+            ),
+      );
+      await pumpFrames(tester, 8);
+      await saveShot(tester, '24-desktop-shell-chat-split', pixelRatio: 1);
       await tearDownPage(tester);
     });
   });

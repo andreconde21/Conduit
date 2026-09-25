@@ -218,15 +218,15 @@ class _ShellTabState extends State<_ShellTab> {
         mainAxisSize: MainAxisSize.min,
         children: [
           tab.leading,
-          if (tab.dot != SidebarDot.none) ...[
-            const SizedBox(width: 5),
-            ShellStateDot(dot: tab.dot, size: 7),
-          ],
           const SizedBox(width: 6),
           Flexible(child: label),
           if (tab.unread && !focused) ...[
             const SizedBox(width: 5),
             const ShellUnreadBadge(count: 1),
+          ],
+          if (tab.dot != SidebarDot.none) ...[
+            const SizedBox(width: 6),
+            ShellStateDot(dot: tab.dot, size: 7),
           ],
           if (tab.dirty) ...[
             const SizedBox(width: 4),
