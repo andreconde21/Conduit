@@ -1,9 +1,10 @@
 import 'package:conduit/core/theme/app_palette.dart';
-import 'package:conduit/features/terminal/presentation/gestures/terminal_gesture_layer.dart';
+import 'package:conduit/features/terminal/presentation/gestures/terminal_gesture_recognizers.dart';
 import 'package:conduit/features/terminal/presentation/terminal_file_tabs_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:conduit/features/terminal/presentation/widgets/session_tabs.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 /// Per-session tools that open as tabs beside the session: the git diff of
@@ -26,8 +27,9 @@ enum TerminalHeaderAction {
 /// menu: chat view and the session tools (git diff, live preview), then
 /// reconnect, fullscreen and new session, then close session.
 ///
-/// A downward swipe on the row opens the session grid, like the swipe from
-/// the terminal's top strip.
+/// Swipes on the row, like an app switcher: up or down opens the quick
+/// switcher (the grid button's action, and the swipe from the terminal's
+/// top strip), left or right moves to the next or previous open session.
 class TerminalHeader extends StatelessWidget {
   const TerminalHeader({
     required this.workspace,
@@ -49,6 +51,9 @@ class TerminalHeader extends StatelessWidget {
     this.onOpenSessionTool,
     this.onOpenSessionGrid,
     this.swipeDownOpensSessionGrid = true,
+    this.onSwipeSession,
+    this.onSessionActivated,
+    this.onSessionLongPress,
     super.key,
   });
 
@@ -90,19 +95,36 @@ class TerminalHeader extends StatelessWidget {
   /// null hides those entries.
   final ValueChanged<SessionTool>? onOpenSessionTool;
 
-  /// Opens the session home grid; null hides the button.
+  /// Opens the session overview (the quick switcher); null hides the
+  /// button.
   final VoidCallback? onOpenSessionGrid;
 
-  /// Whether a downward swipe on the row opens the session grid.
+  /// Whether swipes on the row work: up or down opens the overview, left
+  /// or right switches sessions.
   final bool swipeDownOpensSessionGrid;
+
+  /// Switches to the next (1) or previous (-1) open session after a
+  /// horizontal swipe on the row; null turns that swipe off.
+  final ValueChanged<int>? onSwipeSession;
+
+  /// A tap on a session's tab made it active.
+  final ValueChanged<TerminalSessionController>? onSessionActivated;
+
+  /// Long-press on a session's tab (its "Open in" choice).
+  final ValueChanged<TerminalSessionController>? onSessionLongPress;
 
   @override
   Widget build(BuildContext context) {
     final foreground = palette.foregroundFor(brightness);
     final session = activeSession;
-    return TerminalHeaderSwipeArea(
+    final swipeSessions =
+        swipeDownOpensSessionGrid &&
+        onSwipeSession != null &&
+        workspace.sessions.length > 1;
+    return TopRowSwipeArea(
       enabled: swipeDownOpensSessionGrid,
-      onSwipeDown: onOpenSessionGrid,
+      onSwipeVertical: onOpenSessionGrid,
+      onSwipeHorizontal: swipeSessions ? onSwipeSession : null,
       child: Container(
         height: height,
         decoration: BoxDecoration(
@@ -130,11 +152,15 @@ class TerminalHeader extends StatelessWidget {
                 activeFileTab: activeFileTab,
                 onFileTabSelected: onFileTabSelected,
                 onFileTabClosed: onFileTabClosed,
+                onSessionActivated: onSessionActivated,
+                onSessionLongPress: onSessionLongPress,
+                touchScrolls: !swipeSessions,
               ),
             ),
             if (onOpenSessionGrid != null)
               _RowButton(
                 tooltip: 'Sessions',
+                key: const ValueKey('terminal-open-switcher'),
                 color: foreground,
                 icon: const Icon(Icons.grid_view_rounded, size: 19),
                 onPressed: onOpenSessionGrid!,
@@ -176,12 +202,97 @@ class TerminalHeader extends StatelessWidget {
   }
 }
 
+/// The terminal row's swipes. A vertical swipe either way runs
+/// [onSwipeVertical]; a horizontal one runs [onSwipeHorizontal] with 1 for
+/// a swipe to the left (the next session, like turning a page) and -1 for
+/// one to the right. Only touch and stylus swipe: a mouse drags and
+/// scrolls as usual.
+class TopRowSwipeArea extends StatefulWidget {
+  const TopRowSwipeArea({
+    required this.child,
+    this.onSwipeVertical,
+    this.onSwipeHorizontal,
+    this.enabled = true,
+    super.key,
+  });
+
+  final VoidCallback? onSwipeVertical;
+  final ValueChanged<int>? onSwipeHorizontal;
+  final bool enabled;
+  final Widget child;
+
+  /// Travel that makes a swipe, in logical pixels.
+  static const minimumDistance = TerminalSwipeRecognizer.minimumDistance;
+
+  /// A quick flick counts from half the distance.
+  static const flickVelocity = 400.0;
+
+  static const _devices = {
+    PointerDeviceKind.touch,
+    PointerDeviceKind.stylus,
+    PointerDeviceKind.invertedStylus,
+    PointerDeviceKind.unknown,
+  };
+
+  @override
+  State<TopRowSwipeArea> createState() => _TopRowSwipeAreaState();
+}
+
+class _TopRowSwipeAreaState extends State<TopRowSwipeArea> {
+  double _travel = 0;
+
+  bool _isSwipe(double travel, double velocity) =>
+      travel.abs() >= TopRowSwipeArea.minimumDistance ||
+      (travel.abs() >= TopRowSwipeArea.minimumDistance / 2 &&
+          velocity.abs() >= TopRowSwipeArea.flickVelocity &&
+          velocity.sign == travel.sign);
+
+  @override
+  Widget build(BuildContext context) {
+    final vertical = widget.onSwipeVertical;
+    final horizontal = widget.onSwipeHorizontal;
+    if (!widget.enabled || (vertical == null && horizontal == null)) {
+      return widget.child;
+    }
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      supportedDevices: TopRowSwipeArea._devices,
+      onVerticalDragStart: vertical == null ? null : (_) => _travel = 0,
+      onVerticalDragUpdate: vertical == null
+          ? null
+          : (details) => _travel += details.delta.dy,
+      onVerticalDragEnd: vertical == null
+          ? null
+          : (details) {
+              if (_isSwipe(_travel, details.velocity.pixelsPerSecond.dy)) {
+                vertical();
+              }
+              _travel = 0;
+            },
+      onHorizontalDragStart: horizontal == null ? null : (_) => _travel = 0,
+      onHorizontalDragUpdate: horizontal == null
+          ? null
+          : (details) => _travel += details.delta.dx,
+      onHorizontalDragEnd: horizontal == null
+          ? null
+          : (details) {
+              if (_isSwipe(_travel, details.velocity.pixelsPerSecond.dx)) {
+                horizontal(_travel < 0 ? 1 : -1);
+              }
+              _travel = 0;
+            },
+      child: widget.child,
+    );
+  }
+}
+
 class _RowButton extends StatelessWidget {
   const _RowButton({
     required this.tooltip,
     required this.color,
     required this.icon,
     required this.onPressed,
+    super.key,
   });
 
   final String tooltip;

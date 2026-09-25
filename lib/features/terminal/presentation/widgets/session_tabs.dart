@@ -5,6 +5,7 @@ import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/terminal/presentation/terminal_file_tabs_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 /// Compact, horizontally scrolling tabs for the open sessions and file
@@ -25,6 +26,9 @@ class SessionTabs extends StatefulWidget {
     required this.activeFileTab,
     required this.onFileTabSelected,
     required this.onFileTabClosed,
+    this.onSessionActivated,
+    this.onSessionLongPress,
+    this.touchScrolls = true,
     super.key,
   });
 
@@ -37,6 +41,18 @@ class SessionTabs extends StatefulWidget {
   final TerminalFileTab? activeFileTab;
   final ValueChanged<TerminalFileTab> onFileTabSelected;
   final ValueChanged<TerminalFileTab> onFileTabClosed;
+
+  /// Called after a tap on another session's tab made it the active one (a
+  /// user choice, as opposed to a close moving the focus).
+  final ValueChanged<TerminalSessionController>? onSessionActivated;
+
+  /// Long-press on a session's tab; null leaves long-press to the tooltip.
+  final ValueChanged<TerminalSessionController>? onSessionLongPress;
+
+  /// Whether a touch drag scrolls the strip. Off while a horizontal swipe
+  /// on the row switches sessions: the strip then follows the active tab,
+  /// and a mouse or trackpad still scrolls it.
+  final bool touchScrolls;
 
   /// Height of one tab chip.
   static const tabHeight = 30.0;
@@ -104,7 +120,7 @@ class _SessionTabsState extends State<SessionTabs> {
     final sessions = widget.workspace.sessions;
     final fileTabs = widget.fileTabs;
     final tabCount = sessions.length + fileTabs.length;
-    return SizedBox(
+    final list = SizedBox(
       height: SessionTabs.tabHeight,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
@@ -154,7 +170,11 @@ class _SessionTabsState extends State<SessionTabs> {
             onTap: () {
               widget.workspace.activate(session);
               widget.onChanged();
+              if (!selected) widget.onSessionActivated?.call(session);
             },
+            onLongPress: widget.onSessionLongPress == null
+                ? null
+                : () => widget.onSessionLongPress!(session),
             onClose: () async {
               await widget.workspace.close(session);
               widget.onChanged();
@@ -166,6 +186,16 @@ class _SessionTabsState extends State<SessionTabs> {
           );
         },
       ),
+    );
+    if (widget.touchScrolls) return list;
+    return ScrollConfiguration(
+      behavior: ScrollConfiguration.of(context).copyWith(
+        dragDevices: const {
+          PointerDeviceKind.mouse,
+          PointerDeviceKind.trackpad,
+        },
+      ),
+      child: list,
     );
   }
 }
@@ -216,6 +246,7 @@ class _Tab extends StatelessWidget {
     required this.brightness,
     required this.onTap,
     required this.onClose,
+    this.onLongPress,
     this.dirty = false,
     super.key,
   });
@@ -229,6 +260,7 @@ class _Tab extends StatelessWidget {
   final Brightness brightness;
   final VoidCallback onTap;
   final VoidCallback onClose;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -244,11 +276,15 @@ class _Tab extends StatelessWidget {
     return Tooltip(
       message: tooltip,
       waitDuration: const Duration(milliseconds: 600),
+      // Long-press belongs to the tab's menu when it has one (hover still
+      // shows the tooltip).
+      triggerMode: onLongPress == null ? null : TooltipTriggerMode.manual,
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           borderRadius: BorderRadius.circular(AppTheme.radius),
           onTap: onTap,
+          onLongPress: onLongPress,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 140),
             constraints: const BoxConstraints(maxWidth: 176),

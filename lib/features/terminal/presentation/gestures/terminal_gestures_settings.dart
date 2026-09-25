@@ -178,10 +178,9 @@ class TerminalGesturesSettings extends StatelessWidget {
           const Divider(height: 1),
           SwitchListTile(
             secondary: const Icon(Icons.grid_view_rounded),
-            title: const Text('Swipe down opens sessions'),
+            title: const Text('Top-row swipes switch sessions'),
             subtitle: Text(
-              'Swipe down from the top of the terminal to open the session '
-              'grid.',
+              'Swipe down from the top to open the quick switcher.',
               style: captionStyle,
             ),
             value: preferences.headerSwipeOpensSessions,
