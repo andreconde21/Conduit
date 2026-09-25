@@ -31,6 +31,7 @@ import 'package:conduit/features/sessions/domain/remote_session_listing.dart';
 import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
 import 'package:conduit/features/sessions/presentation/session_grid_page.dart'
     show summarizeAgentState;
+import 'package:conduit/features/sessions/presentation/session_restore_controller.dart';
 import 'package:conduit/features/sftp/domain/file_export.dart';
 import 'package:conduit/features/sftp/domain/sftp_bookmarks_repository.dart';
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
@@ -75,6 +76,7 @@ class HostsPage extends StatefulWidget {
     required this.fileExport,
     this.connectFlow,
     this.homeBoards,
+    this.sessionRestore,
     this.homePreferences = const SecureHomePreferencesRepository(
       FlutterSecureStorage(),
     ),
@@ -105,6 +107,10 @@ class HostsPage extends StatefulWidget {
   /// machines. When null the page builds them from [connectFlow]'s runner
   /// factory (and shows none without a connect flow).
   final HomeBoards? homeBoards;
+
+  /// Brings back the sessions of the last app run and keeps their list;
+  /// null leaves every start empty.
+  final SessionRestoreController? sessionRestore;
 
   /// Remembers the machine filter and the view modes.
   final HomePreferencesRepository homePreferences;
@@ -182,7 +188,11 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     widget.hostsController.addListener(_syncBoards);
     widget.workspaceController.addListener(_syncBoards);
     flow?.terminalRequests.addListener(_handleTerminalRequest);
+    widget.sessionRestore?.addListener(_handleRestoreChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      // The page exists only while unlocked: this is the app start (or the
+      // unlock after a lock) the saved sessions come back on.
+      unawaited(widget.sessionRestore?.restore());
       unawaited(widget.hostsController.load());
       unawaited(widget.localShellController.refresh());
       unawaited(_loadPreferences());
@@ -209,6 +219,9 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _appResumed = state == AppLifecycleState.resumed;
+    // The process may be killed while in the background: write the
+    // session list now rather than after the debounce.
+    if (!_appResumed) unawaited(widget.sessionRestore?.flush());
     _syncVisibility();
   }
 
@@ -218,6 +231,8 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     widget.hostsController.removeListener(_syncBoards);
     widget.workspaceController.removeListener(_syncBoards);
     widget.connectFlow?.terminalRequests.removeListener(_handleTerminalRequest);
+    widget.sessionRestore?.removeListener(_handleRestoreChanged);
+    widget.sessionRestore?.setHomeVisible(false);
     widget.promptCoordinator.removeListener(_handlePromptChanged);
     widget.promptCoordinator.rejectAll();
     _previewTimer?.cancel();
@@ -245,10 +260,15 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     _syncBoards();
   }
 
+  void _handleRestoreChanged() {
+    if (mounted) setState(() {});
+  }
+
   void _syncVisibility() {
     if (!mounted) return;
     final visible = _appResumed && _routeVisible;
     _boards?.setVisible(visible);
+    widget.sessionRestore?.setHomeVisible(visible);
     if (visible) {
       // Back from the terminal a first connection may have trusted a key.
       unawaited(_loadTrustedEndpoints());
@@ -498,6 +518,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
           session.host.id,
         ),
         machineName: session.host.isLocal ? 'This device' : machine?.name ?? '',
+        restoreNote: widget.sessionRestore?.noteFor(session),
       );
     }
 
@@ -1373,6 +1394,8 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
   }
 
   Future<void> _lock() async {
+    // Locking closes every session; unlocking brings them back.
+    await widget.sessionRestore?.holdForLock();
     await widget.workspaceController.closeAll();
     widget.lockController.lock();
   }

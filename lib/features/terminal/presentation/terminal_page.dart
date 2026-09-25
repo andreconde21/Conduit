@@ -1244,6 +1244,8 @@ class _TerminalPageState extends State<TerminalPage> {
                                       onOpenAgentPanel: _agentPanelOpener(),
                                       child: TerminalSurface(
                                         session: session,
+                                        autoConnect: widget.workspace
+                                            .mayAutoConnect(session),
                                         palette: palette,
                                         brightness: brightness,
                                         fontFamily: widget

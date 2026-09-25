@@ -61,6 +61,7 @@ class HomeSessionInfo {
     required this.agentState,
     this.multiplexer,
     this.machineName = '',
+    this.restoreNote,
   });
 
   /// What the session is attached to (null for a plain session).
@@ -79,6 +80,11 @@ class HomeSessionInfo {
   /// The saved machine's name (empty when unknown).
   final String machineName;
 
+  /// For a session brought back from the last app run and not connected
+  /// yet: what happens next ("Reconnecting…", "Tap to reconnect", a plain
+  /// shell that ended). Shown instead of the screen.
+  final String? restoreNote;
+
   bool get isHerdr => multiplexer == MultiplexerKind.herdr;
 
   /// Builds the info for [session]. [workspaces] (the home board of the
@@ -90,6 +96,7 @@ class HomeSessionInfo {
     List<HomeBoardWorkspace> workspaces = const [],
     AgentAttentionState? agentState,
     String machineName = '',
+    String? restoreNote,
   }) {
     final target = ConnectTarget.fromSessionHostId(session.host.id);
     var label = '';
@@ -125,6 +132,7 @@ class HomeSessionInfo {
       agentState: agentState ?? boardState,
       multiplexer: multiplexer,
       machineName: machineName,
+      restoreNote: restoreNote,
     );
   }
 
@@ -267,7 +275,7 @@ class HomeSessionTile extends StatelessWidget {
       button: true,
       label: [
         session.title,
-        statusLabel(session.status),
+        info.restoreNote ?? statusLabel(session.status),
         if (showsAgentState(state)) AgentStateChip.labelFor(state!),
       ].join(', '),
       child: Column(
@@ -297,13 +305,22 @@ class HomeSessionTile extends StatelessWidget {
                       top: 30,
                       child: Padding(
                         padding: const EdgeInsets.fromLTRB(6, 0, 6, 6),
-                        child: LiveTerminalPreview(
-                          preview: preview,
-                          theme: terminalTheme,
-                          fontFamily: fontFamily,
-                          placeholder: placeholderFor(session.status),
-                          placeholderColor: muted,
-                        ),
+                        child: info.restoreNote != null
+                            ? Center(
+                                key: const ValueKey('home-tile-restore-note'),
+                                child: Text(
+                                  info.restoreNote!,
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(color: muted, fontSize: 11),
+                                ),
+                              )
+                            : LiveTerminalPreview(
+                                preview: preview,
+                                theme: terminalTheme,
+                                fontFamily: fontFamily,
+                                placeholder: placeholderFor(session.status),
+                                placeholderColor: muted,
+                              ),
                       ),
                     ),
                     if (showsAgentState(state))
@@ -857,12 +874,13 @@ class HomeSessionRow extends StatelessWidget {
     final state = info.agentState;
     final attention = state != null && state.needsAttention;
     final tail = tailOf(session);
-    final placeholder = HomeSessionTile.placeholderFor(session.status);
+    final placeholder =
+        info.restoreNote ?? HomeSessionTile.placeholderFor(session.status);
     return Semantics(
       button: true,
       label: [
         session.title,
-        HomeSessionTile.statusLabel(session.status),
+        info.restoreNote ?? HomeSessionTile.statusLabel(session.status),
         if (showsAgentState(state)) AgentStateChip.labelFor(state!),
       ].join(', '),
       child: Material(

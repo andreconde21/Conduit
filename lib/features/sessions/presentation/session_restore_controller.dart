@@ -191,6 +191,8 @@ class SessionRestoreController extends ChangeNotifier {
         target: entry.target,
       );
       if (entry.customTitle != null) session.rename(entry.customTitle);
+      // Opening the terminal on one restored tab must not connect them all.
+      _workspace.holdUntilActive(session);
       final mode = modeFor(host, entry.target);
       _restoredSessions[session] = _RestoredSession(mode);
       if (mode == RestoredSessionMode.automatic) automatic.add(session);
@@ -232,6 +234,7 @@ class SessionRestoreController extends ChangeNotifier {
     _restoredSessions.removeWhere((session, restored) {
       if (!test(session, restored)) return false;
       restored.retry?.cancel();
+      _workspace.release(session);
       return true;
     });
     _queue.removeWhere((session) => !_restoredSessions.containsKey(session));

@@ -19,6 +19,11 @@ class TerminalWorkspaceController extends ChangeNotifier {
   /// The connect target each session was opened with, when the caller
   /// passed one (it keeps the Herdr label, which the derived id drops).
   final Map<TerminalSessionController, ConnectTarget> _targets = {};
+
+  /// Sessions the terminal page must not connect while they sit in a
+  /// background tab (restored sessions: each connect may ask for a
+  /// hardware-key touch or start a new shell).
+  final Set<TerminalSessionController> _heldUntilActive = {};
   int _activeIndex = 0;
   TerminalEnterSequence _enterSequence = TerminalEnterSequence.cr;
 
@@ -91,6 +96,21 @@ class TerminalWorkspaceController extends ChangeNotifier {
       ConnectTarget.fromSessionHostId(session.host.id) ??
       const ConnectTarget.shell();
 
+  /// Keeps [session] from connecting on its own until it is the active tab
+  /// (or [release]d).
+  void holdUntilActive(TerminalSessionController session) {
+    if (_sessions.contains(session)) _heldUntilActive.add(session);
+  }
+
+  void release(TerminalSessionController session) {
+    _heldUntilActive.remove(session);
+  }
+
+  /// Whether the terminal page may connect [session] as soon as its view
+  /// is built: always for the active tab, and for every tab not held.
+  bool mayAutoConnect(TerminalSessionController session) =>
+      session == activeSession || !_heldUntilActive.contains(session);
+
   /// Moves the session at [from] to [to] (both indexes into [sessions]),
   /// keeping the same session active.
   void move(int from, int to) {
@@ -125,6 +145,7 @@ class TerminalWorkspaceController extends ChangeNotifier {
 
     _sessions.removeAt(index);
     _targets.remove(session);
+    _heldUntilActive.remove(session);
     if (_sessions.isEmpty) {
       _activeIndex = 0;
     } else if (_activeIndex >= _sessions.length) {
@@ -143,6 +164,7 @@ class TerminalWorkspaceController extends ChangeNotifier {
     final sessions = List<TerminalSessionController>.from(_sessions);
     _sessions.clear();
     _targets.clear();
+    _heldUntilActive.clear();
     _activeIndex = 0;
     notifyListeners();
 
