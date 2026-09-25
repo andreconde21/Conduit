@@ -181,13 +181,13 @@ void main() {
 
     await press(tester, LogicalKeyboardKey.tab, ctrl: true);
     expect(h.activeIndex, 1);
-    await press(tester, LogicalKeyboardKey.pageDown, ctrl: true);
+    await press(tester, LogicalKeyboardKey.tab, ctrl: true);
     expect(h.activeIndex, 2);
     await press(tester, LogicalKeyboardKey.tab, ctrl: true);
     expect(h.activeIndex, 0, reason: 'wraps around');
     await press(tester, LogicalKeyboardKey.tab, ctrl: true, shift: true);
     expect(h.activeIndex, 2);
-    await press(tester, LogicalKeyboardKey.pageUp, ctrl: true);
+    await press(tester, LogicalKeyboardKey.tab, ctrl: true, shift: true);
     expect(h.activeIndex, 1);
     await press(tester, LogicalKeyboardKey.digit1, alt: true);
     expect(h.activeIndex, 0);

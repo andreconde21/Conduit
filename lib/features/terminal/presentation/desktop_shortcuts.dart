@@ -9,6 +9,8 @@ import 'package:flutter/services.dart';
 /// Windows and Terminal.app / iTerm2 on macOS, and avoid keys a shell or a
 /// TUI needs:
 ///
+/// * Ctrl+PgUp / Ctrl+PgDn are left to the multiplexer tab switcher
+///   (previous / next Herdr tab or tmux window).
 /// * Zoom uses Ctrl+= / Ctrl++ / Ctrl+- / Ctrl+0. None is a readline,
 ///   Claude Code, vim or tmux binding (undo is Ctrl+_ = Ctrl+Shift+-, which
 ///   stays with the shell).
@@ -140,14 +142,6 @@ DesktopShortcutMatch? matchDesktopShortcut(KeyEvent event) {
       shift ? DesktopAction.previousSession : DesktopAction.nextSession,
     );
   }
-  if (!_mac && ctrl && !alt && !meta && !shift) {
-    if (key == LogicalKeyboardKey.pageDown) {
-      return match(DesktopAction.nextSession);
-    }
-    if (key == LogicalKeyboardKey.pageUp) {
-      return match(DesktopAction.previousSession);
-    }
-  }
   if (!_mac && alt && !ctrl && !meta && !shift) {
     final index = _digitIndex(key);
     if (index != null) return match(DesktopAction.goToSession, index);
@@ -230,11 +224,9 @@ List<DesktopShortcutHelp> desktopShortcutHelp() => [
     DesktopShortcutHelp(action.label, switch (action) {
       DesktopAction.zoomIn => '$_mod+=  or  $_mod++',
       DesktopAction.nextSession =>
-        _mac ? 'Ctrl+Tab  or  Cmd+Shift+]' : 'Ctrl+Tab  or  Ctrl+PgDn',
+        _mac ? 'Ctrl+Tab  or  Cmd+Shift+]' : 'Ctrl+Tab',
       DesktopAction.previousSession =>
-        _mac
-            ? 'Ctrl+Shift+Tab  or  Cmd+Shift+['
-            : 'Ctrl+Shift+Tab  or  Ctrl+PgUp',
+        _mac ? 'Ctrl+Shift+Tab  or  Cmd+Shift+[' : 'Ctrl+Shift+Tab',
       DesktopAction.toggleFullscreen => _mac ? 'Ctrl+Cmd+F  or  F11' : 'F11',
       _ => desktopShortcutKeys(action),
     }),

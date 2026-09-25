@@ -103,7 +103,7 @@ Windows `.ico`, the macOS AppIcon set and the Linux window icon).
   | Zoom in / out / reset | Ctrl+= (or Ctrl++) / Ctrl+- / Ctrl+0 | Cmd+= / Cmd+- / Cmd+0 |
   | New session on this machine (connect picker) | Ctrl+Shift+T | Cmd+T |
   | Close session | Ctrl+Shift+W | Cmd+W |
-  | Next / previous session | Ctrl+Tab / Ctrl+Shift+Tab, Ctrl+PgDn / Ctrl+PgUp | Ctrl+Tab / Ctrl+Shift+Tab, Cmd+Shift+] / Cmd+Shift+[ |
+  | Next / previous session | Ctrl+Tab / Ctrl+Shift+Tab | Ctrl+Tab / Ctrl+Shift+Tab, Cmd+Shift+] / Cmd+Shift+[ |
   | Go to session 1 to 9 | Alt+1 to Alt+9 | Cmd+1 to Cmd+9 |
   | Fullscreen terminal | F11 | Ctrl+Cmd+F or F11 |
   | Keyboard shortcuts | Ctrl+Shift+/ | Cmd+/ |
