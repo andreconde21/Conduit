@@ -330,12 +330,16 @@ void main() {
       find.text('Based on Conduit by gwitko (Apache-2.0)'),
       findsOneWidget,
     );
-    // No errors this run: nothing to copy.
-    expect(find.byKey(const ValueKey('about-copy-error-log')), findsNothing);
+    expect(find.text('Recent errors'), findsOneWidget);
 
     AppErrorLog.instance.recordError(StateError('boom'), null);
     addTearDown(AppErrorLog.instance.clear);
     await tester.pump();
-    expect(find.text('Copy error log (1 error)'), findsOneWidget);
+    await tester.ensureVisible(find.text('Recent errors (1)'));
+    await tester.tap(find.text('Recent errors (1)'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('recent-errors')), findsOneWidget);
+    expect(find.text('Bad state: boom'), findsOneWidget);
+    expect(find.byKey(const ValueKey('recent-errors-copy')), findsOneWidget);
   });
 }
