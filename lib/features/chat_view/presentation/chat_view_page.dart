@@ -9,6 +9,7 @@ import 'package:conduit/features/chat_view/domain/chat_items.dart';
 import 'package:conduit/features/chat_view/domain/chat_working.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_controller.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_composer.dart';
+import 'package:conduit/features/chat_view/presentation/widgets/chat_injected_items.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_thread_items.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_working_indicator.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/talk_panel.dart';
@@ -699,6 +700,9 @@ class _ChatViewPageState extends State<ChatViewPage>
     final key = ValueKey(item.id);
     return switch (item) {
       ChatUserMessage() => ChatUserBubble(key: key, item: item),
+      ChatAgentMessage() => ChatAgentMessageCard(key: key, item: item),
+      ChatTaskNotice() => ChatTaskNoticeRow(key: key, item: item),
+      ChatShellCommand() => ChatShellCommandCard(key: key, item: item),
       ChatAssistantText() => ChatAssistantBubble(key: key, item: item),
       ChatThinking() => ChatThinkingRow(key: key, item: item),
       ChatToolCall() => ChatToolCard(key: key, item: item),

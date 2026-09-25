@@ -1,4 +1,5 @@
 import 'package:conduit/features/chat_view/domain/chat_transcript.dart';
+import 'package:conduit/features/chat_view/domain/chat_user_input.dart';
 
 /// What kind of card a tool call renders as.
 enum ChatToolKind { bash, edit, write, read, search, web, task, other }
@@ -19,14 +20,88 @@ class ChatUserMessage extends ChatItem {
     this.imageCount = 0,
     this.timestamp,
     this.isCommand = false,
+    this.pasted = const [],
   });
 
   final String text;
   final int imageCount;
   final DateTime? timestamp;
 
-  /// A slash command or `!` shell line rather than a prompt.
+  /// A slash command rather than a prompt.
   final bool isCommand;
+
+  /// Blocks the user pasted (`<pasted_content>`), shown collapsed.
+  final List<String> pasted;
+}
+
+/// A message from another agent, not from the user: a teammate
+/// (`<teammate-message>`) or another Claude session
+/// (`<cross-session-message>`), or a teammate's idle notification.
+class ChatAgentMessage extends ChatItem {
+  const ChatAgentMessage(
+    super.id, {
+    required this.from,
+    required this.body,
+    this.summary,
+    this.idle = false,
+    this.session = false,
+    this.timestamp,
+  });
+
+  /// The teammate id or session name.
+  final String from;
+
+  /// The sender's one-line summary, when it gave one.
+  final String? summary;
+  final String body;
+
+  /// An `idle_notification`: the teammate finished; [body] is its result.
+  final bool idle;
+
+  /// From another Claude session rather than a teammate.
+  final bool session;
+  final DateTime? timestamp;
+}
+
+/// A background task finished (`<task-notification>`).
+class ChatTaskNotice extends ChatItem {
+  const ChatTaskNotice(super.id, {required this.summary, this.status});
+
+  final String summary;
+
+  /// `completed`, `failed`, ... as reported.
+  final String? status;
+
+  bool get failed => status == 'failed' || status == 'error';
+}
+
+/// A `!` shell command the user ran in Claude Code, with its output once
+/// the next line brings it.
+class ChatShellCommand extends ChatItem {
+  const ChatShellCommand(
+    super.id, {
+    required this.command,
+    this.stdout,
+    this.stderr,
+    this.timestamp,
+  });
+
+  final String command;
+  final String? stdout;
+  final String? stderr;
+  final DateTime? timestamp;
+
+  bool get hasOutput => stdout != null || stderr != null;
+  bool get failed =>
+      (stderr?.trim().isNotEmpty ?? false) && (stdout?.trim().isEmpty ?? true);
+
+  ChatShellCommand withOutput(String stdout, String stderr) => ChatShellCommand(
+    id,
+    command: command,
+    stdout: stdout,
+    stderr: stderr,
+    timestamp: timestamp,
+  );
 }
 
 class ChatAssistantText extends ChatItem {
@@ -333,58 +408,77 @@ class ChatItemBuilder {
       );
       return;
     }
-    final cleaned = cleanUserText(raw);
-    if (cleaned == null) {
-      return;
+    final parts = ChatUserInput.parse(raw);
+    var imagesLeft = images;
+    for (var k = 0; k < parts.length; k++) {
+      final id = parts.length == 1 ? key : '$key#u$k';
+      switch (parts[k]) {
+        case UserTextPart(:final text, :final pasted):
+          items.add(
+            ChatUserMessage(
+              id,
+              text: text,
+              pasted: pasted,
+              imageCount: imagesLeft,
+              timestamp: entry.timestamp,
+            ),
+          );
+          imagesLeft = 0;
+        case SlashCommandPart(:final command):
+          items.add(
+            ChatUserMessage(
+              id,
+              text: command,
+              isCommand: true,
+              timestamp: entry.timestamp,
+            ),
+          );
+        case ShellInputPart(:final command):
+          items.add(
+            ChatShellCommand(id, command: command, timestamp: entry.timestamp),
+          );
+        case ShellOutputPart(:final stdout, :final stderr):
+          final index = items.lastIndexWhere(
+            (item) => item is ChatShellCommand && !item.hasOutput,
+          );
+          if (index != -1) {
+            items[index] = (items[index] as ChatShellCommand).withOutput(
+              stdout,
+              stderr,
+            );
+          }
+        case AgentMessagePart(
+          :final from,
+          :final summary,
+          :final body,
+          :final idle,
+          :final session,
+        ):
+          items.add(
+            ChatAgentMessage(
+              id,
+              from: from,
+              summary: summary,
+              body: body,
+              idle: idle,
+              session: session,
+              timestamp: entry.timestamp,
+            ),
+          );
+        case TaskPart(:final summary, :final status):
+          items.add(ChatTaskNotice(id, summary: summary, status: status));
+      }
     }
-    items.add(
-      ChatUserMessage(
-        key,
-        text: cleaned.$1,
-        isCommand: cleaned.$2,
-        imageCount: images,
-        timestamp: entry.timestamp,
-      ),
-    );
-  }
-
-  /// Rewrites Claude Code's tagged user lines: `<command-name>/x</…>` becomes
-  /// the slash command, `<bash-input>` a `!` line; command output, task
-  /// notifications and system reminders are hidden (null). Returns the text
-  /// and whether it is a command.
-  static (String, bool)? cleanUserText(String raw) {
-    if (!raw.startsWith('<')) {
-      return raw.isEmpty ? null : (raw, false);
+    if (imagesLeft > 0) {
+      items.add(
+        ChatUserMessage(
+          key,
+          text: '',
+          imageCount: imagesLeft,
+          timestamp: entry.timestamp,
+        ),
+      );
     }
-    String? tag(String name) {
-      final match = RegExp('<$name>([\\s\\S]*?)</$name>').firstMatch(raw);
-      return match?.group(1)?.trim();
-    }
-
-    final command = tag('command-name');
-    if (command != null) {
-      final args = tag('command-args') ?? '';
-      final name = command.startsWith('/') ? command : '/$command';
-      return (args.isEmpty ? name : '$name $args', true);
-    }
-    final bash = tag('bash-input');
-    if (bash != null) {
-      return ('! $bash', true);
-    }
-    const hidden = [
-      '<local-command-stdout>',
-      '<local-command-stderr>',
-      '<local-command-caveat>',
-      '<bash-stdout>',
-      '<bash-stderr>',
-      '<task-notification>',
-      '<system-reminder>',
-      '<command-message>',
-    ];
-    if (hidden.any(raw.startsWith)) {
-      return null;
-    }
-    return (raw, false);
   }
 
   static void _addSidechain(
