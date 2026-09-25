@@ -45,6 +45,7 @@ import 'package:conduit/features/share_target/data/sftp_share_uploader.dart';
 import 'package:conduit/features/share_target/presentation/share_target_controller.dart';
 import 'package:conduit/features/share_target/presentation/share_target_host.dart';
 import 'package:conduit/features/share_target/presentation/share_target_scope.dart';
+import 'package:conduit/features/sync/data/app_local_sync_store.dart';
 import 'package:conduit/features/terminal/data/connectivity_plus_network.dart';
 import 'package:conduit/features/terminal/data/dart_ssh_terminal_repository.dart';
 import 'package:conduit/features/terminal/data/mosh_terminal_repository.dart';
@@ -145,11 +146,6 @@ void main() {
     agentAttention,
     channel: PlatformAgentStatusWidgetChannel.instance,
   ).start();
-  final backupService = AppBackupService(
-    hostsController: hostsController,
-    themeController: themeController,
-    hostKeyVerifier: hostKeyVerifier,
-  );
   const fileExport = FilePickerFileExport();
   final shareTarget = ShareTargetController(
     source: PlatformShareTargetSource(),
@@ -196,6 +192,30 @@ void main() {
   );
   themeController.addListener(
     () => sessionRestore.enabled = themeController.restoreSessionsOnLaunch,
+  );
+  // This device's data as sync records: file backups and device sync
+  // (Settings › Sync) read and write the app through it.
+  final localSyncStore = AppLocalSyncStore(
+    hosts: hostsController,
+    theme: themeController,
+    hostKeys: hostKeyVerifier,
+    connectPreferences: const SecureJsonMapStore(
+      secureStorage,
+      SecureConnectPreferencesRepository.storageKey,
+    ),
+    recentDirectoriesStore: const SecureJsonMapStore(
+      secureStorage,
+      SecureRecentDirectoriesStore.storageKey,
+    ),
+    recentDirectories: recentDirectories,
+    sessions: const SecureSessionSnapshotRepository(secureStorage),
+    ready: themeLoaded,
+  );
+  final backupService = AppBackupService(
+    hostsController: hostsController,
+    themeController: themeController,
+    hostKeyVerifier: hostKeyVerifier,
+    localStore: localSyncStore,
   );
   unawaited(shareTarget.start());
 

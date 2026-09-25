@@ -3,31 +3,51 @@
 import 'dart:convert';
 import 'dart:math';
 
-import 'package:conduit/core/theme/app_palette.dart';
-import 'package:conduit/core/theme/terminal_appearance.dart';
-import 'package:conduit/core/theme/terminal_pill_items.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/domain/saved_hosts_repository.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
+import 'package:conduit/features/sessions/domain/session_snapshot.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
+import 'package:conduit/features/sync/data/app_local_sync_store.dart';
+import 'package:conduit/features/sync/data/app_settings_codec.dart';
+import 'package:conduit/features/sync/data/sync_crypto.dart';
+import 'package:conduit/features/sync/domain/local_sync_store.dart';
+import 'package:conduit/features/sync/domain/sync_category.dart';
+import 'package:conduit/features/sync/domain/sync_record.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
-import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
 import 'package:crypto/crypto.dart';
-import 'package:flutter/material.dart';
 import 'package:pinenacl/x25519.dart';
 
+/// File backups, in the same encrypted bundle format as device sync (see
+/// [SyncCrypto]): a backup file and a sync hub's bundle open the same way
+/// with their passphrase. Older `conduit.backup` v1 files still import.
 class AppBackupService {
+  /// Without [localStore], backups cover machines, keys, snippets and
+  /// settings but not connect preferences or the session list (tests).
   AppBackupService({
     required HostsController hostsController,
     required ThemeController themeController,
     required HostKeyVerifier hostKeyVerifier,
-    AppBackupCrypto crypto = const AppBackupCrypto(),
+    LocalSyncStore? localStore,
+    SyncCrypto crypto = const SyncCrypto(),
+    AppBackupCrypto legacyCrypto = const AppBackupCrypto(),
     DateTime Function()? now,
   }) : _hostsController = hostsController,
        _themeController = themeController,
        _hostKeyVerifier = hostKeyVerifier,
+       _localStore =
+           localStore ??
+           AppLocalSyncStore(
+             hosts: hostsController,
+             theme: themeController,
+             hostKeys: hostKeyVerifier,
+             connectPreferences: _NoJsonMapStore(),
+             recentDirectoriesStore: _NoJsonMapStore(),
+             sessions: InMemorySessionSnapshotRepository(),
+           ),
        _crypto = crypto,
+       _legacyCrypto = legacyCrypto,
        _now = now ?? DateTime.now;
 
   static const fileExtension = 'conductore-backup.json';
@@ -35,37 +55,116 @@ class AppBackupService {
   final HostsController _hostsController;
   final ThemeController _themeController;
   final HostKeyVerifier _hostKeyVerifier;
-  final AppBackupCrypto _crypto;
+  final LocalSyncStore _localStore;
+  final SyncCrypto _crypto;
+  final AppBackupCrypto _legacyCrypto;
   final DateTime Function() _now;
 
+  /// Everything but credentials unless [includeSecrets]; always encrypted
+  /// with [password]. Hardware-key stubs come along with credentials.
   Future<Uint8List> exportBackup({
     required bool includeSecrets,
-    String? password,
+    required String password,
   }) async {
-    final payload = await _payload(includeSecrets: includeSecrets);
-    if (!includeSecrets) {
-      return _encodeJson({
-        'format': 'conduit.backup',
-        'version': 1,
-        'encrypted': false,
-        'createdAt': _now().toUtc().toIso8601String(),
-        'payload': payload,
-      });
-    }
-
-    final secret = password ?? '';
-    final validation = AppBackupPasswordPolicy.validate(secret);
+    final validation = AppBackupPasswordPolicy.validate(password);
     if (validation != null) {
       throw AppBackupException(validation);
     }
-    final plaintext = _encodeJson(payload);
-    return _encodeJson(_crypto.encrypt(plaintext, secret));
+    final options = LocalSyncOptions(
+      categories: {
+        ...SyncCategory.values.where(
+          (category) => includeSecrets || category != SyncCategory.credentials,
+        ),
+      },
+      includeHardwareKeys: includeSecrets,
+    );
+    final values = await _localStore.snapshot(options);
+    final now = _now().toUtc();
+    final clock = SyncClock(
+      time: now.millisecondsSinceEpoch,
+      counter: 0,
+      device: 'backup',
+    );
+    final document = SyncDocument(
+      records: {
+        for (final entry in values.entries)
+          entry.key: SyncRecord(
+            key: entry.key,
+            value: entry.value,
+            clock: clock,
+          ),
+      },
+      deviceId: 'backup',
+      createdAt: now,
+    );
+    final key = await _crypto.newKey(password);
+    return _crypto.seal(
+      key,
+      Uint8List.fromList(utf8.encode(jsonEncode(document.toJson()))),
+    );
   }
 
+  /// Imports a backup file or a sync hub bundle. Items in the file replace
+  /// the matching ones here; nothing else is removed.
   Future<AppBackupImportResult> importBackup(
     Uint8List bytes, {
     String? password,
   }) async {
+    if (SyncCrypto.isBundle(bytes)) {
+      return _importBundle(bytes, password);
+    }
+    return _importLegacy(bytes, password);
+  }
+
+  Future<AppBackupImportResult> _importBundle(
+    Uint8List bytes,
+    String? password,
+  ) async {
+    if (password == null || password.isEmpty) {
+      throw const AppBackupException('Enter the backup password.');
+    }
+    final SyncDocument document;
+    try {
+      final plaintext = await _crypto.open(bytes, passphrase: password);
+      document = SyncDocument.fromJson(jsonDecode(utf8.decode(plaintext)));
+    } on SyncCryptoException catch (error) {
+      throw AppBackupException(
+        error.error == SyncCryptoError.wrongKey
+            ? 'The password is wrong or the backup changed.'
+            : error.message,
+      );
+    } on SyncFormatException catch (error) {
+      throw AppBackupException(error.message);
+    } on FormatException {
+      throw const AppBackupException('This backup is damaged.');
+    }
+    final values = <String, Object?>{
+      for (final record in document.records.values)
+        if (!record.deleted) record.key: record.value,
+    };
+    await _localStore.apply(
+      values,
+      values.keys.toSet(),
+      const LocalSyncOptions(
+        categories: {...SyncCategory.values},
+        includeHardwareKeys: true,
+      ),
+      replace: false,
+    );
+    return AppBackupImportResult(
+      hostsImported: values.keys
+          .where((key) => key.startsWith('${SyncKeys.hostPrefix}:'))
+          .length,
+      trustedKeysImported: values.keys
+          .where((key) => key.startsWith('${SyncKeys.knownHostPrefix}:'))
+          .length,
+    );
+  }
+
+  Future<AppBackupImportResult> _importLegacy(
+    Uint8List bytes,
+    String? password,
+  ) async {
     final document = _decodeDocument(bytes);
     final payload = _extractPayload(document, password: password);
     final hosts = _parseHosts(payload['hosts']);
@@ -90,175 +189,20 @@ class AppBackupService {
     );
   }
 
-  Future<Map<String, Object?>> _payload({required bool includeSecrets}) async {
-    final trustedKeys = await _hostKeyVerifier.loadTrustedKeys();
-    return {
-      'hosts': [
-        for (final host in _hostsController.hosts)
-          _hostForBackup(host, includeSecrets: includeSecrets).toJson(),
-      ],
-      'hostSortMode': _hostsController.sortMode.name,
-      'hostManualOrder': _hostsController.manualOrder,
-      'theme': _themeToJson(includeSecrets: includeSecrets),
-      'trustedHostKeys': [for (final record in trustedKeys) record.toJson()],
-    };
-  }
-
-  SavedHost _hostForBackup(SavedHost host, {required bool includeSecrets}) {
-    if (includeSecrets) {
-      return host;
-    }
-    return host.copyWith(
-      password: '',
-      privateKey: '',
-      passphrase: '',
-      hardwareKeys: [
-        for (final key in host.hardwareKeys)
-          HardwareKeyEntry(id: key.id, label: key.label, privateKey: ''),
-      ],
-      snippets: [
-        for (final snippet in host.snippets) _snippetForBackup(snippet),
-      ],
-    );
-  }
-
-  TerminalSnippet _snippetForBackup(TerminalSnippet snippet) {
-    return snippet.hidden ? snippet.copyWith(text: '') : snippet;
-  }
-
-  Map<String, Object?> _themeToJson({required bool includeSecrets}) {
-    return {
-      'themeMode': _themeController.themeMode.name,
-      'palette': _themeController.selectedPalette.name,
-      'omarchySyncHostId': _themeController.omarchySyncHostId,
-      'terminalFont': _themeController.terminalFont.name,
-      'terminalFontSize': _themeController.terminalFontSize,
-      'terminalKeyboardRows': [
-        for (final row in _themeController.terminalKeyboardRows)
-          {
-            'height': row.height,
-            'items': [for (final item in row.items) _keyboardItemToJson(item)],
-          },
-      ],
-      'terminalSnippets': [
-        for (final snippet in _themeController.terminalSnippets)
-          (includeSecrets ? snippet : _snippetForBackup(snippet)).toJson(),
-      ],
-      'showLocalShell': _themeController.showLocalShell,
-      'terminalMouseInput': _themeController.terminalMouseInput,
-      'terminalEnterSequence': _themeController.terminalEnterSequence.name,
-      'composeSubmitEnter': _themeController.composeSubmitEnter,
-      'terminalToolbarStyle': _themeController.terminalToolbarStyle.name,
-      'terminalPillItems': TerminalPillItem.encodeList(
-        _themeController.terminalPillItems,
-      ),
-      'menuButtonsEnabled': _themeController.menuButtonsEnabled,
-      'remoteClipboardEnabled': _themeController.remoteClipboardEnabled,
-      'restoreSessionsOnLaunch': _themeController.restoreSessionsOnLaunch,
-      'terminalGestures': _themeController.terminalGestures.toJson(),
-      'speechLanguage': _themeController.speechLanguage,
-    };
-  }
-
   Future<void> _restoreTheme(Object? raw) async {
     if (raw is! Map<Object?, Object?>) {
       return;
     }
     final json = Map<String, Object?>.from(raw);
-    await _themeController.setThemeMode(
-      ThemeMode.values.firstWhere(
-        (mode) => mode.name == json['themeMode'],
-        orElse: () => _themeController.themeMode,
-      ),
+    // v1 wrote null when not following a machine and restored nothing.
+    final followed = json['omarchySyncHostId'];
+    if (followed is! String || followed.isEmpty) {
+      json.remove('omarchySyncHostId');
+    }
+    await AppSettingsCodec.apply(_themeController, json);
+    await _themeController.setTerminalSnippets(
+      _parseSnippets(json['terminalSnippets']),
     );
-    final rawPalette = json['palette'];
-    await _themeController.setPalette(
-      rawPalette is String
-          ? AppPalette.fromStoredId(rawPalette)
-          : _themeController.selectedPalette,
-    );
-    final syncHostId = json['omarchySyncHostId'];
-    if (syncHostId is String && syncHostId.isNotEmpty) {
-      await _themeController.setOmarchySyncHost(syncHostId);
-    }
-    await _themeController.setTerminalFont(
-      TerminalFontOption.values.firstWhere(
-        (font) => font.name == json['terminalFont'],
-        orElse: () => _themeController.terminalFont,
-      ),
-    );
-    final fontSize = json['terminalFontSize'];
-    if (fontSize is num) {
-      await _themeController.setTerminalFontSize(fontSize.toDouble());
-    }
-    final keyboardRows = _parseKeyboardRows(json['terminalKeyboardRows']);
-    if (keyboardRows.isNotEmpty) {
-      await _themeController.setTerminalKeyboardRows(keyboardRows);
-    } else {
-      final keyboardItems = _parseKeyboardItems(json['terminalKeyboardItems']);
-      if (keyboardItems.isNotEmpty) {
-        await _themeController.setTerminalKeyboardRows([
-          TerminalKeyboardRow(items: keyboardItems),
-        ]);
-      }
-    }
-    final snippets = _parseSnippets(json['terminalSnippets']);
-    await _themeController.setTerminalSnippets(snippets);
-    final showLocalShell = json['showLocalShell'];
-    if (showLocalShell is bool) {
-      await _themeController.setShowLocalShell(showLocalShell);
-    }
-    final terminalMouseInput = json['terminalMouseInput'];
-    if (terminalMouseInput is bool) {
-      await _themeController.setTerminalMouseInput(terminalMouseInput);
-    }
-    await _themeController.setTerminalEnterSequence(
-      TerminalEnterSequence.values.firstWhere(
-        (sequence) => sequence.name == json['terminalEnterSequence'],
-        orElse: () => _themeController.terminalEnterSequence,
-      ),
-    );
-    final composeSubmitEnter = json['composeSubmitEnter'];
-    if (composeSubmitEnter is bool) {
-      await _themeController.setComposeSubmitEnter(composeSubmitEnter);
-    }
-    await _themeController.setTerminalToolbarStyle(
-      TerminalToolbarStyle.values.firstWhere(
-        (style) => style.name == json['terminalToolbarStyle'],
-        orElse: () => _themeController.terminalToolbarStyle,
-      ),
-    );
-    if (json['terminalPillItems'] is List) {
-      await _themeController.setTerminalPillItems(
-        TerminalPillItem.decodeList(json['terminalPillItems']),
-      );
-    }
-    final menuButtonsEnabled = json['menuButtonsEnabled'];
-    if (menuButtonsEnabled is bool) {
-      await _themeController.setMenuButtonsEnabled(menuButtonsEnabled);
-    }
-    final remoteClipboardEnabled = json['remoteClipboardEnabled'];
-    if (remoteClipboardEnabled is bool) {
-      await _themeController.setRemoteClipboardEnabled(remoteClipboardEnabled);
-    }
-    final restoreSessionsOnLaunch = json['restoreSessionsOnLaunch'];
-    if (restoreSessionsOnLaunch is bool) {
-      await _themeController.setRestoreSessionsOnLaunch(
-        restoreSessionsOnLaunch,
-      );
-    }
-
-    final terminalGestures = json['terminalGestures'];
-    if (terminalGestures is Map) {
-      await _themeController.setTerminalGestures(
-        TerminalGesturePreferences.fromJson(terminalGestures),
-      );
-    }
-
-    final speechLanguage = json['speechLanguage'];
-    if (speechLanguage is String) {
-      await _themeController.setSpeechLanguage(speechLanguage);
-    }
   }
 
   Map<String, Object?> _decodeDocument(Uint8List bytes) {
@@ -289,7 +233,7 @@ class AppBackupService {
         throw const AppBackupException('Enter the backup password.');
       }
       try {
-        final plaintext = _crypto.decrypt(document, secret);
+        final plaintext = _legacyCrypto.decrypt(document, secret);
         final decoded = jsonDecode(utf8.decode(plaintext));
         if (decoded is Map<Object?, Object?>) {
           return Map<String, Object?>.from(decoded);
@@ -358,46 +302,6 @@ class AppBackupService {
     }
     return raw.whereType<String>().toList(growable: false);
   }
-
-  List<TerminalKeyboardRow> _parseKeyboardRows(Object? raw) {
-    if (raw is! List) {
-      return const [];
-    }
-    final rows = <TerminalKeyboardRow>[];
-    for (final rawRow in raw.whereType<Map<Object?, Object?>>()) {
-      final row = Map<String, Object?>.from(rawRow);
-      final items = _parseKeyboardItems(row['items']);
-      if (items.isEmpty) {
-        continue;
-      }
-      final height = row['height'];
-      rows.add(
-        TerminalKeyboardRow(
-          items: items,
-          height: height is num
-              ? clampTerminalKeyboardRowHeight(height.toDouble())
-              : terminalKeyboardRowHeightDefault,
-        ),
-      );
-    }
-    return rows;
-  }
-
-  List<TerminalKeyboardItem> _parseKeyboardItems(Object? raw) {
-    if (raw is! List) {
-      return const [];
-    }
-    return raw
-        .whereType<Map<Object?, Object?>>()
-        .map((json) => _keyboardItemFromJson(Map<String, Object?>.from(json)))
-        .whereType<TerminalKeyboardItem>()
-        .toList(growable: false);
-  }
-
-  Uint8List _encodeJson(Object? value) {
-    const encoder = JsonEncoder.withIndent('  ');
-    return Uint8List.fromList(utf8.encode('${encoder.convert(value)}\n'));
-  }
 }
 
 List<TerminalSnippet> _parseSnippets(Object? raw) {
@@ -410,6 +314,9 @@ List<TerminalSnippet> _parseSnippets(Object? raw) {
       .toList(growable: false);
 }
 
+/// Version 1 backups (PBKDF2 + XSalsa20-Poly1305). New backups use
+/// [SyncCrypto]; this stays so older files still import, and [encrypt]
+/// stays for tests of that path.
 class AppBackupCrypto {
   const AppBackupCrypto();
 
@@ -569,71 +476,10 @@ class AppBackupException implements Exception {
   String toString() => message;
 }
 
-Map<String, Object?> _keyboardItemToJson(TerminalKeyboardItem item) {
-  return {
-    'id': item.id,
-    'kind': item.kind.name,
-    'label': item.label,
-    'action': item.action?.name,
-    'text': item.text,
-    'controlKey': item.controlKey,
-    'submit': item.submit,
-  };
-}
+class _NoJsonMapStore implements JsonMapStore {
+  @override
+  Future<Map<String, Object?>> readAll() async => {};
 
-TerminalKeyboardItem? _keyboardItemFromJson(Map<String, Object?> json) {
-  final kindName = json['kind'];
-  final id = json['id'];
-  if (kindName is! String || id is! String) {
-    return null;
-  }
-  final kind = TerminalKeyboardItemKind.values
-      .where((candidate) => candidate.name == kindName)
-      .firstOrNull;
-  if (kind == null) {
-    return null;
-  }
-  switch (kind) {
-    case TerminalKeyboardItemKind.builtIn:
-      final actionName = json['action'];
-      if (actionName is! String) {
-        return null;
-      }
-      final action = TerminalKeyboardAction.values
-          .where((candidate) => candidate.name == actionName)
-          .firstOrNull;
-      return action == null ? null : TerminalKeyboardItem.builtIn(action);
-    case TerminalKeyboardItemKind.customText:
-      final label = json['label'];
-      final text = json['text'];
-      if (id.trim().isEmpty ||
-          label is! String ||
-          text is! String ||
-          label.trim().isEmpty) {
-        return null;
-      }
-      return TerminalKeyboardItem(
-        id: id,
-        kind: kind,
-        label: label,
-        text: text,
-        submit: json['submit'] == true,
-      );
-    case TerminalKeyboardItemKind.customControl:
-      final label = json['label'];
-      final controlKey = json['controlKey'];
-      if (id.trim().isEmpty ||
-          label is! String ||
-          controlKey is! String ||
-          label.trim().isEmpty ||
-          !terminalKeyboardControlKeys.contains(controlKey)) {
-        return null;
-      }
-      return TerminalKeyboardItem(
-        id: id,
-        kind: kind,
-        label: label,
-        controlKey: controlKey,
-      );
-  }
+  @override
+  Future<void> writeAll(Map<String, Object?> values) async {}
 }

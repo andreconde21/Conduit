@@ -101,10 +101,7 @@ void main() {
     final synced = [
       _rec(hostA, {'name': 'A'}, 500),
     ];
-    final result = _merge(
-      base: _base(synced),
-      remote: {hostA: synced.single},
-    );
+    final result = _merge(base: _base(synced), remote: {hostA: synced.single});
     expect(result.merged[hostA]!.deleted, isTrue);
     expect(result.pushNeeded, isTrue);
     expect(result.toApply, isEmpty);
@@ -232,10 +229,7 @@ void main() {
 
   test('records from a newer app are kept and never applied', () {
     final future = _rec('widget:clock', {'x': 1}, 500);
-    final result = _merge(
-      base: _base([future]),
-      remote: {future.key: future},
-    );
+    final result = _merge(base: _base([future]), remote: {future.key: future});
     expect(result.merged[future.key], same(future));
     expect(result.toApply, isEmpty);
     expect(result.pushNeeded, isFalse);

@@ -99,6 +99,30 @@ class RecentDirectoriesController extends ChangeNotifier {
     return completer.future;
   }
 
+  /// Replaces [hostId]'s list with one from another device (sync); an
+  /// empty list forgets it.
+  Future<void> replace(String hostId, List<String> directories) {
+    final completer = Completer<void>();
+    _writes = _writes.then((_) async {
+      try {
+        final updated = [
+          for (final directory in directories)
+            ?normalizeRecentDirectory(directory),
+        ].take(maxRecentDirectories).toList();
+        _cache[hostId] = updated;
+        if (!_disposed) {
+          notifyListeners();
+        }
+        await _store.write(hostId, updated);
+      } catch (_) {
+        // Best effort, as above.
+      } finally {
+        completer.complete();
+      }
+    });
+    return completer.future;
+  }
+
   @override
   void dispose() {
     _disposed = true;

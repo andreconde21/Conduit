@@ -9,7 +9,9 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 class SecureRecentDirectoriesStore implements RecentDirectoriesStore {
   const SecureRecentDirectoriesStore(this._storage);
 
-  static const _key = 'conduit.recent_directories.v1';
+  /// The storage entry (host id -> list), read whole by device sync.
+  static const storageKey = 'conduit.recent_directories.v1';
+  static const _key = storageKey;
 
   final FlutterSecureStorage _storage;
 
