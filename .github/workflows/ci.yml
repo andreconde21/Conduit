@@ -65,7 +65,7 @@ jobs:
     name: Android debug build
     # inputs is empty unless called (github.event_name is the caller's event
     # there, so it cannot tell the cases apart).
-    if: ${{ inputs.builds != false }}
+    if: ${{ format('{0}', inputs.builds) != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -93,7 +93,7 @@ jobs:
 
   ios:
     name: iOS build (no codesign)
-    if: ${{ inputs.builds != false }}
+    if: ${{ format('{0}', inputs.builds) != 'false' }}
     runs-on: macos-latest
     timeout-minutes: 60
     steps:
