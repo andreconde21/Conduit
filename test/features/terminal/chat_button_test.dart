@@ -1,3 +1,4 @@
+import 'package:conduit/core/theme/terminal_pill_items.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
@@ -17,6 +18,7 @@ import 'package:wakelock_plus_platform_interface/wakelock_plus_platform_interfac
 import '../../support/test_doubles.dart';
 import '../chat_view/live_status_fixture.dart';
 import '../companion_setup/companion_fakes.dart' as fakes;
+import '../voice/fake_speech_recognizer.dart';
 
 /// The floating pill's Chat button: Chat View for a Claude session the
 /// companion knows, else the inline composer, which must take over at once.
@@ -251,6 +253,45 @@ void main() {
         session.terminal.viewHeight,
       ));
       expect(find.text(hint), findsOneWidget);
+      await drainSnackBars(tester);
+    });
+
+    testWidgets('the Dictate pill button opens the chat line dictating', (
+      tester,
+    ) async {
+      await themeController.setTerminalPillItems(const [
+        TerminalPillItem.button(TerminalPillButton.chat),
+        TerminalPillItem.button(TerminalPillButton.dictate),
+      ]);
+      final recognizer = FakeSpeechRecognizer();
+      final workspace = TerminalWorkspaceController(
+        ImmediateTerminalRepository(TrackableTerminalSession()),
+      );
+      addTearDown(workspace.dispose);
+      workspace.open(buildHost('plain'));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: TerminalPage(
+            workspace: workspace,
+            themeController: themeController,
+            sftpRepository: NoNetworkSftpRepository(),
+            speechRecognizer: recognizer,
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      await tester.tap(find.byKey(const ValueKey('toolbar-dictate')));
+      for (var i = 0; i < 6; i += 1) {
+        await tester.pump();
+      }
+
+      expect(find.byTooltip('Close chat mode'), findsOneWidget);
+      expect(recognizer.starts, hasLength(1));
+      recognizer.say('git status');
+      await tester.pump();
+      expect(find.text('git status'), findsOneWidget);
       await drainSnackBars(tester);
     });
 

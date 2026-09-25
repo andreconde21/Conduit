@@ -343,6 +343,17 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
             ? null
             : widget.keyRows.onToggleCompose,
       ),
+      TerminalPillButton.dictate =>
+        widget.keyRows.onDictate == null
+            ? const SizedBox.shrink(key: ValueKey('toolbar-dictate'))
+            : _PillButton(
+                key: const ValueKey('toolbar-dictate'),
+                icon: Icons.mic_none_rounded,
+                tooltip: 'Dictate into the chat line',
+                palette: _palette,
+                brightness: _brightness,
+                onTap: widget.keyRows.onDictate,
+              ),
       TerminalPillButton.keyboard => _PillButton(
         key: const ValueKey('toolbar-keyboard'),
         icon: keyboardVisible
@@ -442,6 +453,8 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
   }
 
   Future<void> _openPalette() async {
+    final onDictate = widget.keyRows.onDictate;
+    var dictate = false;
     await showToolbarSnippetPalette(
       context: context,
       palette: _palette,
@@ -452,8 +465,13 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
       onQuickPrompt: _runQuickPrompt,
       onSnippet: _sendSnippet,
       onPassword: _sendText,
+      onDictate: onDictate == null ? null : () => dictate = true,
     );
-    if (mounted) {
+    if (!mounted) return;
+    if (dictate) {
+      // The chat line takes the focus itself.
+      onDictate!();
+    } else {
       _focusTerminal();
     }
   }
