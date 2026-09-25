@@ -232,7 +232,7 @@ void main() {
     await tester.tap(install);
     await tester.pumpAndSettle();
 
-    expect(sftp.writtenFiles, hasLength(4));
+    expect(sftp.writtenFiles.keys.single, endsWith('/companion.tar.gz'));
     expect(runner.ran('install.sh'), isTrue);
     expect(badge('Waiting for first event'), findsOneWidget);
     expect(find.byKey(const ValueKey('companion-log')), findsOneWidget);

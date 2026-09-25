@@ -19,8 +19,9 @@ const companionHookEvents = [
 /// What installing changes on the machine, one line per item, in the order
 /// the confirmation sheet lists them.
 List<String> companionInstallChanges(String version) => [
-  'Uploads the companion $version to '
-      '~/${CompanionInstaller.uploadDirectory(version)}/.',
+  'Uploads the companion $version as one archive to '
+      '~/${CompanionInstaller.uploadDirectory(version)}/ and unpacks it '
+      'there with tar.',
   'Copies it to ~/.local/share/conductore and links '
       '~/.local/bin/conductore-hostd and ~/.local/bin/conductore-hook.',
   'Adds ${companionHookEvents.length} hook entries to '

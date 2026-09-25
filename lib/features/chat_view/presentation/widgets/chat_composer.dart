@@ -16,9 +16,9 @@ class ChatComposer extends StatefulWidget {
     this.showInterrupt = false,
     this.onExpand,
     this.dictation,
-    this.initialText = '',
     this.onTalk,
     this.textController,
+    this.initialText = '',
     this.onPasteImage,
     this.clipboardHasImage,
     super.key,
@@ -41,15 +41,15 @@ class ChatComposer extends StatefulWidget {
   final void Function(String text, ValueChanged<String> setDraft)? onExpand;
   final DictationController? dictation;
 
-  /// Text the field starts with (e.g. an uploaded screenshot's path).
-  final String initialText;
-
   /// Starts the hands-free Talk loop; null hides the button.
   final VoidCallback? onTalk;
 
   /// The field's text, when the page needs it (Talk puts unsent speech
   /// back here); otherwise the composer owns one.
   final TextEditingController? textController;
+
+  /// Text the field starts with (e.g. an uploaded screenshot's path).
+  final String initialText;
 
   /// Uploads the clipboard's image and inserts its path; offered as
   /// "Paste image" in the field's menu while [clipboardHasImage] says so.

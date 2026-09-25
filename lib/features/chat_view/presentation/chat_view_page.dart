@@ -37,12 +37,12 @@ class ChatViewPage extends StatefulWidget {
     this.ownsController = true,
     this.onSetUpCompanion,
     this.onEnableMonitoring,
+    this.textToSpeech,
     this.accessory,
     this.initialDraft = '',
     this.imageAttacher,
     this.pasteImages = true,
     this.clipboardHasImage = PlatformPromptImageSource.clipboardHasImage,
-    this.textToSpeech,
     super.key,
   });
 
@@ -65,6 +65,10 @@ class ChatViewPage extends StatefulWidget {
   /// off; the banner offering it hides once tapped.
   final Future<void> Function()? onEnableMonitoring;
 
+  /// Speaks replies when "Read replies aloud" is on; defaults to the
+  /// on-device engine on Android and to none elsewhere (tests inject one).
+  final TextToSpeech? textToSpeech;
+
   /// A small widget pinned above the composer (the "Preview ready" chip).
   final Widget? accessory;
 
@@ -80,10 +84,6 @@ class ChatViewPage extends StatefulWidget {
 
   /// Whether the clipboard holds an image (offers "Paste image").
   final Future<bool> Function() clipboardHasImage;
-
-  /// Speaks replies when "Read replies aloud" is on; defaults to the
-  /// on-device engine on Android and to none elsewhere (tests inject one).
-  final TextToSpeech? textToSpeech;
 
   @override
   State<ChatViewPage> createState() => _ChatViewPageState();
