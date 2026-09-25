@@ -1,5 +1,6 @@
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/chat_view/domain/chat_items.dart';
+import 'package:conduit/features/chat_view/domain/markdown_table.dart';
 
 /// Turns chat content into text that sounds natural when spoken: Markdown
 /// syntax is dropped, code blocks become a short cue, lists become
@@ -32,7 +33,9 @@ abstract final class SpeechText {
 
     var inFence = false;
     var inTable = false;
-    for (final line in markdown.replaceAll('\r\n', '\n').split('\n')) {
+    final lines = markdown.replaceAll('\r\n', '\n').split('\n');
+    for (var i = 0; i < lines.length; i++) {
+      final line = lines[i];
       if (_fence.hasMatch(line)) {
         if (!inFence) {
           flushParagraph();
@@ -42,6 +45,14 @@ abstract final class SpeechText {
         continue;
       }
       if (inFence) continue;
+      if (MarkdownTables.tryParse(lines, i) case (final table, final span)?) {
+        // The shape, never the cells.
+        flushParagraph();
+        final rows = table.rows.length;
+        sentences.add('Table with $rows row${rows == 1 ? '' : 's'}.');
+        i += span - 1;
+        continue;
+      }
       if (_tableRow.hasMatch(line)) {
         if (!inTable) {
           flushParagraph();

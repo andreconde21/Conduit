@@ -251,7 +251,7 @@ void main() {
       MarkdownListItem,
       MarkdownListItem,
       MarkdownQuote,
-      MarkdownCode,
+      MarkdownTableBlock,
       MarkdownRule,
     ]);
     expect((blocks[2] as MarkdownCode).language, 'dart');
