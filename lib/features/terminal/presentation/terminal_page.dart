@@ -55,7 +55,6 @@ import 'package:conduit/features/terminal/presentation/widgets/floating_toolbar.
 import 'package:conduit/features/terminal/presentation/widgets/image_crop_page.dart';
 import 'package:conduit/features/terminal/presentation/widgets/prompt_composer_sheet.dart';
 import 'package:conduit/features/terminal/presentation/widgets/recent_directories_sheet.dart';
-import 'package:conduit/features/terminal/presentation/widgets/session_tools_menu.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_header.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_link_sheet.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_surface.dart';
@@ -969,16 +968,13 @@ class _TerminalPageState extends State<TerminalPage> {
                                 .themeController
                                 .terminalGestures
                                 .headerSwipeOpensSessions,
-                            actions: [
-                              if (activeSession != null &&
-                                  widget.hostKeyVerifier != null &&
-                                  !activeSession.host.isLocal)
-                                SessionToolsMenu(
-                                  color: palette.foregroundFor(brightness),
-                                  onSelected: (tool) =>
-                                      _openSessionTool(activeSession, tool),
-                                ),
-                            ],
+                            onOpenSessionTool:
+                                activeSession != null &&
+                                    widget.hostKeyVerifier != null &&
+                                    !activeSession.host.isLocal
+                                ? (tool) =>
+                                      _openSessionTool(activeSession, tool)
+                                : null,
                           );
                         },
                       ),

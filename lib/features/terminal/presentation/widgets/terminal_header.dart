@@ -6,9 +6,15 @@ import 'package:conduit/features/terminal/presentation/terminal_workspace_contro
 import 'package:conduit/features/terminal/presentation/widgets/session_tabs.dart';
 import 'package:flutter/material.dart';
 
+/// Per-session tools that open as tabs beside the session: the git diff of
+/// the working directory and a live preview of a web app on the host.
+enum SessionTool { gitDiff, livePreview }
+
 /// Actions in the terminal row's overflow menu.
 enum TerminalHeaderAction {
   chatView,
+  gitDiff,
+  livePreview,
   reconnect,
   fullscreen,
   newSession,
@@ -16,8 +22,9 @@ enum TerminalHeaderAction {
 }
 
 /// The terminal's single chrome row (~40 dp): back, the scrollable session
-/// and file tabs, then the session grid, the agents badge and an overflow
-/// menu (reconnect, fullscreen, new session, close session).
+/// and file tabs, then the session grid, the agents badge and ONE overflow
+/// menu: chat view and the session tools (git diff, live preview), then
+/// reconnect, fullscreen and new session, then close session.
 ///
 /// A downward swipe on the row opens the session grid, like the swipe from
 /// the terminal's top strip.
@@ -39,7 +46,7 @@ class TerminalHeader extends StatelessWidget {
     this.onOpenChatView,
     this.attentionCount = 0,
     this.onOpenAgentAttention,
-    this.actions = const [],
+    this.onOpenSessionTool,
     this.onOpenSessionGrid,
     this.swipeDownOpensSessionGrid = true,
     super.key,
@@ -79,9 +86,9 @@ class TerminalHeader extends StatelessWidget {
   /// Opens the Agent Attention dashboard; null hides the button.
   final VoidCallback? onOpenAgentAttention;
 
-  /// Extra buttons shown before the overflow menu (e.g. the session tools
-  /// menu).
-  final List<Widget> actions;
+  /// Opens a session tool (git diff, live preview) for the active session;
+  /// null hides those entries.
+  final ValueChanged<SessionTool>? onOpenSessionTool;
 
   /// Opens the session home grid; null hides the button.
   final VoidCallback? onOpenSessionGrid;
@@ -143,7 +150,6 @@ class TerminalHeader extends StatelessWidget {
                 ),
                 onPressed: onOpenAgentAttention!,
               ),
-            ...actions,
             _OverflowMenu(
               session: session,
               color: foreground,
@@ -151,6 +157,7 @@ class TerminalHeader extends StatelessWidget {
               onToggleFullscreen: onToggleFullscreen,
               onNewSession: onNewSession,
               onOpenChatView: onOpenChatView,
+              onOpenSessionTool: onOpenSessionTool,
               onClose: session == null
                   ? null
                   : () async {
@@ -204,6 +211,7 @@ class _OverflowMenu extends StatelessWidget {
     required this.onNewSession,
     required this.onClose,
     this.onOpenChatView,
+    this.onOpenSessionTool,
   });
 
   final TerminalSessionController? session;
@@ -213,10 +221,12 @@ class _OverflowMenu extends StatelessWidget {
   final VoidCallback? onNewSession;
   final VoidCallback? onClose;
   final VoidCallback? onOpenChatView;
+  final ValueChanged<SessionTool>? onOpenSessionTool;
 
   @override
   Widget build(BuildContext context) {
     final session = this.session;
+    final tools = onOpenSessionTool;
     return PopupMenuButton<TerminalHeaderAction>(
       tooltip: 'More',
       padding: EdgeInsets.zero,
@@ -230,6 +240,10 @@ class _OverflowMenu extends StatelessWidget {
       ),
       onSelected: (action) => switch (action) {
         TerminalHeaderAction.chatView => onOpenChatView?.call(),
+        TerminalHeaderAction.gitDiff => tools?.call(SessionTool.gitDiff),
+        TerminalHeaderAction.livePreview => tools?.call(
+          SessionTool.livePreview,
+        ),
         TerminalHeaderAction.reconnect => onReconnect?.call(),
         TerminalHeaderAction.fullscreen => onToggleFullscreen?.call(),
         TerminalHeaderAction.newSession => onNewSession?.call(),
@@ -237,6 +251,50 @@ class _OverflowMenu extends StatelessWidget {
       },
       itemBuilder: (context) {
         final theme = Theme.of(context);
+        // Grouped: agent and session tools, session control, close.
+        final groups = [
+          <PopupMenuEntry<TerminalHeaderAction>>[
+            if (onOpenChatView != null)
+              const PopupMenuItem(
+                value: TerminalHeaderAction.chatView,
+                child: _MenuRow(Icons.forum_outlined, 'Open chat view'),
+              ),
+            if (tools != null) ...const [
+              PopupMenuItem(
+                value: TerminalHeaderAction.gitDiff,
+                child: _MenuRow(Icons.difference_outlined, 'Git diff'),
+              ),
+              PopupMenuItem(
+                value: TerminalHeaderAction.livePreview,
+                child: _MenuRow(Icons.public_rounded, 'Live preview'),
+              ),
+            ],
+          ],
+          <PopupMenuEntry<TerminalHeaderAction>>[
+            if (onReconnect != null)
+              const PopupMenuItem(
+                value: TerminalHeaderAction.reconnect,
+                child: _MenuRow(Icons.refresh_rounded, 'Reconnect'),
+              ),
+            if (onToggleFullscreen != null)
+              const PopupMenuItem(
+                value: TerminalHeaderAction.fullscreen,
+                child: _MenuRow(Icons.fullscreen_rounded, 'Fullscreen'),
+              ),
+            if (onNewSession != null)
+              const PopupMenuItem(
+                value: TerminalHeaderAction.newSession,
+                child: _MenuRow(Icons.add_rounded, 'New session'),
+              ),
+          ],
+          <PopupMenuEntry<TerminalHeaderAction>>[
+            if (onClose != null)
+              const PopupMenuItem(
+                value: TerminalHeaderAction.closeSession,
+                child: _MenuRow(Icons.close_rounded, 'Close session'),
+              ),
+          ],
+        ].where((group) => group.isNotEmpty).toList();
         return [
           if (session != null)
             PopupMenuItem<TerminalHeaderAction>(
@@ -264,31 +322,10 @@ class _OverflowMenu extends StatelessWidget {
                 ],
               ),
             ),
-          if (onOpenChatView != null)
-            const PopupMenuItem(
-              value: TerminalHeaderAction.chatView,
-              child: _MenuRow(Icons.forum_outlined, 'Open chat view'),
-            ),
-          if (onReconnect != null)
-            const PopupMenuItem(
-              value: TerminalHeaderAction.reconnect,
-              child: _MenuRow(Icons.refresh_rounded, 'Reconnect'),
-            ),
-          if (onToggleFullscreen != null)
-            const PopupMenuItem(
-              value: TerminalHeaderAction.fullscreen,
-              child: _MenuRow(Icons.fullscreen_rounded, 'Fullscreen'),
-            ),
-          if (onNewSession != null)
-            const PopupMenuItem(
-              value: TerminalHeaderAction.newSession,
-              child: _MenuRow(Icons.add_rounded, 'New session'),
-            ),
-          if (onClose != null)
-            const PopupMenuItem(
-              value: TerminalHeaderAction.closeSession,
-              child: _MenuRow(Icons.close_rounded, 'Close session'),
-            ),
+          for (final (index, group) in groups.indexed) ...[
+            if (index > 0 || session != null) const PopupMenuDivider(),
+            ...group,
+          ],
         ];
       },
     );
