@@ -4,6 +4,7 @@ import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/presentation/theme_sheet.dart';
+import 'package:conduit/core/secure_storage.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
@@ -47,7 +48,6 @@ import 'package:conduit/features/terminal/presentation/terminal_workspace_contro
 import 'package:conduit/features/terminal/presentation/trusted_keys_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:uuid/uuid.dart';
 
 /// The home page, Moshi-style: a slim bar (lock, machine filter chip,
@@ -78,7 +78,7 @@ class HostsPage extends StatefulWidget {
     this.homeBoards,
     this.sessionRestore,
     this.homePreferences = const SecureHomePreferencesRepository(
-      FlutterSecureStorage(),
+      conductoreSecureStorage,
     ),
     this.previewRefreshInterval = const Duration(seconds: 2),
     this.paneRefocusDelay = const Duration(seconds: 4),

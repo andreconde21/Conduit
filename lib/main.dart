@@ -4,6 +4,7 @@ import 'package:conduit/core/diagnostics/app_error_log.dart';
 import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
+import 'package:conduit/core/secure_storage.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/core/theme/omarchy_theme_sync_controller.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
@@ -62,7 +63,6 @@ import 'package:conduit/features/terminal/presentation/terminal_workspace_contro
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -74,7 +74,7 @@ void main() {
   registerMultiplexerLogoLicenses();
   unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
 
-  const secureStorage = FlutterSecureStorage();
+  const secureStorage = conductoreSecureStorage;
   final themeController = ThemeController(
     const ThemePreferencesRepository(secureStorage),
   );

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
+import 'package:conduit/core/secure_storage.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
@@ -69,7 +70,6 @@ import 'package:conduit_vt/conduit_vt.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
@@ -81,7 +81,7 @@ class TerminalPage extends StatefulWidget {
     this.agentAttention,
     this.hostKeyVerifier,
     this.livePreviewPortStore = const SecureLivePreviewPortStore(
-      FlutterSecureStorage(),
+      conductoreSecureStorage,
     ),
     this.connectFlow,
     this.speechRecognizer,
