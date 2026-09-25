@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/presentation/theme_sheet.dart';
+import 'package:conduit/core/telemetry/telemetry.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/domain/agent_inbox.dart';
@@ -14,6 +15,7 @@ import 'package:conduit/features/home_widget/presentation/quick_settings_tile_co
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/session_navigation/presentation/session_view_widgets.dart';
+import 'package:conduit/features/settings/presentation/privacy_settings.dart';
 import 'package:conduit/features/settings/presentation/settings_catalog.dart';
 import 'package:conduit/features/settings/presentation/settings_services.dart';
 import 'package:conduit/features/snippets/presentation/snippet_editor.dart';
@@ -64,6 +66,9 @@ class SettingsSectionBody extends StatelessWidget {
       SettingsSection.agents => _agents(context),
       SettingsSection.syncBackup => _syncBackup(context),
       SettingsSection.security => _security(context),
+      SettingsSection.privacy => [
+        PrivacySettingsControls(telemetry: Telemetry.instance),
+      ],
       SettingsSection.about => const [AboutControls()],
     };
   }

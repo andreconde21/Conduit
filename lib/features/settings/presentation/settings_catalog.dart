@@ -36,6 +36,11 @@ enum SettingsSection {
     Icons.sync_rounded,
   ),
   security('Security', 'App lock, trusted host keys', Icons.shield_outlined),
+  privacy(
+    'Privacy',
+    'Crash reports, anonymous usage stats',
+    Icons.privacy_tip_outlined,
+  ),
   about(
     'About',
     'Version, credits, licences, recent errors',
@@ -326,6 +331,17 @@ const List<SettingsEntry> settingsCatalog = [
     'Trusted host keys',
     keywords: ['known hosts', 'fingerprint', 'ssh keys'],
     availableWhen: _trustedKeys,
+  ),
+  // Privacy
+  SettingsEntry(
+    SettingsSection.privacy,
+    'Send crash reports',
+    keywords: ['crash', 'errors', 'glitchtip', 'sentry', 'telemetry'],
+  ),
+  SettingsEntry(
+    SettingsSection.privacy,
+    'Send anonymous usage stats',
+    keywords: ['analytics', 'plausible', 'statistics', 'telemetry'],
   ),
   // About
   SettingsEntry(

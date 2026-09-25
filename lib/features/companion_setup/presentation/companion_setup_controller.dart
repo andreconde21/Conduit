@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:conduit/core/app_failure.dart';
+import 'package:conduit/core/telemetry/telemetry.dart';
+import 'package:conduit/core/telemetry/telemetry_events.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/companion_setup/data/companion_bundle.dart';
@@ -85,6 +87,7 @@ class CompanionSetupController extends ChangeNotifier {
     if (running != null) return running;
     final future = _prober.check(entry.runner).then((status) {
       entry.status = status;
+      _reportCompanion(status.installedVersion);
       return status;
     });
     entry.checking = future;
@@ -93,6 +96,14 @@ class CompanionSetupController extends ChangeNotifier {
       if (identical(entry.checking, future)) entry.checking = null;
       _notify();
     });
+  }
+
+  final _reportedVersions = <String>{};
+
+  /// Counts each companion version once per app run (anonymous usage).
+  void _reportCompanion(String? version) {
+    if (version == null || !_reportedVersions.add(version)) return;
+    Telemetry.instance.track(TelemetryEvent.companionDetected(version));
   }
 
   /// Uploads and installs the bundled companion, then re-checks.

@@ -5,6 +5,8 @@ import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/secure_storage.dart';
+import 'package:conduit/core/telemetry/telemetry.dart';
+import 'package:conduit/core/telemetry/telemetry_events.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
@@ -228,6 +230,7 @@ class _TerminalPageState extends State<TerminalPage>
   void initState() {
     super.initState();
     _fileTabs = TerminalFileTabsController(widget.sftpRepository);
+    Telemetry.instance.screen(TelemetryScreen.terminal);
     final recognizer =
         widget.speechRecognizer ??
         (defaultTargetPlatform == TargetPlatform.android

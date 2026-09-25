@@ -1,6 +1,8 @@
 import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
+import 'package:conduit/core/telemetry/telemetry.dart';
+import 'package:conduit/core/telemetry/telemetry_events.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sftp/domain/file_export.dart';
@@ -52,6 +54,7 @@ class _SftpBrowserPageState extends State<SftpBrowserPage> {
   void initState() {
     super.initState();
     SecurityKeyInteraction.instance.registerPinPrompt(_promptSecurityKeyPin);
+    Telemetry.instance.screen(TelemetryScreen.files);
     SecurityKeyInteraction.instance.registerSelectionPrompt(
       _promptSecurityKeySelection,
     );
