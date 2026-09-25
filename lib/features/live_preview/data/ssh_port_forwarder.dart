@@ -56,11 +56,7 @@ class SshPortForwarder implements PortForwarder {
     } catch (error) {
       throw AppFailure('Could not open a local port for the preview.', error);
     }
-    final forward = SshLocalPortForward(
-      client,
-      server,
-      remotePort: remotePort,
-    );
+    final forward = SshLocalPortForward(client, server, remotePort: remotePort);
     _forwards.add(forward);
     unawaited(forward.done.then((_) => _forwards.remove(forward)));
     return forward;

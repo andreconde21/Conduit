@@ -109,9 +109,7 @@ class _LivePreviewViewState extends State<LivePreviewView> {
     final webView = widget.createWebViewController();
     unawaited(webView.setJavaScriptMode(JavaScriptMode.unrestricted));
     unawaited(
-      webView.setBackgroundColor(
-        widget.palette.canvasFor(widget.brightness),
-      ),
+      webView.setBackgroundColor(widget.palette.canvasFor(widget.brightness)),
     );
     unawaited(
       webView.setNavigationDelegate(
@@ -313,7 +311,10 @@ class _LivePreviewViewState extends State<LivePreviewView> {
           if (connectionError != null && ready)
             MaterialBanner(
               backgroundColor: palette.warning.withValues(alpha: 0.12),
-              leading: Icon(Icons.warning_amber_rounded, color: palette.warning),
+              leading: Icon(
+                Icons.warning_amber_rounded,
+                color: palette.warning,
+              ),
               content: Text(
                 connectionError,
                 style: TextStyle(
