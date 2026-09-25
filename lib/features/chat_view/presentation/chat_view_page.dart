@@ -238,8 +238,18 @@ class _ChatViewPageState extends State<ChatViewPage>
   void _toggleReadAloud() {
     final readAloud = _readAloud;
     if (readAloud == null) return;
+    if (!readAloud.isAvailable) {
+      _tell(
+        'Reading aloud needs a text-to-speech engine. Install or turn one '
+        'on in Android Settings › Accessibility › Text-to-speech output.',
+      );
+      // It may have been installed since the chat opened.
+      unawaited(readAloud.checkAvailability());
+      return;
+    }
     final enabled = !readAloud.enabled;
     readAloud.setEnabled(enabled);
+    _tell(enabled ? 'Reading replies aloud' : 'Stopped reading aloud');
     final settings = _settings;
     if (settings != null) {
       unawaited(
@@ -250,6 +260,12 @@ class _ChatViewPageState extends State<ChatViewPage>
     }
   }
 
+  void _tell(String message) => ScaffoldMessenger.maybeOf(context)
+    ?..hideCurrentSnackBar()
+    ..showSnackBar(
+      SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
+    );
+
   /// The user is acting (sending, answering): stop talking over them.
   void _quiet() => _readAloud?.stop();
 
@@ -258,8 +274,13 @@ class _ChatViewPageState extends State<ChatViewPage>
     return _chat.send(text, enter: enter);
   }
 
+  /// The last lifecycle state seen, to tell leaving from coming back.
+  AppLifecycleState? _lifecycle;
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    final previous = _lifecycle;
+    _lifecycle = state;
     final readAloud = _readAloud;
     final talking = _talk?.active ?? false;
     if (state == AppLifecycleState.resumed ||
@@ -274,10 +295,22 @@ class _ChatViewPageState extends State<ChatViewPage>
     if (state == AppLifecycleState.inactive) {
       return;
     }
+    // Only going down (inactive → hidden) can mean the user left. Coming
+    // back up from paused passes through hidden too, with the screen
+    // already on (a notification woke it, the user unlocked): that is not
+    // leaving.
+    if (previous != AppLifecycleState.inactive) {
+      return;
+    }
     final onTop = ModalRoute.of(context)?.isCurrent ?? true;
     unawaited(
       readAloud.screenOn().then((screenOn) {
         if (!mounted) return;
+        // Back on screen before the answer came.
+        if (_lifecycle == AppLifecycleState.resumed ||
+            _lifecycle == AppLifecycleState.inactive) {
+          return;
+        }
         final keep = onTop && !screenOn;
         _chat.setVisible(keep);
         if (!keep) {
@@ -530,16 +563,37 @@ class _ChatViewPageState extends State<ChatViewPage>
               ],
             ),
             actions: [
+              if (_talk case final talk?)
+                ListenableBuilder(
+                  listenable: talk,
+                  builder: (context, _) => talk.active
+                      ? IconButton.filled(
+                          key: const ValueKey('chat-talk-toggle'),
+                          tooltip: 'End Talk mode',
+                          isSelected: true,
+                          onPressed: _stopTalk,
+                          icon: const Icon(Icons.record_voice_over_rounded),
+                        )
+                      : const SizedBox.shrink(),
+                ),
               if (_readAloud case final readAloud?)
                 _ReadAloudToggle(
                   controller: readAloud,
                   onPressed: _toggleReadAloud,
                 ),
-              TextButton.icon(
-                onPressed: widget.onOpenTerminal,
-                icon: const Icon(Icons.terminal_rounded),
-                label: const Text('Terminal'),
-              ),
+              // Narrow phones: the icon alone keeps room for the title.
+              if (MediaQuery.sizeOf(context).width < 400)
+                IconButton(
+                  tooltip: 'Terminal',
+                  onPressed: widget.onOpenTerminal,
+                  icon: const Icon(Icons.terminal_rounded),
+                )
+              else
+                TextButton.icon(
+                  onPressed: widget.onOpenTerminal,
+                  icon: const Icon(Icons.terminal_rounded),
+                  label: const Text('Terminal'),
+                ),
             ],
           ),
           body: SafeArea(
@@ -827,8 +881,9 @@ class _Centered extends StatelessWidget {
   }
 }
 
-/// The header's speaker: on/off for "Read replies aloud"; tinted while
-/// speaking. Turning it off stops speech at once.
+/// The header's speaker: on/off for "Read replies aloud", filled while
+/// on, a sound wave while speaking. Turning it off stops speech at once.
+/// Without a text-to-speech engine it shows muted and explains on tap.
 class _ReadAloudToggle extends StatelessWidget {
   const _ReadAloudToggle({required this.controller, required this.onPressed});
 
@@ -840,8 +895,17 @@ class _ReadAloudToggle extends StatelessWidget {
     return ListenableBuilder(
       listenable: controller,
       builder: (context, _) {
+        final colors = Theme.of(context).colorScheme;
         if (!controller.isAvailable) {
-          return const SizedBox.shrink();
+          return IconButton(
+            key: const ValueKey('chat-read-aloud'),
+            tooltip: 'Read aloud unavailable',
+            onPressed: onPressed,
+            icon: Icon(
+              Icons.volume_off_outlined,
+              color: colors.onSurface.withValues(alpha: 0.38),
+            ),
+          );
         }
         final on = controller.enabled;
         return IconButton(
@@ -849,12 +913,17 @@ class _ReadAloudToggle extends StatelessWidget {
           tooltip: on ? 'Stop reading replies aloud' : 'Read replies aloud',
           isSelected: on,
           onPressed: onPressed,
+          style: on
+              ? IconButton.styleFrom(
+                  backgroundColor: colors.primaryContainer,
+                  foregroundColor: colors.onPrimaryContainer,
+                )
+              : null,
           icon: const Icon(Icons.volume_off_outlined),
           selectedIcon: Icon(
             controller.speaking
-                ? Icons.record_voice_over_rounded
+                ? Icons.graphic_eq_rounded
                 : Icons.volume_up_rounded,
-            color: Theme.of(context).colorScheme.primary,
           ),
         );
       },

@@ -191,6 +191,42 @@ void main() {
     await tester.pump();
   });
 
+  testWidgets('the screen waking (a notification, unlocking) does not cut '
+      'the voice', (tester) async {
+    await settings.setVoice(settings.voice.copyWith(readAloudByDefault: true));
+    final chat = await pumpPage(tester, [
+      ok(page(history)),
+      ok(
+        page([
+          assistantLine('a2', [text('A long answer.')]),
+        ], offset: 200),
+      ),
+      ok(page([], offset: 200)),
+    ]);
+    await chat.refresh();
+    await tester.pump();
+    expect(tts.spoken, ['A long answer.']);
+
+    // Screen off with the chat on top: it keeps reading.
+    tts.interactive = false;
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+
+    // The agent-attention notification for the new message wakes the
+    // screen and the activity starts again: Flutter passes through
+    // `hidden` on the way up, with the screen already on.
+    tts.interactive = true;
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(tts.stops, 0, reason: 'coming back is not leaving');
+    expect(find.byTooltip('Stop reading replies aloud'), findsOneWidget);
+  });
+
   testWidgets('Talk: speak, auto-send, stay quiet, hear the answer, touch '
       'to stop', (tester) async {
     await settings.setVoice(settings.voice.copyWith(talkSendSilenceSeconds: 2));
@@ -250,5 +286,83 @@ void main() {
     final field = find.byKey(const ValueKey('chat-composer-field'));
     expect(tester.widget<TextField>(field).controller!.text, 'and deploy');
     await tester.pump(const Duration(seconds: 5));
+  });
+
+  group('header toggles', () {
+    IconButton readAloudButton(WidgetTester tester) => tester
+        .widget<IconButton>(find.byKey(const ValueKey('chat-read-aloud')));
+
+    testWidgets('read aloud is always in the header on a phone, filled '
+        'while on, and says what it did', (tester) async {
+      tester.view.physicalSize = const Size(360, 740);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await pumpPage(tester, [ok(page(history))]);
+
+      expect(find.byKey(const ValueKey('chat-read-aloud')), findsOneWidget);
+      expect(tester.takeException(), isNull, reason: 'no header overflow');
+      expect(find.byTooltip('Terminal'), findsOneWidget);
+      expect(readAloudButton(tester).isSelected, isFalse);
+
+      await tester.tap(find.byKey(const ValueKey('chat-read-aloud')));
+      await tester.pump();
+      expect(find.text('Reading replies aloud'), findsOneWidget);
+      expect(readAloudButton(tester).isSelected, isTrue);
+      expect(find.byTooltip('Stop reading replies aloud'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('chat-read-aloud')));
+      await tester.pump();
+      expect(find.text('Stopped reading aloud'), findsOneWidget);
+      expect(readAloudButton(tester).isSelected, isFalse);
+      await tester.pump(const Duration(seconds: 5));
+    });
+
+    testWidgets('without a speech engine it shows muted and explains', (
+      tester,
+    ) async {
+      tts.available = false;
+      await pumpPage(tester, [ok(page(history))]);
+      await tester.pump();
+
+      expect(find.byTooltip('Read aloud unavailable'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('chat-read-aloud')));
+      await tester.pump();
+      expect(find.textContaining('text-to-speech engine'), findsOneWidget);
+      expect(settings.voice.readAloudFor('s-1'), isFalse);
+
+      // Installed meanwhile: a tap looks again and finds it.
+      tts.available = true;
+      await tester.tap(find.byKey(const ValueKey('chat-read-aloud')));
+      await tester.pump(const Duration(seconds: 5));
+      expect(find.byTooltip('Read replies aloud'), findsOneWidget);
+    });
+
+    testWidgets('Talk mode shows as on in the header and ends from there', (
+      tester,
+    ) async {
+      final mic = FakeSpeechRecognizer();
+      final dictation = DictationController(mic, language: () => 'en-US');
+      addTearDown(dictation.dispose);
+      await pumpPage(tester, [ok(page(history))], dictation: dictation);
+
+      final toggle = find.byKey(const ValueKey('chat-talk-toggle'));
+      expect(toggle, findsNothing);
+      await tester.tap(find.byKey(const ValueKey('chat-talk')));
+      await tester.pump();
+      expect(toggle, findsOneWidget);
+      expect(find.byTooltip('End Talk mode'), findsOneWidget);
+      expect(find.byKey(const ValueKey('talk-panel')), findsOneWidget);
+
+      mic.emit(const SpeechPartial('and deploy'));
+      await tester.pump();
+      await tester.tap(toggle);
+      await tester.pump();
+      expect(toggle, findsNothing);
+      expect(find.byKey(const ValueKey('talk-panel')), findsNothing);
+      expect(dictation.isActive, isFalse);
+      final field = find.byKey(const ValueKey('chat-composer-field'));
+      expect(tester.widget<TextField>(field).controller!.text, 'and deploy');
+      await tester.pump(const Duration(seconds: 5));
+    });
   });
 }

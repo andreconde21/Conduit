@@ -24,7 +24,10 @@ import 'package:flutter/foundation.dart';
 /// The first call only records what is there, so opening a chat never
 /// re-reads its history. A turn that ends while reading is off, or while
 /// [suppressed] (the user is dictating), is marked as heard and not read
-/// later. Utterances queue and play one at a time.
+/// later. Utterances queue and play one at a time: new items never cut
+/// what is playing, only the user does ([stop], [setEnabled], dictating).
+/// A short audio interruption pauses and resumes from the sentence it cut
+/// (see [TtsPaused]).
 ///
 /// [conversation] (the Talk loop) reads even when [enabled] is off and
 /// phrases announcements with how to answer by voice.
@@ -60,7 +63,12 @@ class ReadAloudController extends ChangeNotifier {
 
   final Queue<String> _queue = Queue();
   String? _currentId;
+  String _currentText = '';
   Timer? _watchdog;
+
+  /// Another app has the audio for a moment; the queue waits.
+  bool _paused = false;
+  Timer? _pauseLimit;
   int _counter = 0;
   StreamSubscription<TtsEvent>? _events;
   bool _disposed = false;
@@ -126,6 +134,8 @@ class ReadAloudController extends ChangeNotifier {
     final wasSpeaking = _currentId != null || _queue.isNotEmpty;
     _queue.clear();
     _currentId = null;
+    _paused = false;
+    _pauseLimit?.cancel();
     _watchdog?.cancel();
     if (wasSpeaking) {
       unawaited(_tts.stop().catchError((Object _) {}));
@@ -217,20 +227,14 @@ class ReadAloudController extends ChangeNotifier {
   }
 
   Future<void> _pump() async {
-    if (_disposed || _currentId != null || _queue.isEmpty) return;
+    if (_disposed || _paused || _currentId != null || _queue.isEmpty) return;
     final text = _queue.removeFirst();
     final id = 'read-aloud-${_counter++}';
     _currentId = id;
+    _currentText = text;
     notifyListeners();
     final prefs = preferences();
-    // A reply the engine never finishes (or never reports on) must not
-    // stall the queue: move on after a generous estimate.
-    _watchdog?.cancel();
-    _watchdog = Timer(
-      const Duration(seconds: 10) +
-          Duration(milliseconds: (text.length * 120 / prefs.ttsRate).round()),
-      () => _finish(id),
-    );
+    _arm(id, started: false);
     try {
       await _tts.setRate(prefs.ttsRate);
       await _tts.setPitch(prefs.ttsPitch);
@@ -246,16 +250,71 @@ class ReadAloudController extends ChangeNotifier {
     }
   }
 
+  /// A reply the engine never finishes (or never reports on) must not
+  /// stall the queue: move on after a generous estimate. The clock
+  /// restarts when the engine reports the start, so a slow engine or
+  /// voice is never cut off (the native side queues rather than flushes,
+  /// so even a wrong guess does not cut the voice).
+  void _arm(String id, {required bool started}) {
+    final estimate = Duration(
+      milliseconds: (_currentText.length * 120 / preferences().ttsRate).round(),
+    );
+    _watchdog?.cancel();
+    _watchdog = Timer(
+      started
+          ? const Duration(seconds: 30) + estimate * 2
+          : const Duration(seconds: 10) + estimate,
+      () => _finish(id),
+    );
+  }
+
   void _onEvent(TtsEvent event) {
     switch (event) {
       case TtsDone(:final id) || TtsFailed(:final id) || TtsStopped(:final id):
         _finish(id);
       case TtsInterrupted():
-        // A call or another app took the audio: drop the backlog.
+        // Music, a video or a call took the audio for good: drop the
+        // backlog.
         stop();
-      case TtsStarted():
-        break;
+      case TtsStarted(:final id):
+        if (id == _currentId) _arm(id, started: true);
+      case TtsPaused(:final id, :final offset):
+        _pause(id, offset);
+      case TtsResumed():
+        if (!_paused) return;
+        _paused = false;
+        _pauseLimit?.cancel();
+        unawaited(_pump());
     }
+  }
+
+  /// How long a paused reply waits for the audio to come back.
+  static const _maxPause = Duration(minutes: 3);
+
+  /// Puts the rest of the cut utterance, from the start of the sentence
+  /// it was in, back at the front of the queue until [TtsResumed].
+  void _pause(String id, int offset) {
+    if (id != _currentId || _disposed) return;
+    _watchdog?.cancel();
+    _currentId = null;
+    final rest = _resumeFrom(_currentText, offset);
+    if (rest.isNotEmpty) _queue.addFirst(rest);
+    _paused = true;
+    _pauseLimit?.cancel();
+    _pauseLimit = Timer(_maxPause, stop);
+    notifyListeners();
+  }
+
+  static final _sentenceBreak = RegExp(r'[.!?…]\s+');
+
+  static String _resumeFrom(String text, int offset) {
+    if (offset <= 0 || offset >= text.length) return text;
+    var start = 0;
+    for (final match in _sentenceBreak.allMatches(text)) {
+      if (match.end > offset) break;
+      start = match.end;
+    }
+    return text.substring(start).trim();
   }
 
   void _finish(String id) {
@@ -271,6 +330,7 @@ class ReadAloudController extends ChangeNotifier {
     stop();
     _disposed = true;
     _watchdog?.cancel();
+    _pauseLimit?.cancel();
     unawaited(_events?.cancel());
     super.dispose();
   }

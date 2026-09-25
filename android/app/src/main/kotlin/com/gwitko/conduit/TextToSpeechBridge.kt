@@ -28,8 +28,9 @@ import java.util.Locale
  *  - `isAvailable` -> Boolean, whether a TTS engine initialised.
  *  - `voices` {language?: String} -> List<Map> of offline voices
  *    ({id, name, locale, quality}) for the language (all when null).
- *  - `speak` {text, id, language?, voice?} -> null. Flushes whatever was
- *    playing: the Dart side queues and sends one utterance at a time.
+ *  - `speak` {text, id, language?, voice?} -> null. Queues behind whatever
+ *    is playing (never cuts it off): the Dart side queues and sends one
+ *    utterance at a time; only `stop` cuts.
  *  - `stop` -> null, stops at once and releases audio focus.
  *  - `setRate` {rate: Double}, `setPitch` {pitch: Double} -> null.
  *  - `isInteractive` -> Boolean, whether the screen is on.
@@ -38,9 +39,15 @@ import java.util.Locale
  *  - {type: "start" | "done", id}
  *  - {type: "error", id, message}
  *  - {type: "stopped", id} when an utterance was interrupted.
+ *  - {type: "paused", id, offset} when another app took the audio for a
+ *    moment (a ringtone, a voice note): the utterance was cut near
+ *    character `offset`; {type: "resumed"} when the audio is back.
+ *  - {type: "interrupted"} when another app took the audio for good.
  *
  * Audio focus: AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK with speech attributes,
- * so music ducks under the voice. Focus is held across consecutive
+ * so music ducks under the voice. A notification sound asks to duck us
+ * and the voice carries on; a transient loss pauses; only a permanent
+ * loss (music, a video) stops and drops the queue. Focus is held across consecutive
  * utterances and released a moment after the last one ends (no un-duck /
  * duck flicker between sentences). No foreground service: speech continues
  * with the screen off only while the Dart side keeps sending utterances.
@@ -61,6 +68,9 @@ class TextToSpeechBridge(private val activity: Activity) :
     private var focusRequest: AudioFocusRequest? = null
     private var hasFocus = false
     private var speaking = false
+    private var paused = false
+    private var currentId = ""
+    private var spokenUpTo = 0
     private val releaseFocus = Runnable { abandonFocus() }
 
     private val attributes: AudioAttributes = AudioAttributes.Builder()
@@ -165,7 +175,10 @@ class TextToSpeechBridge(private val activity: Activity) :
             putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1f)
         }
         speaking = true
-        val status = engine.speak(text, TextToSpeech.QUEUE_FLUSH, params, id)
+        paused = false
+        currentId = id
+        spokenUpTo = 0
+        val status = engine.speak(text, TextToSpeech.QUEUE_ADD, params, id)
         if (status != TextToSpeech.SUCCESS) {
             speaking = false
             emit(mapOf("type" to "error", "id" to id, "message" to "Could not speak."))
@@ -175,6 +188,7 @@ class TextToSpeechBridge(private val activity: Activity) :
 
     private fun stop() {
         speaking = false
+        paused = false
         try {
             tts?.stop()
         } catch (_: RuntimeException) {
@@ -250,10 +264,17 @@ class TextToSpeechBridge(private val activity: Activity) :
 
         override fun onDone(utteranceId: String?) {
             main.post {
-                speaking = false
-                scheduleFocusRelease()
+                // A later utterance may be queued behind this one.
+                if (utteranceId == currentId) {
+                    speaking = false
+                    scheduleFocusRelease()
+                }
                 emit(mapOf("type" to "done", "id" to (utteranceId ?: "")))
             }
+        }
+
+        override fun onRangeStart(utteranceId: String?, start: Int, end: Int, frame: Int) {
+            main.post { if (utteranceId == currentId) spokenUpTo = start }
         }
 
         override fun onStop(utteranceId: String?, interrupted: Boolean) {
@@ -269,8 +290,10 @@ class TextToSpeechBridge(private val activity: Activity) :
 
         override fun onError(utteranceId: String?, errorCode: Int) {
             main.post {
-                speaking = false
-                scheduleFocusRelease()
+                if (utteranceId == currentId) {
+                    speaking = false
+                    scheduleFocusRelease()
+                }
                 emit(
                     mapOf(
                         "type" to "error",
@@ -293,7 +316,7 @@ class TextToSpeechBridge(private val activity: Activity) :
             val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
                 .setAudioAttributes(attributes)
                 .setOnAudioFocusChangeListener { change ->
-                    if (change == AudioManager.AUDIOFOCUS_LOSS) main.post { stopForFocusLoss() }
+                    main.post { onFocusChange(change) }
                 }
                 .build()
             focusRequest = request
@@ -308,11 +331,34 @@ class TextToSpeechBridge(private val activity: Activity) :
         }
     }
 
-    /** A call or another app took the audio for good: go quiet. */
-    private fun stopForFocusLoss() {
-        if (!speaking) return
-        stop()
-        emit(mapOf("type" to "interrupted"))
+    private fun onFocusChange(change: Int) {
+        when (change) {
+            // Music or a video took the audio for good: go quiet.
+            AudioManager.AUDIOFOCUS_LOSS -> {
+                if (!speaking && !paused) return
+                stop()
+                emit(mapOf("type" to "interrupted"))
+            }
+            // A ringtone or a voice note for a moment: pause, keep the
+            // focus request so the audio comes back to us.
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                if (!speaking) return
+                speaking = false
+                paused = true
+                emit(mapOf("type" to "paused", "id" to currentId, "offset" to spokenUpTo))
+                try {
+                    tts?.stop()
+                } catch (_: RuntimeException) {
+                }
+            }
+            AudioManager.AUDIOFOCUS_GAIN -> {
+                if (!paused) return
+                paused = false
+                emit(mapOf("type" to "resumed"))
+            }
+            // AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK (a notification sound):
+            // keep speaking.
+        }
     }
 
     private fun abandonFocus() {
