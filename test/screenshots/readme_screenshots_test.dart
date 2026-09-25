@@ -4,7 +4,6 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:conduit/core/presentation/theme_sheet.dart';
 import 'package:conduit/core/theme/app_palette.dart';
@@ -27,17 +26,28 @@ import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/home_board_controller.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/hosts/presentation/hosts_page.dart';
+import 'package:conduit/features/live_preview/presentation/preview_ready_controller.dart';
 import 'package:conduit/features/local_shell/presentation/local_shell_controller.dart';
 import 'package:conduit/features/prompt_menus/presentation/prompt_menu_strip.dart';
 import 'package:conduit/features/sessions/domain/connect_preferences.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
+import 'package:conduit/features/sync/data/sync_crypto.dart';
+import 'package:conduit/features/sync/data/sync_setup.dart';
+import 'package:conduit/features/sync/data/sync_state_store.dart';
+import 'package:conduit/features/sync/presentation/sync_controller.dart';
+import 'package:conduit/features/sync/presentation/sync_page.dart';
+import 'package:conduit/features/sync/presentation/widgets/qr_code_view.dart';
 import 'package:conduit/features/terminal/domain/herdr_keymap.dart';
 import 'package:conduit/features/terminal/domain/herdr_navigator.dart';
+import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:conduit/features/terminal/presentation/host_key_prompt_coordinator.dart';
 import 'package:conduit/features/terminal/presentation/terminal_page.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
+import 'package:conduit/features/voice/presentation/dictation_controller.dart';
+import 'package:conduit/features/voice/presentation/voice_settings_scope.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wakelock_plus_platform_interface/wakelock_plus_platform_interface.dart';
@@ -45,7 +55,11 @@ import 'package:wakelock_plus_platform_interface/wakelock_plus_platform_interfac
 import '../features/chat_view/chat_fixtures.dart';
 import '../features/companion_setup/companion_fakes.dart' show MatchingRunner;
 import '../features/hosts/home_board_fakes.dart';
+import '../features/sync/fake_sync_hub.dart';
+import '../features/sync/sync_test_support.dart';
 import '../features/terminal/herdr/fake_herdr_runner.dart';
+import '../features/voice/fake_speech_recognizer.dart';
+import '../features/voice/fake_tts.dart';
 import '../support/test_doubles.dart';
 import 'demo_screens.dart';
 import 'screenshot_harness.dart';
@@ -163,9 +177,9 @@ AgentCommandResult ok(String stdout) =>
 const workstationPanes =
     '{"id":"cli:pane:list","result":{"panes":['
     '{"pane_id":"w1:p1","workspace_id":"w1","tab_id":"w1:t1",'
-    '"cwd":"/home/demo/demo/todo-api","focused":true},'
+    '"cwd":"/home/demo/todo-api","focused":true},'
     '{"pane_id":"w1:p2","workspace_id":"w1","tab_id":"w1:t2",'
-    '"cwd":"/home/demo/demo/todo-api"}],"type":"pane_list"}}';
+    '"cwd":"/home/demo/todo-api"}],"type":"pane_list"}}';
 
 /// Answers the Herdr CLI on the workstation from the demo fixtures.
 AgentCommandResult workstationHerdr(String command) {
@@ -203,7 +217,7 @@ String agentJson(
   String pending = '',
   String extra = '',
 }) =>
-    '{"sessionId":"$id","name":"$name","cwd":"/home/demo/demo/$name",'
+    '{"sessionId":"$id","name":"$name","cwd":"/home/demo/$name",'
     '"state":"$state","updatedAt":${minutesAgo(minutes)},'
     '"startedAt":${minutesAgo(minutes + 30)}'
     '${message == null ? '' : ',"lastMessage":"$message"'}'
@@ -258,6 +272,78 @@ String buildBoxStatus() => statusOf([
   ),
 ]);
 
+/// [line] stamped [ago] before now, so elapsed times read naturally.
+Map<String, Object?> stamped(Map<String, Object?> line, Duration ago) =>
+    line
+      ..['timestamp'] = DateTime.now().toUtc().subtract(ago).toIso8601String();
+
+/// A transcript page whose agent started [started] ago.
+String livePage(
+  List<Map<String, Object?>> entries, {
+  required String state,
+  Duration started = const Duration(minutes: 26),
+  List<Map<String, Object?>> pending = const [],
+}) {
+  final json =
+      jsonDecode(page(entries, state: state, pending: pending))
+          as Map<String, Object?>;
+  final agent = json['agent']! as Map<String, Object?>;
+  final now = DateTime.now();
+  agent['startedAt'] = now.subtract(started).millisecondsSinceEpoch;
+  agent['updatedAt'] = now.millisecondsSinceEpoch;
+  return jsonEncode(json);
+}
+
+const _dateTable =
+    'Here is how they compare for a due date field:\n\n'
+    '| Library | Time zones | Tree-shakes | Size |\n'
+    '|:--------|:----------:|:-----------:|:----:|\n'
+    '| date-fns | add-on | yes | 18 KB |\n'
+    '| Day.js | plugin | partly | 3 KB |\n'
+    '| Luxon | built in | no | 23 KB |\n\n'
+    "I'll go with **date-fns**: we only need parsing and comparing, and it "
+    'tree-shakes to about 2 KB for that.';
+
+/// Demo sync keys: fast parameters, nothing real.
+const _syncCrypto = SyncCrypto(
+  params: KdfParams.insecureFast,
+  useIsolate: false,
+);
+
+Future<SyncController> demoSyncDevice(
+  FakeHubServer server, {
+  List<SavedHost> hosts = const [],
+}) async {
+  final local = await LocalDevice.create(
+    hosts: hosts,
+    trustedKeys: [
+      HostKeyRecord(
+        host: workstation.host,
+        port: 22,
+        type: 'ssh-ed25519',
+        fingerprint: 'SHA256:demo-workstation',
+        trustedAt: DateTime.utc(2026, 9),
+      ),
+    ],
+  );
+  final sync = SyncController(
+    state: InMemorySyncStateStore(),
+    local: local.store,
+    hubFactory: server.factory,
+    hosts: local.hosts,
+    hostKeys: local.verifier,
+    crypto: _syncCrypto,
+    setupCodec: const SyncSetupCodec(
+      crypto: _syncCrypto,
+      params: KdfParams.insecureFast,
+    ),
+    timers: FakeSyncTimers(),
+    observeLifecycle: false,
+  );
+  await sync.start();
+  return sync;
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   WakelockPlusPlatformInterface.instance = _NoopWakelock();
@@ -277,8 +363,15 @@ void main() {
   }
 
   /// The home page: two Herdr sessions open, other workspaces listed.
-  Future<ThemeController> pumpHome(WidgetTester tester) async {
-    usePhoneView(tester);
+  Future<ThemeController> pumpHome(
+    WidgetTester tester, {
+    bool desktop = false,
+  }) async {
+    if (desktop) {
+      useDesktopView(tester);
+    } else {
+      usePhoneView(tester);
+    }
     final theme = await everforest();
     final repository = FakeHostsRepository()
       ..persisted = [workstation, buildBox];
@@ -351,6 +444,7 @@ void main() {
           homePreferences: InMemoryHomePreferencesRepository(),
           previewRefreshInterval: const Duration(days: 1),
         ),
+        systemBars: !desktop,
       ),
     );
     await tester.runAsync(pumpEventQueue);
@@ -378,8 +472,18 @@ void main() {
     WidgetTester tester, {
     required bool withPrompt,
     bool inbox = false,
+    bool desktop = false,
+    bool moreSessions = false,
+    ConnectTarget? target,
+    String? screen,
+    PreviewReadyController Function(TerminalSessionController)?
+    previewWatcherFactory,
   }) async {
-    usePhoneView(tester);
+    if (desktop) {
+      useDesktopView(tester);
+    } else {
+      usePhoneView(tester);
+    }
     HerdrPaneListingCache.instance.clear();
     HerdrKeymapCache.instance.clear();
     final theme = await everforest();
@@ -387,11 +491,14 @@ void main() {
       agentAttentionEnabled: true,
       agentMonitor: AgentMonitorKind.companion,
     );
-    final host = const ConnectTarget.herdr(
-      workspaceId: 'w1',
-      label: 'api',
-      tabId: 'w1:t1',
-    ).apply(companion(workstation));
+    final host =
+        (target ??
+                const ConnectTarget.herdr(
+                  workspaceId: 'w1',
+                  label: 'api',
+                  tabId: 'w1:t1',
+                ))
+            .apply(companion(workstation));
     final hostsController = HostsController(
       FakeHostsRepository()..persisted = [workstation, buildBox],
     );
@@ -417,12 +524,23 @@ void main() {
       runnerFactory: (_) => FakeHerdrRunner(workstationHerdr),
       preferences: InMemoryConnectPreferencesRepository(),
     );
-    if (inbox) {
+    if (inbox || moreSessions) {
       await openDemoSession(
         tester,
         workspace,
         const ConnectTarget.tmux('ci').apply(companion(buildBox)),
         shellTestsScreen(),
+      );
+    }
+    if (moreSessions) {
+      await openDemoSession(
+        tester,
+        workspace,
+        const ConnectTarget.herdr(
+          workspaceId: 'w2',
+          label: 'web',
+        ).apply(companion(workstation)),
+        claudeWorkingScreen(),
       );
     }
     final session = workspace.open(host);
@@ -438,11 +556,19 @@ void main() {
           sftpRepository: NoNetworkSftpRepository(),
           agentAttention: agentAttention,
           connectFlow: flow,
+          previewWatcherFactory: previewWatcherFactory,
         ),
+        systemBars: !desktop,
       ),
     );
     await pumpFrames(tester);
-    session.terminal.write(claudeTerminalScreen(withPrompt: withPrompt));
+    session.terminal.write(
+      screen ??
+          claudeTerminalScreen(
+            withPrompt: withPrompt,
+            width: desktop ? 96 : 46,
+          ),
+    );
     await tester.pump(PromptMenuStrip.defaultDebounce);
     await pumpFrames(tester);
 
@@ -477,7 +603,10 @@ void main() {
   testWidgets('03 chat view', (tester) async {
     usePhoneView(tester);
     final thread = [
-      userLine('u1', 'Add a due date to todos and cover it with tests'),
+      stamped(
+        userLine('u1', 'Add a due date to todos and cover it with tests'),
+        const Duration(minutes: 12),
+      ),
       assistantLine('a1', [
         text(
           "I'll add an optional **`dueDate`** to the todo schema, then:\n"
@@ -492,7 +621,7 @@ void main() {
       userLine('r1', [toolResult('t1', 'Tests  18 passed (18)')]),
       assistantLine('a2', [
         toolUse('t2', 'Edit', {
-          'file_path': '/home/demo/demo/todo-api/src/routes/todos.ts',
+          'file_path': '/home/demo/todo-api/src/routes/todos.ts',
           'old_string': '  done: z.boolean(),',
           'new_string':
               '  dueDate: z.string().datetime().optional(),\n'
@@ -513,9 +642,10 @@ void main() {
     final controller = ChatViewController(
       runner: ScriptedAgentCommandRunner([
         ok(
-          page(
+          livePage(
             thread,
             state: 'needs_permission',
+            started: const Duration(minutes: 12),
             pending: [
               {
                 'id': 'req-1',
@@ -544,7 +674,7 @@ void main() {
       ),
     );
     await pumpFrames(tester);
-    await tester.tap(find.text('/home/demo/demo/todo-api/src/routes/todos.ts'));
+    await tester.tap(find.text('/home/demo/todo-api/src/routes/todos.ts'));
     await pumpFrames(tester);
     await saveShot(tester, '03-chat-view');
     await tearDownPage(tester);
@@ -620,5 +750,301 @@ void main() {
     await pumpFrames(tester, 8);
     await saveShot(tester, '08-agent-hooks');
     await tearDownPage(tester);
+  });
+
+  testWidgets('09 quick switcher', (tester) async {
+    await pumpTerminal(tester, withPrompt: true, moreSessions: true);
+    await tester.tap(find.byTooltip('Sessions'));
+    await pumpFrames(tester, 8);
+    await saveShot(tester, '09-quick-switcher');
+    await tearDownPage(tester);
+  });
+
+  testWidgets('10 chat view working', (tester) async {
+    usePhoneView(tester);
+    final thread = [
+      stamped(
+        userLine('u0', 'Add a dueDate field to the todo schema'),
+        const Duration(minutes: 9),
+      ),
+      assistantLine('a0', [
+        text(
+          'Added an optional `dueDate` (ISO 8601) to the schema and the '
+          'create route. Asking the reviewer agent to check it.',
+        ),
+      ]),
+      stamped(
+        userLine(
+          'm1',
+          '<teammate-message teammate_id="reviewer" color="green" '
+              'summary="Due date PR reviewed">\n'
+              'Looks good. Sort overdue todos before the ones without a '
+              'date.\n</teammate-message>',
+        ),
+        const Duration(minutes: 6),
+      ),
+      stamped(
+        userLine('u1', 'Which date library should the due date use?'),
+        const Duration(minutes: 2, seconds: 14),
+      ),
+      assistantLine('a1', [
+        toolUse('task1', 'Task', {
+          'description': 'Compare date libraries',
+          'subagent_type': 'Explore',
+          'prompt': 'Compare date-fns, Day.js and Luxon for this repo',
+        }),
+      ]),
+      assistantLine('s1', [
+        toolUse('g1', 'Grep', {'pattern': 'new Date\\('}),
+      ], sidechain: true),
+      userLine('s2', [toolResult('g1', 'Found 7 files')], sidechain: true),
+      assistantLine('s3', [
+        toolUse('r1', 'Read', {
+          'file_path': '/home/demo/todo-api/package.json',
+        }),
+      ], sidechain: true),
+      userLine('s4', [toolResult('r1', '{ ... }')], sidechain: true),
+      userLine('u2', [toolResult('task1', 'date-fns fits best.')]),
+      assistantLine('a2', [text(_dateTable)]),
+      assistantLine('a3', [
+        toolUse('t2', 'Bash', {
+          'command': 'npm install date-fns && npm test -- due-date',
+          'description': 'Install date-fns and run the due date tests',
+        }),
+      ]),
+    ];
+    final controller = ChatViewController(
+      runner: ScriptedAgentCommandRunner([
+        ok(livePage(thread, state: 'working')),
+      ]),
+      sessionId: 's-1',
+      decide: (_, _) async {},
+      pollInterval: const Duration(days: 1),
+    );
+    await tester.pumpWidget(shotApp(home: const Scaffold()));
+    await pushPage(
+      tester,
+      ChatViewPage(
+        controller: controller,
+        hostName: 'workstation',
+        onOpenTerminal: () {},
+      ),
+    );
+    await pumpFrames(tester, 8);
+    await saveShot(tester, '10-chat-working');
+    await tearDownPage(tester);
+  });
+
+  testWidgets('11 talk mode', (tester) async {
+    usePhoneView(tester);
+    final theme = await everforest();
+    await theme.setVoice(theme.voice.copyWith(talkSendSilenceSeconds: 2));
+    final mic = FakeSpeechRecognizer();
+    final dictation = DictationController(mic, language: () => 'en-US');
+    addTearDown(dictation.dispose);
+    final history = [
+      stamped(
+        userLine('u-1', 'Add a due date to todos and cover it with tests'),
+        const Duration(minutes: 14),
+      ),
+      assistantLine('a-1', [
+        text(
+          'Done. Todos now have an optional **`dueDate`**:\n'
+          '- validated as an ISO 8601 date in the create and update routes\n'
+          '- returned by `GET /todos` and filterable with `?due=today`\n'
+          '- covered by 12 new tests in `test/due-date.test.ts`',
+        ),
+      ]),
+      stamped(
+        userLine('u0', 'Sort overdue todos first'),
+        const Duration(minutes: 8),
+      ),
+      assistantLine('a0', [
+        toolUse('t0', 'Edit', {
+          'file_path': '/home/demo/todo-api/src/lib/sort.ts',
+          'old_string': '  return a.createdAt - b.createdAt;',
+          'new_string':
+              '  if (isOverdue(a) !== isOverdue(b)) {\n'
+              '    return isOverdue(a) ? -1 : 1;\n'
+              '  }\n'
+              '  return a.createdAt - b.createdAt;',
+        }),
+      ]),
+      userLine('r0', [toolResult('t0', 'ok')]),
+      assistantLine('a00', [
+        text('Overdue todos now come first; the rest keep their order.'),
+      ]),
+      stamped(
+        userLine('u1', 'Run the due date tests'),
+        const Duration(minutes: 3),
+      ),
+      assistantLine('a1', [
+        toolUse('t1', 'Bash', {
+          'command': 'npm test -- due-date',
+          'description': 'Run the due date tests',
+        }),
+      ]),
+      userLine('r1', [toolResult('t1', 'Tests  24 passed (24)')]),
+      assistantLine('a2', [
+        text(
+          'All **24** due date tests pass, including the overdue sorting. '
+          'Want me to add a reminder before a todo is due?',
+        ),
+      ]),
+    ];
+    final idle = ok(livePage(history, state: 'waiting_input'));
+    final controller = ChatViewController(
+      runner: ScriptedAgentCommandRunner([
+        idle,
+        ok('{"ok":true}'),
+        for (var i = 0; i < 8; i++) idle,
+      ]),
+      sessionId: 's-1',
+      decide: (_, _) async {},
+      pollInterval: const Duration(days: 1),
+    );
+    await tester.pumpWidget(
+      VoiceSettingsScope(
+        settings: theme,
+        child: shotApp(home: const Scaffold()),
+      ),
+    );
+    await pushPage(
+      tester,
+      ChatViewPage(
+        controller: controller,
+        hostName: 'workstation',
+        onOpenTerminal: () {},
+        textToSpeech: FakeTts(),
+        dictation: dictation,
+      ),
+    );
+    await pumpFrames(tester);
+    await tester.tap(find.byKey(const ValueKey('chat-talk')));
+    await tester.pump();
+    mic.say('Yes, remind me the evening before');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 2400));
+    await pumpFrames(tester, 2);
+    await saveShot(tester, '11-talk-mode');
+    await tearDownPage(tester);
+  });
+
+  /// A phone syncing through the workstation, with a laptop and a Mac
+  /// joined through setup codes. The hub is a fake in memory.
+  Future<SyncController> pumpSync(WidgetTester tester) async {
+    usePhoneView(tester);
+    final server = FakeHubServer();
+    final phone = await demoSyncDevice(server, hosts: [workstation, buildBox]);
+    await phone.setUp(
+      hub: workstation,
+      passphrase: 'demo-passphrase-only',
+      deviceName: 'Pixel 8',
+    );
+    for (final name in ['ThinkPad', 'MacBook']) {
+      final offer = await phone.addDevice(name);
+      final other = await demoSyncDevice(server);
+      await other.join(
+        setupCode: offer.setupCode,
+        words: offer.words.join(' '),
+        deviceName: name,
+      );
+    }
+    await phone.syncNow();
+    await phone.refreshDevices();
+    await tester.pumpWidget(shotApp(home: const Scaffold()));
+    await pushPage(tester, SyncPage(controller: phone));
+    await tester.runAsync(pumpEventQueue);
+    await pumpFrames(tester, 8);
+    return phone;
+  }
+
+  /// Lets real async work (the fake hub, crypto) finish while frames pump.
+  Future<void> pumpUntil(WidgetTester tester, bool Function() done) async {
+    for (var i = 0; i < 200 && !done(); i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 5)),
+      );
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    await pumpFrames(tester, 8);
+  }
+
+  testWidgets('12 sync', (tester) async {
+    await pumpSync(tester);
+    // Down to the device list, keeping the last switches in view.
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -470));
+    await pumpFrames(tester, 8);
+    await saveShot(tester, '12-sync');
+    await tearDownPage(tester);
+  });
+
+  testWidgets('13 sync add device', (tester) async {
+    await pumpSync(tester);
+    final add = find.byKey(const ValueKey('sync-add-device'));
+    await tester.scrollUntilVisible(
+      add,
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await pumpFrames(tester);
+    await tester.tap(add);
+    await pumpFrames(tester, 8);
+    await tester.enterText(
+      find.byKey(const ValueKey('sync-new-device-name')),
+      'iPad',
+    );
+    await tester.tap(find.byKey(const ValueKey('sync-create-pairing')));
+    await pumpFrames(tester, 8);
+    await tester.tap(find.byKey(const ValueKey('sync-add-device-confirm')));
+    await pumpUntil(
+      tester,
+      () => find.byType(QrCodeView).evaluate().isNotEmpty,
+    );
+    FocusManager.instance.primaryFocus?.unfocus();
+    await pumpFrames(tester, 8);
+    await saveShot(tester, '13-sync-add-device');
+    await tearDownPage(tester);
+  });
+
+  testWidgets('14 live preview ready', (tester) async {
+    final runner = ScriptedAgentCommandRunner([
+      for (var i = 0; i < 4; i++) ok('{"seq":3,"ports":[]}'),
+    ]);
+    await pumpTerminal(
+      tester,
+      withPrompt: false,
+      target: const ConnectTarget.tmux('web-dev'),
+      screen: viteDevServerScreen(),
+      previewWatcherFactory: (_) =>
+          PreviewReadyController(runnerFactory: () => runner),
+    );
+    await tester.pump(PreviewReadyController.defaultStartDelay);
+    await tester.pump(PreviewReadyController.defaultScreenDebounce);
+    await pumpFrames(tester);
+    await saveShot(tester, '14-live-preview-ready');
+    await tearDownPage(tester);
+  });
+
+  testWidgets('15 desktop terminal', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    try {
+      await pumpTerminal(tester, withPrompt: false, desktop: true);
+      await saveShot(tester, '15-desktop-terminal', pixelRatio: 1);
+      await tearDownPage(tester);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets('16 desktop home', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    try {
+      await pumpHome(tester, desktop: true);
+      await saveShot(tester, '16-desktop-home', pixelRatio: 1);
+      await tearDownPage(tester);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
   });
 }

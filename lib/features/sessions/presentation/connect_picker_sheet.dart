@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_palette.dart';
@@ -38,7 +39,9 @@ Future<ConnectPickerResult?> showConnectPicker({
   ConnectPickerTab initialTab = ConnectPickerTab.tmux,
   List<String> recentDirectories = const [],
 }) {
-  return showModalBottomSheet<ConnectPickerResult>(
+  return showAdaptiveModal<ConnectPickerResult>(
+    kind: AdaptiveModalKind.dialog,
+    desktopFill: true,
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
@@ -46,9 +49,9 @@ Future<ConnectPickerResult?> showConnectPicker({
       value: AppTheme.systemUiOverlayStyle(Theme.of(context).brightness),
       child: DraggableScrollableSheet(
         expand: false,
-        initialChildSize: 0.62,
-        minChildSize: 0.35,
-        maxChildSize: 0.92,
+        initialChildSize: adaptiveSheetFraction(context, 0.62),
+        minChildSize: adaptiveSheetFraction(context, 0.35),
+        maxChildSize: adaptiveSheetFraction(context, 0.92),
         builder: (context, scrollController) => ConnectPickerSheet(
           host: host,
           runner: runner,

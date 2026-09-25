@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:conduit/core/platform_features.dart';
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/features/terminal/domain/clipboard_image_paste.dart';
 import 'package:conduit/features/terminal/domain/prompt_image.dart';
 import 'package:conduit/features/voice/presentation/dictation_button.dart';
@@ -42,7 +43,8 @@ Future<void> showPromptComposerSheet({
   PromptImageAttacher? imageAttacher,
   bool pasteImages = true,
 }) {
-  return showModalBottomSheet<void>(
+  return showAdaptiveModal<void>(
+    kind: AdaptiveModalKind.dialog,
     context: context,
     isScrollControlled: true,
     useSafeArea: true,

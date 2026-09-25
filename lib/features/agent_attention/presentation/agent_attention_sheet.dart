@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
@@ -26,7 +27,9 @@ Future<void> showAgentAttentionSheet({
   required AgentAttentionNavigate onOpenAgent,
   AgentAttentionNavigate? onOpenChat,
 }) {
-  return showModalBottomSheet<void>(
+  return showAdaptiveModal<void>(
+    kind: AdaptiveModalKind.sidePanel,
+    desktopFill: true,
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
@@ -34,9 +37,9 @@ Future<void> showAgentAttentionSheet({
       value: AppTheme.systemUiOverlayStyle(Theme.of(context).brightness),
       child: DraggableScrollableSheet(
         expand: false,
-        initialChildSize: 0.6,
-        minChildSize: 0.3,
-        maxChildSize: 0.92,
+        initialChildSize: adaptiveSheetFraction(context, 0.6),
+        minChildSize: adaptiveSheetFraction(context, 0.3),
+        maxChildSize: adaptiveSheetFraction(context, 0.92),
         builder: (context, scrollController) => AgentAttentionSheet(
           controller: controller,
           scrollController: scrollController,

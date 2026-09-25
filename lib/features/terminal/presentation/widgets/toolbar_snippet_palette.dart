@@ -1,3 +1,4 @@
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
 import 'package:flutter/material.dart';
@@ -36,7 +37,8 @@ Future<void> showToolbarSnippetPalette({
   String hostPassword = '',
   ValueChanged<String>? onPassword,
 }) {
-  return showModalBottomSheet<void>(
+  return showAdaptiveModal<void>(
+    kind: AdaptiveModalKind.palette,
     context: context,
     useSafeArea: true,
     isScrollControlled: true,

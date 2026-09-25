@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
@@ -201,7 +202,8 @@ class SessionConnectFlow {
   Future<TerminalSessionController?> pickHostAndConnect(
     BuildContext context,
   ) async {
-    final host = await showModalBottomSheet<SavedHost>(
+    final host = await showAdaptiveModal<SavedHost>(
+      kind: AdaptiveModalKind.dialog,
       context: context,
       useSafeArea: true,
       builder: (context) => AnnotatedRegion<SystemUiOverlayStyle>(
@@ -230,7 +232,7 @@ class _HostChooser extends StatelessWidget {
     return ListenableBuilder(
       listenable: hostsController,
       builder: (context, _) {
-        final hosts = hostsController.sortedHosts
+        final hosts = hostsController.sortedMachines
             .where((host) => !host.isLocal)
             .toList();
         return ListView(
@@ -255,7 +257,11 @@ class _HostChooser extends StatelessWidget {
             else
               for (final host in hosts)
                 ListTile(
-                  leading: const Icon(Icons.dns_rounded),
+                  leading: Icon(
+                    host.isThisComputer
+                        ? Icons.computer_rounded
+                        : Icons.dns_rounded,
+                  ),
                   title: Text(
                     host.name,
                     maxLines: 1,

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -9,7 +10,8 @@ Future<void> showBackupSheet({
   required BuildContext context,
   required AppBackupService backupService,
 }) {
-  return showModalBottomSheet<void>(
+  return showAdaptiveModal<void>(
+    kind: AdaptiveModalKind.dialog,
     context: context,
     isScrollControlled: true,
     builder: (context) => _BackupSheet(backupService: backupService),

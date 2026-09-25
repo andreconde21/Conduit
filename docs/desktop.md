@@ -92,6 +92,38 @@ Windows `.ico`, the macOS AppIcon set and the Linux window icon).
 - **Mouse.** Drag to select, and use the wheel to scroll back. The phone
   swipe gestures only react to touch, so a mouse drag never switches tmux
   windows.
+- **Zoom.** Ctrl + mouse wheel (Cmd + wheel on macOS) or a trackpad pinch
+  changes the terminal font size, like the phone's pinch, and it is saved
+  the same way. A plain wheel still scrolls.
+- **Shortcuts.** Ctrl+Shift+/ (Cmd+/ on macOS) or *Keyboard shortcuts* in
+  the terminal menu lists them all:
+
+  | Action | Linux / Windows | macOS |
+  |---|---|---|
+  | Zoom in / out / reset | Ctrl+= (or Ctrl++) / Ctrl+- / Ctrl+0 | Cmd+= / Cmd+- / Cmd+0 |
+  | New session on this machine (connect picker) | Ctrl+Shift+T | Cmd+T |
+  | Close session | Ctrl+Shift+W | Cmd+W |
+  | Next / previous session | Ctrl+Tab / Ctrl+Shift+Tab | Ctrl+Tab / Ctrl+Shift+Tab, Cmd+Shift+] / Cmd+Shift+[ |
+  | Go to session 1 to 9 | Alt+1 to Alt+9 | Cmd+1 to Cmd+9 |
+  | Fullscreen terminal | F11 | Ctrl+Cmd+F or F11 |
+  | Keyboard shortcuts | Ctrl+Shift+/ | Cmd+/ |
+
+  None of these reach the shell. Two choices avoid clashes with shells and
+  TUIs. Go to session uses Alt+digit, because Ctrl+2 to Ctrl+8 are control
+  characters (Ctrl+6 is vim's alternate file). The price is readline's
+  rarely used Alt+digit argument. Help is Ctrl+Shift+/ because Ctrl+/ sends
+  ^_ (undo) and F1 belongs to htop and mc. Ctrl+Shift+- (Ctrl+_, undo)
+  still reaches the shell. Close asks first when the session is a plain
+  shell, because closing it ends what runs there. tmux and Herdr sessions
+  just detach. Fullscreen hides the app's chrome, not the OS window
+  decorations. There is no scrollback search yet (conduit_vt has none).
+- **Menus and sheets.** Nothing slides up from the bottom on desktop.
+  Action menus open as popovers at the click. Pickers and forms, such as
+  the connect picker, open as centred dialogs. The agent inbox and the
+  Herdr and tmux navigators slide in from the right. The quick switcher
+  and snippets open as a command palette at the top. Esc closes any of
+  them, and the first field has the focus. Phones keep the bottom sheets.
+  All of these go through `lib/core/presentation/adaptive_modal.dart`.
 - **On-screen keys.** The pill and key rows are hidden by default. The
   *On-screen keys* button above the bottom edge brings them back for the
   multiplexer shortcuts, snippets and the chat button. It resets for each
@@ -112,7 +144,8 @@ Windows `.ico`, the macOS AppIcon set and the Linux window icon).
 | Secret storage | libsecret | Credential Manager | login keychain | flutter_secure_storage |
 | Attach image to a prompt | file picker | file picker | file picker | image_picker's desktop implementations pick files. No camera |
 | Hardware security keys (`sk-` SSH keys) | no | no | no | FIDO runs over NFC (flutter_nfc_kit) or Android USB. Use a regular OpenSSH key on desktop. Connecting with an `sk-` key says so |
-| Local shell | no | no | no | The local shell section is Android's proot Linux (arm64 binaries). flutter_pty works on all three desktops, so a native local terminal running the user's shell is the natural follow-up |
+| This computer (local terminal) | yes | yes | yes | The machine list starts with *This computer*: the login shell in a flutter_pty PTY (`$SHELL -l`; PowerShell, cmd or WSL on Windows, from the machine menu's *Shell…*). Local tmux sessions and Herdr workspaces, the companion (Agent hooks installs it locally), git diff, files and live preview (127.0.0.1 directly) all work without SSH. Commands run with `sh -c` and the usual tool directories on PATH; on Windows only through WSL. Per device: never backed up or synced |
+| Proot local shell | no | no | no | Android's proot Linux section (arm64 binaries) |
 | Dictation, read-aloud (Talk) | no | no | no | Android `conduit/speech` and `conduit/tts` channels |
 | Live preview screenshot to Claude | no | no | yes | Needs the embedded page. Android uses PixelCopy |
 | Paste a clipboard image as a file | no | no | no | Android `conduit/clipboard_image` bridge. Paste falls back to text |
@@ -154,5 +187,5 @@ Gating lives in `lib/core/platform_features.dart`. Every flag reads
 - The UI is the phone UI with a centred home screen. Settings and sheets are
   full width. A real desktop layout, such as a side-by-side host list and
   terminal, comes later.
-- No desktop keyboard shortcuts for app actions yet (new tab, switch
-  session, font zoom). Use the terminal font size setting.
+- No scrollback search (Ctrl+Shift+F) yet, and the shortcuts are not
+  configurable.

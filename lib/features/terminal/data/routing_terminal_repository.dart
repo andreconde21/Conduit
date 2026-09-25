@@ -7,11 +7,15 @@ class RoutingTerminalRepository implements SshTerminalRepository {
     required this.ssh,
     required this.mosh,
     required this.local,
+    this.thisComputer,
   });
 
   final SshTerminalRepository ssh;
   final SshTerminalRepository mosh;
   final SshTerminalRepository local;
+
+  /// The desktop's own shell ("This computer"); null on phones.
+  final SshTerminalRepository? thisComputer;
 
   @override
   Future<SshTerminalSession> connect(
@@ -19,6 +23,10 @@ class RoutingTerminalRepository implements SshTerminalRepository {
     required int columns,
     required int rows,
   }) {
+    final desktop = thisComputer;
+    if (desktop != null && host.isThisComputer) {
+      return desktop.connect(host, columns: columns, rows: rows);
+    }
     final repository = host.isLocal
         ? local
         : host.useMosh

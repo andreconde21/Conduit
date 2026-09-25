@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_palette.dart';
@@ -99,7 +100,8 @@ Future<TmuxNavigatorPick?> showTmuxNavigatorSheet({
   String? paneListUnavailableReason,
   bool showCdTo = false,
 }) {
-  return showModalBottomSheet<TmuxNavigatorPick>(
+  return showAdaptiveModal<TmuxNavigatorPick>(
+    kind: AdaptiveModalKind.sidePanel,
     context: context,
     isScrollControlled: true,
     useSafeArea: true,

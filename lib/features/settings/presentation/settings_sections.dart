@@ -154,6 +154,20 @@ class SettingsSectionBody extends StatelessWidget {
     _gap,
     // Brings its own bottom gap (and nothing without a SessionViewScope).
     const SessionViewSettingsTile(),
+    SettingsSegmentCard<MultiplexerTabsMode>(
+      key: const ValueKey('multiplexer-tabs-setting'),
+      icon: Icons.tab_rounded,
+      title: 'Multiplexer tabs on phone',
+      description:
+          'Herdr tabs and tmux windows. Compact names the current one in the '
+          'session tab (tap it for the list) and costs no screen space; '
+          'Strip adds a row, for tablets. A computer always shows the strip.',
+      values: MultiplexerTabsMode.values,
+      label: (value) => value.label,
+      selected: theme.multiplexerTabs,
+      onChanged: theme.setMultiplexerTabs,
+    ),
+    _gap,
     SettingsCard(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),

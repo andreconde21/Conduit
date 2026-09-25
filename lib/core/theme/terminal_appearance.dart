@@ -28,6 +28,25 @@ extension TerminalToolbarStyleDetails on TerminalToolbarStyle {
   };
 }
 
+/// How a phone or tablet shows the multiplexer's own tabs (Herdr tabs,
+/// tmux windows). A desktop always has the full strip unless this is off.
+enum MultiplexerTabsMode {
+  /// No extra row: the session's tab in the top row names the current
+  /// multiplexer tab and opens the list; switching shows a brief overlay.
+  compact,
+
+  /// The full strip under the top row (a tablet has the room).
+  strip,
+
+  off;
+
+  String get label => switch (this) {
+    MultiplexerTabsMode.compact => 'Compact',
+    MultiplexerTabsMode.strip => 'Strip',
+    MultiplexerTabsMode.off => 'Off',
+  };
+}
+
 const terminalFontSizeDefault = 13.5;
 const terminalFontSizeMin = 4.0;
 const terminalFontSizeMax = 30.0;

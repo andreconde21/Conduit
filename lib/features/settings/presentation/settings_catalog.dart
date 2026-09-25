@@ -169,6 +169,11 @@ const List<SettingsEntry> settingsCatalog = [
   ),
   SettingsEntry(
     SettingsSection.terminal,
+    'Multiplexer tabs on phone',
+    keywords: ['herdr tabs', 'tmux windows', 'strip', 'compact', 'tablet'],
+  ),
+  SettingsEntry(
+    SettingsSection.terminal,
     'Global snippets',
     keywords: ['snippet', 'snip', 'macro', 'command'],
   ),

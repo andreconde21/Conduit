@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_theme.dart';
@@ -13,7 +14,8 @@ Future<void> showPublicKeySheet({
   required SshKeyDetails details,
   bool freshlyGenerated = false,
 }) {
-  return showModalBottomSheet<void>(
+  return showAdaptiveModal<void>(
+    kind: AdaptiveModalKind.dialog,
     context: context,
     isScrollControlled: true,
     builder: (context) => AnnotatedRegion<SystemUiOverlayStyle>(

@@ -109,53 +109,55 @@ String claudeWorkingScreen() => _lines([
 
 /// Claude Code in a Herdr pane, for the terminal and menu-button screens:
 /// writing tests, or asking to run them.
-String claudeTerminalScreen({bool withPrompt = true}) => _lines([
-  '$_bold$_orange✶$_reset$_bold Welcome to Claude Code!$_reset',
-  '$_grey  /help for help, /status for your setup$_reset',
-  '$_grey  cwd: ~/demo/todo-api$_reset',
-  '',
-  '$_bold>$_reset Add a due date to todos and cover it',
-  '  with tests',
-  '',
-  '$_green●$_reset I\'ll add an optional $_cyan`dueDate`$_reset field,',
-  '  validate it, and test overdue sorting.',
-  '',
-  _tool('Read', 'src/routes/todos.ts'),
-  _result('Read ${_bold}86$_reset lines'),
-  '',
-  _tool('Update', 'src/routes/todos.ts'),
-  _result('Updated with ${_bold}6$_reset additions and'),
-  '     ${_bold}1$_reset removal',
-  '     $_grey 40$_reset   title: z.string().min(1),',
-  '     $_grey 41$_reset $_addBg+  dueDate: z.string()        $_reset',
-  '     $_grey 42$_reset $_addBg+    .datetime().optional(),  $_reset',
-  '     $_grey 43$_reset $_delBg-  done: z.boolean(),         $_reset',
-  '     $_grey 43$_reset $_addBg+  done: z.boolean()          $_reset',
-  '     $_grey 44$_reset $_addBg+    .default(false),         $_reset',
-  '',
-  _tool('Write', 'test/due-date.test.ts'),
-  _result('Wrote ${_bold}38$_reset lines to test/due-date.test.ts'),
-  '',
-  if (withPrompt)
-    ..._permission(width: 46)
-  else ...[
-    _tool('Bash', 'npm run typecheck'),
-    _result('$_green✓$_reset No type errors'),
-    '',
-    '$_orange●$_reset ${_bold}Update Todos$_reset',
-    _result('$_green■$_reset Add dueDate to the schema'),
-    '     $_green■$_reset Validate ISO dates',
-    '     $_orange□$_reset ${_bold}Test overdue sorting$_reset',
-    '',
-    '$_orange✶ Writing tests…$_reset $_grey(21s · esc to interrupt)$_reset',
-    '',
-    ..._input(width: 46),
-  ],
-]);
+/// [width] is the box width in cells (46 on the phone, wider on desktop).
+String claudeTerminalScreen({bool withPrompt = true, int width = 46}) =>
+    _lines([
+      '$_bold$_orange✶$_reset$_bold Welcome to Claude Code!$_reset',
+      '$_grey  /help for help, /status for your setup$_reset',
+      '$_grey  cwd: ~/todo-api$_reset',
+      '',
+      '$_bold>$_reset Add a due date to todos and cover it',
+      '  with tests',
+      '',
+      '$_green●$_reset I\'ll add an optional $_cyan`dueDate`$_reset field,',
+      '  validate it, and test overdue sorting.',
+      '',
+      _tool('Read', 'src/routes/todos.ts'),
+      _result('Read ${_bold}86$_reset lines'),
+      '',
+      _tool('Update', 'src/routes/todos.ts'),
+      _result('Updated with ${_bold}6$_reset additions and'),
+      '     ${_bold}1$_reset removal',
+      '     $_grey 40$_reset   title: z.string().min(1),',
+      '     $_grey 41$_reset $_addBg+  dueDate: z.string()        $_reset',
+      '     $_grey 42$_reset $_addBg+    .datetime().optional(),  $_reset',
+      '     $_grey 43$_reset $_delBg-  done: z.boolean(),         $_reset',
+      '     $_grey 43$_reset $_addBg+  done: z.boolean()          $_reset',
+      '     $_grey 44$_reset $_addBg+    .default(false),         $_reset',
+      '',
+      _tool('Write', 'test/due-date.test.ts'),
+      _result('Wrote ${_bold}38$_reset lines to test/due-date.test.ts'),
+      '',
+      if (withPrompt)
+        ..._permission(width: width)
+      else ...[
+        _tool('Bash', 'npm run typecheck'),
+        _result('$_green✓$_reset No type errors'),
+        '',
+        '$_orange●$_reset ${_bold}Update Todos$_reset',
+        _result('$_green■$_reset Add dueDate to the schema'),
+        '     $_green■$_reset Validate ISO dates',
+        '     $_orange□$_reset ${_bold}Test overdue sorting$_reset',
+        '',
+        '$_orange✶ Writing tests…$_reset $_grey(21s · esc to interrupt)$_reset',
+        '',
+        ..._input(width: width),
+      ],
+    ]);
 
 /// A plain shell running the demo app's tests (tmux).
 String shellTestsScreen() => _lines([
-  '${_green}demo@build-box$_reset:$_blue~/demo/todo-web$_reset\$ npm test',
+  '${_green}demo@build-box$_reset:$_blue~/todo-web$_reset\$ npm test',
   '',
   '> todo-web@1.4.0 test',
   '> vitest run',
@@ -169,5 +171,28 @@ String shellTestsScreen() => _lines([
   ' Test Files  $_red${_bold}1 failed$_reset | $_green${_bold}3 passed$_reset (4)',
   '      Tests  $_red${_bold}1 failed$_reset | $_green${_bold}31 passed$_reset (32)',
   '',
-  '${_green}demo@build-box$_reset:$_blue~/demo/todo-web$_reset\$ $_yellow$_reset',
+  '${_green}demo@build-box$_reset:$_blue~/todo-web$_reset\$ $_yellow$_reset',
+]);
+
+/// A Vite dev server started in a tmux window, for the "Preview ready"
+/// chip.
+String viteDevServerScreen() => _lines([
+  // Empty rows under the chip.
+  '',
+  '',
+  '',
+  '${_green}demo@workstation$_reset:$_blue~/todo-web$_reset\$ npm run dev',
+  '',
+  '> todo-web@1.4.0 dev',
+  '> vite',
+  '',
+  '',
+  '  $_green${_bold}VITE$_reset ${_green}v5.4.2$_reset  ${_grey}ready in$_reset ${_bold}312$_reset ${_grey}ms$_reset',
+  '',
+  '  $_green➜$_reset  ${_bold}Local$_reset:   ${_cyan}http://localhost:${_bold}5173$_reset$_cyan/$_reset',
+  '  $_green➜$_reset  ${_bold}Network$_reset: ${_grey}use --host to expose$_reset',
+  '  $_green➜$_reset  ${_grey}press$_reset ${_bold}h + enter$_reset ${_grey}to show help$_reset',
+  '',
+  '${_grey}10:23:41$_reset $_cyan$_bold[vite]$_reset ${_green}hmr update$_reset $_grey/src/DueDate.tsx$_reset',
+  '${_grey}10:23:58$_reset $_cyan$_bold[vite]$_reset ${_green}hmr update$_reset $_grey/src/TodoList.tsx$_reset',
 ]);

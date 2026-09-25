@@ -1,5 +1,8 @@
+import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/theme/app_palette.dart';
+import 'package:conduit/features/terminal/presentation/desktop_shortcuts.dart';
 import 'package:conduit/features/terminal/presentation/gestures/terminal_gesture_recognizers.dart';
+import 'package:conduit/features/terminal/presentation/multiplexer_tabs_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_file_tabs_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
@@ -21,7 +24,13 @@ enum TerminalHeaderAction {
   newSession,
   settings,
   closeSession,
+  keyboardShortcuts,
 }
+
+/// "Label (keys)" on desktop, where a keyboard shortcut exists; the bare
+/// label on phones.
+String _withKeys(String label, String keys) =>
+    PlatformFeatures.isDesktop ? '$label ($keys)' : label;
 
 /// The terminal's single chrome row (~40 dp): back, the scrollable session
 /// and file tabs, then the session grid, the agents badge and ONE overflow
@@ -46,6 +55,7 @@ class TerminalHeader extends StatelessWidget {
     this.onReconnect,
     this.onToggleFullscreen,
     this.onNewSession,
+    this.onShowShortcuts,
     this.onOpenChatView,
     this.onOpenSettings,
     this.attentionCount = 0,
@@ -56,6 +66,8 @@ class TerminalHeader extends StatelessWidget {
     this.onSwipeSession,
     this.onSessionActivated,
     this.onSessionLongPress,
+    this.multiplexerTabsFor,
+    this.onOpenMultiplexerTabs,
     super.key,
   });
 
@@ -82,6 +94,10 @@ class TerminalHeader extends StatelessWidget {
 
   /// Opens a new session through the connect flow; null hides the entry.
   final VoidCallback? onNewSession;
+
+  /// Opens the desktop keyboard shortcuts sheet; null (phones) hides the
+  /// entry.
+  final VoidCallback? onShowShortcuts;
 
   /// Opens the chat view of the active session's Claude agent; null hides
   /// the entry.
@@ -117,6 +133,13 @@ class TerminalHeader extends StatelessWidget {
 
   /// Long-press on a session's tab (its "Open in" choice).
   final ValueChanged<TerminalSessionController>? onSessionLongPress;
+
+  /// See [SessionTabs.multiplexerTabsFor] (the phone's compact mode).
+  final MultiplexerTabsController? Function(TerminalSessionController)?
+  multiplexerTabsFor;
+
+  /// See [SessionTabs.onOpenMultiplexerTabs].
+  final ValueChanged<TerminalSessionController>? onOpenMultiplexerTabs;
 
   @override
   Widget build(BuildContext context) {
@@ -159,12 +182,14 @@ class TerminalHeader extends StatelessWidget {
                 onFileTabClosed: onFileTabClosed,
                 onSessionActivated: onSessionActivated,
                 onSessionLongPress: onSessionLongPress,
+                multiplexerTabsFor: multiplexerTabsFor,
+                onOpenMultiplexerTabs: onOpenMultiplexerTabs,
                 touchScrolls: !swipeSessions,
               ),
             ),
             if (onOpenSessionGrid != null)
               _RowButton(
-                tooltip: 'Sessions',
+                tooltip: _withKeys('Sessions', quickSwitcherKeys),
                 key: const ValueKey('terminal-open-switcher'),
                 color: foreground,
                 icon: const Icon(Icons.grid_view_rounded, size: 19),
@@ -187,6 +212,7 @@ class TerminalHeader extends StatelessWidget {
               onReconnect: onReconnect,
               onToggleFullscreen: onToggleFullscreen,
               onNewSession: onNewSession,
+              onShowShortcuts: onShowShortcuts,
               onOpenChatView: onOpenChatView,
               onOpenSettings: onOpenSettings,
               onOpenSessionTool: onOpenSessionTool,
@@ -327,6 +353,7 @@ class _OverflowMenu extends StatelessWidget {
     required this.onToggleFullscreen,
     required this.onNewSession,
     required this.onClose,
+    this.onShowShortcuts,
     this.onOpenChatView,
     this.onOpenSessionTool,
     this.onOpenSettings,
@@ -338,6 +365,7 @@ class _OverflowMenu extends StatelessWidget {
   final VoidCallback? onToggleFullscreen;
   final VoidCallback? onNewSession;
   final VoidCallback? onClose;
+  final VoidCallback? onShowShortcuts;
   final VoidCallback? onOpenChatView;
   final ValueChanged<SessionTool>? onOpenSessionTool;
   final VoidCallback? onOpenSettings;
@@ -368,6 +396,7 @@ class _OverflowMenu extends StatelessWidget {
         TerminalHeaderAction.newSession => onNewSession?.call(),
         TerminalHeaderAction.settings => onOpenSettings?.call(),
         TerminalHeaderAction.closeSession => onClose?.call(),
+        TerminalHeaderAction.keyboardShortcuts => onShowShortcuts?.call(),
       },
       itemBuilder: (context) {
         final theme = Theme.of(context);
@@ -392,14 +421,24 @@ class _OverflowMenu extends StatelessWidget {
           ],
           <PopupMenuEntry<TerminalHeaderAction>>[
             if (onReconnect != null)
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: TerminalHeaderAction.reconnect,
-                child: _MenuRow(Icons.refresh_rounded, 'Reconnect'),
+                child: _MenuRow(
+                  Icons.refresh_rounded,
+                  // A local shell starts over; there is no connection.
+                  session?.runsOnThisComputer ?? false
+                      ? 'Restart'
+                      : 'Reconnect',
+                ),
               ),
             if (onToggleFullscreen != null)
               const PopupMenuItem(
                 value: TerminalHeaderAction.fullscreen,
-                child: _MenuRow(Icons.fullscreen_rounded, 'Fullscreen'),
+                child: _MenuRow(
+                  Icons.fullscreen_rounded,
+                  'Fullscreen',
+                  action: DesktopAction.toggleFullscreen,
+                ),
               ),
             if (onNewSession != null)
               const PopupMenuItem(
@@ -412,12 +451,25 @@ class _OverflowMenu extends StatelessWidget {
                 value: TerminalHeaderAction.settings,
                 child: _MenuRow(Icons.settings_outlined, 'Settings'),
               ),
+            if (onShowShortcuts != null)
+              const PopupMenuItem(
+                value: TerminalHeaderAction.keyboardShortcuts,
+                child: _MenuRow(
+                  Icons.keyboard_outlined,
+                  'Keyboard shortcuts',
+                  action: DesktopAction.showShortcuts,
+                ),
+              ),
           ],
           <PopupMenuEntry<TerminalHeaderAction>>[
             if (onClose != null)
               const PopupMenuItem(
                 value: TerminalHeaderAction.closeSession,
-                child: _MenuRow(Icons.close_rounded, 'Close session'),
+                child: _MenuRow(
+                  Icons.close_rounded,
+                  'Close session',
+                  action: DesktopAction.closeSession,
+                ),
               ),
           ],
         ].where((group) => group.isNotEmpty).toList();
@@ -459,15 +511,34 @@ class _OverflowMenu extends StatelessWidget {
 }
 
 class _MenuRow extends StatelessWidget {
-  const _MenuRow(this.icon, this.label);
+  const _MenuRow(this.icon, this.label, {this.action});
 
   final IconData icon;
   final String label;
 
+  /// Shows this action's keyboard shortcut at the end of the row, on
+  /// desktop only.
+  final DesktopAction? action;
+
   @override
   Widget build(BuildContext context) {
+    final action = this.action;
     return Row(
-      children: [Icon(icon, size: 18), const SizedBox(width: 10), Text(label)],
+      children: [
+        Icon(icon, size: 18),
+        const SizedBox(width: 10),
+        Text(label),
+        if (action != null && PlatformFeatures.isDesktop) ...[
+          const Spacer(),
+          const SizedBox(width: 16),
+          Text(
+            desktopShortcutKeys(action),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ],
     );
   }
 }

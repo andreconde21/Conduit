@@ -123,6 +123,7 @@ void main() {
       'Paste images as uploaded files',
       'Restore sessions on launch',
       'Open Claude sessions in',
+      'Multiplexer tabs on phone',
       'Global snippets',
       'Toolbar style',
       'Pill buttons',

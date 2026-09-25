@@ -1,3 +1,4 @@
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
@@ -21,9 +22,28 @@ enum MachineMenuChoice {
   files,
   edit,
   agentHooks,
+  shell,
   duplicate,
   copyAddress,
   delete;
+
+  /// The choices a machine's menu offers. "This computer" is not saved:
+  /// nothing to edit, copy or delete, and on Windows its shell to pick.
+  static List<MachineMenuChoice> forHost(SavedHost host) {
+    if (!host.isThisComputer) {
+      return [
+        for (final choice in values)
+          if (choice != MachineMenuChoice.shell) choice,
+      ];
+    }
+    return [
+      MachineMenuChoice.connectTo,
+      MachineMenuChoice.files,
+      MachineMenuChoice.agentHooks,
+      if (defaultTargetPlatform == TargetPlatform.windows)
+        MachineMenuChoice.shell,
+    ];
+  }
 
   HostAction? get hostAction => switch (this) {
     MachineMenuChoice.connectTo => HostAction.connectTo,
@@ -32,7 +52,7 @@ enum MachineMenuChoice {
     MachineMenuChoice.duplicate => HostAction.duplicate,
     MachineMenuChoice.copyAddress => HostAction.copyAddress,
     MachineMenuChoice.delete => HostAction.delete,
-    MachineMenuChoice.agentHooks => null,
+    MachineMenuChoice.agentHooks || MachineMenuChoice.shell => null,
   };
 
   String get label => switch (this) {
@@ -40,6 +60,7 @@ enum MachineMenuChoice {
     MachineMenuChoice.files => 'Files',
     MachineMenuChoice.edit => 'Edit',
     MachineMenuChoice.agentHooks => 'Agent hooks',
+    MachineMenuChoice.shell => 'Shell…',
     MachineMenuChoice.duplicate => 'Duplicate',
     MachineMenuChoice.copyAddress => 'Copy address',
     MachineMenuChoice.delete => 'Delete',
@@ -50,6 +71,7 @@ enum MachineMenuChoice {
     MachineMenuChoice.files => Icons.folder_open_rounded,
     MachineMenuChoice.edit => Icons.edit_outlined,
     MachineMenuChoice.agentHooks => Icons.webhook_rounded,
+    MachineMenuChoice.shell => Icons.terminal_rounded,
     MachineMenuChoice.duplicate => Icons.copy_all_rounded,
     MachineMenuChoice.copyAddress => Icons.content_copy_rounded,
     MachineMenuChoice.delete => Icons.delete_outline_rounded,
@@ -226,7 +248,9 @@ Future<MachineSheetResult?> showMachineSheet({
   LocalShellController? localShellController,
   Set<String> activeLocalInstanceIds = const {},
 }) {
-  return showModalBottomSheet<MachineSheetResult>(
+  return showAdaptiveModal<MachineSheetResult>(
+    kind: AdaptiveModalKind.dialog,
+    desktopFill: true,
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
@@ -234,9 +258,9 @@ Future<MachineSheetResult?> showMachineSheet({
       value: AppTheme.systemUiOverlayStyle(Theme.of(context).brightness),
       child: DraggableScrollableSheet(
         expand: false,
-        initialChildSize: 0.65,
-        minChildSize: 0.3,
-        maxChildSize: 0.92,
+        initialChildSize: adaptiveSheetFraction(context, 0.65),
+        minChildSize: adaptiveSheetFraction(context, 0.3),
+        maxChildSize: adaptiveSheetFraction(context, 0.92),
         builder: (context, scrollController) => MachineSheet(
           hostsController: hostsController,
           filter: filter,
@@ -327,7 +351,7 @@ class _MachineSheetState extends State<MachineSheet> {
     return ListenableBuilder(
       listenable: widget.hostsController,
       builder: (context, _) {
-        final all = widget.hostsController.sortedHosts;
+        final all = widget.hostsController.sortedMachines;
         final hosts = _matching(all);
         return ListView(
           key: const ValueKey('machine-sheet'),
@@ -393,7 +417,9 @@ class _MachineSheetState extends State<MachineSheet> {
                 key: ValueKey('machine-row-${host.id}'),
                 checked: _filter.keys.contains(host.id),
                 title: host.name,
-                subtitle: '${host.endpoint} · ${host.useMosh ? 'Mosh' : 'SSH'}',
+                subtitle: host.isThisComputer
+                    ? '${host.endpoint} · local shell'
+                    : '${host.endpoint} · ${host.useMosh ? 'Mosh' : 'SSH'}',
                 live: widget.liveKeys.contains(host.id),
                 onToggle: () => _toggle(host.id),
                 onOnly: () => _set({host.id}),
@@ -404,7 +430,7 @@ class _MachineSheetState extends State<MachineSheet> {
                   onSelected: (choice) =>
                       widget.onResult(MachineMenuRequested(host, choice)),
                   itemBuilder: (context) => [
-                    for (final choice in MachineMenuChoice.values)
+                    for (final choice in MachineMenuChoice.forHost(host))
                       PopupMenuItem(
                         value: choice,
                         child: Row(

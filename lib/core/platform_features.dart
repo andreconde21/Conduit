@@ -52,9 +52,14 @@ abstract final class PlatformFeatures {
   static bool get backgroundKeepalive => _android;
 
   /// The proot Linux environment of the local shell section (bundled
-  /// arm64 Android binaries). A desktop could run the user's own shell
-  /// through flutter_pty instead; that is not wired yet.
+  /// arm64 Android binaries).
   static bool get prootLocalShell => _android;
+
+  /// "This computer": the desktop's own login shell (flutter_pty), local
+  /// tmux sessions and Herdr workspaces, files and companion, as a machine
+  /// that is always there and never synced. Phones reach machines over
+  /// SSH only.
+  static bool get thisComputer => isDesktop;
 
   /// FIDO hardware security keys for `sk-` SSH keys: NFC (flutter_nfc_kit,
   /// Android and iOS) and USB (`conduit/fido_usb`, Android). No desktop

@@ -1,3 +1,4 @@
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
@@ -268,7 +269,8 @@ class _SftpBrowserPageState extends State<SftpBrowserPage> {
   }
 
   Future<void> _showEntrySheet(SftpEntry entry) async {
-    final action = await showModalBottomSheet<EntryAction>(
+    final action = await showAdaptiveModal<EntryAction>(
+      kind: AdaptiveModalKind.menu,
       context: context,
       showDragHandle: true,
       builder: (context) => SafeArea(
