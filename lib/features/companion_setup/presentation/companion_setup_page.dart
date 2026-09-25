@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
+import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/companion_setup/domain/companion_status.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_install_sheet.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_controller.dart';
@@ -416,7 +417,7 @@ class _StatusCard extends StatelessWidget {
                     key: const ValueKey('companion-status-badge'),
                     decoration: BoxDecoration(
                       color: color.withValues(alpha: 0.16),
-                      borderRadius: BorderRadius.circular(999),
+                      borderRadius: BorderRadius.circular(AppTheme.radius),
                       border: Border.all(color: color.withValues(alpha: 0.6)),
                     ),
                     child: Padding(
@@ -711,7 +712,7 @@ class _CopyableCommand extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Material(
         color: scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
         child: Row(
           children: [
             Expanded(

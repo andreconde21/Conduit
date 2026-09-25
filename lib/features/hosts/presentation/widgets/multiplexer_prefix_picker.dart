@@ -1,4 +1,5 @@
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
+import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/hosts/domain/multiplexer_prefix_key.dart';
 import 'package:flutter/material.dart';
 
@@ -19,7 +20,7 @@ class MultiplexerPrefixField extends StatelessWidget {
     final theme = Theme.of(context);
     return InkWell(
       key: const ValueKey('multiplexer-prefix-field'),
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(AppTheme.radius),
       onTap: () async {
         final picked = await showMultiplexerPrefixPicker(
           context: context,
@@ -125,7 +126,7 @@ class _MultiplexerPrefixPickerSheetState
                   ),
                   decoration: BoxDecoration(
                     color: colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(AppTheme.radius),
                   ),
                   child: Row(
                     children: [
@@ -177,15 +178,17 @@ class _MultiplexerPrefixPickerSheetState
                       key: const ValueKey('prefix-mod-ctrl'),
                       label: const Text('Ctrl'),
                       selected: _value.ctrl,
-                      onSelected: (selected) =>
-                          setState(() => _value = _value.copyWith(ctrl: selected)),
+                      onSelected: (selected) => setState(
+                        () => _value = _value.copyWith(ctrl: selected),
+                      ),
                     ),
                     FilterChip(
                       key: const ValueKey('prefix-mod-alt'),
                       label: const Text('Alt'),
                       selected: _value.alt,
-                      onSelected: (selected) =>
-                          setState(() => _value = _value.copyWith(alt: selected)),
+                      onSelected: (selected) => setState(
+                        () => _value = _value.copyWith(alt: selected),
+                      ),
                     ),
                     FilterChip(
                       key: const ValueKey('prefix-mod-shift'),

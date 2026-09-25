@@ -1,4 +1,5 @@
 import 'package:conduit/core/app_failure.dart';
+import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/voice/presentation/dictation_button.dart';
 import 'package:conduit/features/voice/presentation/dictation_controller.dart';
 import 'package:flutter/material.dart';
@@ -120,7 +121,9 @@ class _ChatComposerState extends State<ChatComposer> {
                       ? 'Message Claude…'
                       : widget.disabledHint,
                   border: const OutlineInputBorder(
-                    borderRadius: BorderRadius.all(Radius.circular(20)),
+                    borderRadius: BorderRadius.all(
+                      Radius.circular(AppTheme.radius),
+                    ),
                   ),
                   contentPadding: const EdgeInsets.symmetric(
                     horizontal: 14,

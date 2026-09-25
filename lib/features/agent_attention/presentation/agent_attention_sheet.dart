@@ -293,7 +293,7 @@ class _AgentAttentionSheetState extends State<AgentAttentionSheet>
       alignment: alignment,
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
       ),
       child: Text('Hide', style: theme.textTheme.labelLarge),
     );
