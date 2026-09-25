@@ -7,6 +7,7 @@ import 'package:conduit/features/agent_attention/presentation/agent_attention_co
 import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
 import 'package:conduit/features/desktop_shell/data/desktop_shell_store.dart';
+import 'package:conduit/features/desktop_shell/presentation/desktop_home.dart';
 import 'package:conduit/features/desktop_shell/presentation/desktop_shell_controller.dart';
 import 'package:conduit/features/hosts/domain/home_preferences.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
@@ -22,6 +23,8 @@ import 'package:conduit/features/terminal/domain/ssh_terminal_session.dart';
 import 'package:conduit/features/terminal/presentation/host_key_prompt_coordinator.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
+import 'package:conduit/features/usage/presentation/usage_controller.dart';
+import 'package:conduit/features/usage/presentation/usage_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -75,34 +78,44 @@ class ShellHarness {
   HerdrFakeRunner runnerFor(SavedHost host) =>
       runners[baseHostId(host.id)] ?? HerdrFakeRunner.tmuxOnly();
 
-  Widget page({bool? shellMode, WidgetBuilder? usage}) => MaterialApp(
-    home: HostsPage(
-      hostsController: hosts,
-      lockController: AppLockController(AlwaysAuthenticates()),
-      terminalRepository: NoNetworkTerminalRepository(),
-      workspaceController: workspace,
-      localShellController: LocalShellController(),
-      themeController: theme,
-      hostKeyVerifier: NoopVerifier(),
-      promptCoordinator: HostKeyPromptCoordinator(),
-      sftpRepository: NoNetworkSftpRepository(),
-      sftpBookmarksRepository: InMemorySftpBookmarks(),
-      agentAttention: attention,
-      backupService: AppBackupService(
+  /// The app's usage controller, provided above the page when set.
+  UsageController? usageController;
+
+  Widget page({bool? shellMode, UsageSummaryBuilder? usage}) => MaterialApp(
+    home: _withUsage(
+      HostsPage(
         hostsController: hosts,
+        lockController: AppLockController(AlwaysAuthenticates()),
+        terminalRepository: NoNetworkTerminalRepository(),
+        workspaceController: workspace,
+        localShellController: LocalShellController(),
         themeController: theme,
         hostKeyVerifier: NoopVerifier(),
+        promptCoordinator: HostKeyPromptCoordinator(),
+        sftpRepository: NoNetworkSftpRepository(),
+        sftpBookmarksRepository: InMemorySftpBookmarks(),
+        agentAttention: attention,
+        backupService: AppBackupService(
+          hostsController: hosts,
+          themeController: theme,
+          hostKeyVerifier: NoopVerifier(),
+        ),
+        fileExport: RecordingFileExport(),
+        homeBoards: boards,
+        homePreferences: InMemoryHomePreferencesRepository(),
+        connectFlow: flow,
+        previewRefreshInterval: const Duration(days: 1),
+        desktopShell: shell,
+        shellMode: shellMode,
+        usageSummary: usage,
       ),
-      fileExport: RecordingFileExport(),
-      homeBoards: boards,
-      homePreferences: InMemoryHomePreferencesRepository(),
-      connectFlow: flow,
-      previewRefreshInterval: const Duration(days: 1),
-      desktopShell: shell,
-      shellMode: shellMode,
-      usageSummary: usage,
     ),
   );
+
+  Widget _withUsage(Widget page) {
+    final usage = usageController;
+    return usage == null ? page : UsageScope(controller: usage, child: page);
+  }
 }
 
 Future<ShellHarness> pumpShell(
@@ -111,7 +124,7 @@ Future<ShellHarness> pumpShell(
   Size size = const Size(1280, 800),
   double pixelRatio = 1,
   bool? shellMode,
-  WidgetBuilder? usage,
+  UsageSummaryBuilder? usage,
   void Function(ShellHarness harness)? before,
 }) async {
   tester.view.physicalSize = size * pixelRatio;

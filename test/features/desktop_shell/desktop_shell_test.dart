@@ -13,12 +13,16 @@ import 'package:conduit/features/desktop_shell/presentation/desktop_shell_contro
 import 'package:conduit/features/desktop_shell/presentation/terminal_shell_embedding.dart';
 import 'package:conduit/features/desktop_shell/presentation/widgets/shell_tab_strip.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
+import 'package:conduit/features/usage/data/usage_preferences.dart';
+import 'package:conduit/features/usage/presentation/usage_controller.dart';
+import 'package:conduit/features/usage/presentation/usage_widgets.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../usage/usage_fakes.dart';
 import 'shell_harness.dart';
 
 final _linux = TargetPlatformVariant.only(TargetPlatform.linux);
@@ -694,7 +698,8 @@ void main() {
   ) async {
     final h = await pumpShell(
       tester,
-      usage: (context) => const Text('Usage 42%'),
+      usage: (context, {required compact}) =>
+          Text(compact ? 'Usage 42%' : 'Usage 42% today'),
     );
     // The waiting agent, by its pane title.
     final review = SidebarKeys.herdrTab('workstation', 'w1', 'w1:t2');
@@ -708,7 +713,7 @@ void main() {
     expect(
       find.descendant(
         of: find.byKey(const ValueKey('dashboard-usage-slot')),
-        matching: find.text('Usage 42%'),
+        matching: find.text('Usage 42% today'),
       ),
       findsOneWidget,
     );
@@ -738,6 +743,29 @@ void main() {
       findsOneWidget,
     );
     expect(build, findsNothing);
+    await tearDownShell(tester);
+  }, variant: _linux);
+
+  testWidgets('the app usage shows on the dashboard and in the sidebar', (
+    tester,
+  ) async {
+    final usage = UsageController(
+      source: FakeUsageSource(const [], const {}),
+      preferences: MemoryUsagePreferencesStore(),
+      observeLifecycle: false,
+    );
+    addTearDown(usage.dispose);
+    await pumpShell(tester, before: (h) => h.usageController = usage);
+    UsageSummaryView inSlot(String key) => tester.widget<UsageSummaryView>(
+      find.descendant(
+        of: find.byKey(ValueKey(key)),
+        matching: find.byType(UsageSummaryView),
+      ),
+    );
+    expect(inSlot('dashboard-usage-slot').layout, UsageSummaryLayout.bar);
+    expect(inSlot('sidebar-usage-slot').layout, UsageSummaryLayout.compact);
+    // Not the phone's home bar.
+    expect(find.byType(UsageHomeBar), findsNothing);
     await tearDownShell(tester);
   }, variant: _linux);
 }

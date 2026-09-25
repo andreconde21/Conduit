@@ -38,6 +38,11 @@ bool usesDesktopShell(Size size) =>
     PlatformFeatures.isDesktop ||
     (size.width >= 900 && size.shortestSide >= 600);
 
+/// Builds the usage summary: [compact] for the sidebar footer, else the
+/// dashboard's card.
+typedef UsageSummaryBuilder =
+    Widget Function(BuildContext context, {required bool compact});
+
 /// What the desktop home asks the home page to do (the page owns the
 /// connect flow, the machine forms and the dialogs).
 class DesktopHomeActions {
@@ -111,7 +116,7 @@ class DesktopHome extends StatefulWidget {
 
   /// The usage summary for the dashboard and the sidebar footer; null
   /// keeps the slot empty (the usage feature fills it).
-  final WidgetBuilder? usageSummary;
+  final UsageSummaryBuilder? usageSummary;
 
   /// How often the dashboard's live previews redraw while it is shown.
   final Duration previewRefreshInterval;
@@ -1009,7 +1014,9 @@ class DesktopHomeState extends State<DesktopHome> {
           if (usage != null && !compact)
             KeyedSubtree(
               key: const ValueKey('sidebar-usage-slot'),
-              child: Builder(builder: usage),
+              child: Builder(
+                builder: (context) => usage(context, compact: true),
+              ),
             ),
           if (compact)
             ...buttons
@@ -1319,7 +1326,10 @@ class DesktopHomeState extends State<DesktopHome> {
         onNewSession: () => unawaited(widget.actions.newSession()),
         usage: widget.usageSummary == null
             ? null
-            : Builder(builder: widget.usageSummary!),
+            : Builder(
+                builder: (context) =>
+                    widget.usageSummary!(context, compact: false),
+              ),
         actions: [_agentsToggle(), _previewToggle()],
       ),
     );
