@@ -124,8 +124,6 @@ class LiveTerminalPreview extends StatelessWidget {
             child: RichText(
               key: const ValueKey('live-preview-text'),
               softWrap: false,
-              overflow: TextOverflow.clip,
-              textScaler: TextScaler.noScaling,
               text: TextSpan(style: base, children: spans),
             ),
           ),
