@@ -101,7 +101,6 @@ void main() {
                 globalSnippets: const [],
                 fullscreen: false,
                 onToggleFullscreen: () {},
-                composeActive: false,
                 onEnterTmuxScrollMode: () {},
                 onExitTmuxScrollMode: () {},
                 tmuxPrefixKey: MultiplexerPrefixKey.controlB,
@@ -167,7 +166,7 @@ void main() {
       expect(
         commands.last,
         contains(
-          "exec herdr pane split w1:p1 --direction right --cwd "
+          'exec herdr pane split w1:p1 --direction right --cwd '
           "'\\''/srv/app'\\'' --focus",
         ),
       );
