@@ -3,6 +3,7 @@ import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/data/herdr_attention_provider.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart';
+import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
 import 'package:conduit/features/hosts/domain/home_preferences.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
@@ -206,18 +207,19 @@ void main() {
       debugDefaultTargetPlatformOverride = TargetPlatform.linux;
       try {
         await pumpHome(tester, desktop: true);
-        await tester.tap(find.byKey(const ValueKey('machine-name')));
-        await tester.pumpAndSettle();
+        // The desktop shell's sidebar lists This computer first.
         expect(
-          find.byKey(const ValueKey('machine-row-$thisComputerHostId')),
+          find.byKey(
+            ValueKey(
+              'sidebar-row-machines-${SidebarKeys.machine(thisComputerHostId)}',
+            ),
+          ),
           findsOneWidget,
         );
-        expect(
-          find.byKey(const ValueKey('machine-filter-local')),
-          findsNothing,
-        );
+        expect(find.byKey(const ValueKey('machine-name')), findsNothing);
         expect(find.text('This device'), findsNothing);
         expect(find.text('Local shell sessions'), findsNothing);
+        await tester.pumpWidget(const SizedBox());
       } finally {
         debugDefaultTargetPlatformOverride = null;
       }

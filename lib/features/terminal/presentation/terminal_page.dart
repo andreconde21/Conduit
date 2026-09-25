@@ -188,10 +188,9 @@ class _TerminalPageState extends State<TerminalPage>
   final _focusNode = FocusNode();
 
   /// The short slide after a swipe on the top row switched sessions.
-  late final AnimationController _slide = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 220),
-  );
+  /// Created up front: a page that never slid (the desktop shell's) must
+  /// not create it in dispose.
+  late final AnimationController _slide;
   int _slideDirection = 0;
   late final TerminalFileTabsController _fileTabs;
   TerminalSessionController? _focusedSession;
@@ -246,6 +245,10 @@ class _TerminalPageState extends State<TerminalPage>
   @override
   void initState() {
     super.initState();
+    _slide = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 220),
+    );
     _fileTabs = TerminalFileTabsController(widget.sftpRepository);
     final recognizer =
         widget.speechRecognizer ??
@@ -380,6 +383,16 @@ class _TerminalPageState extends State<TerminalPage>
     if (session == null) return;
     await _openLivePreview(session);
   }
+
+  @override
+  void splitView(String viewId, ShellEdge edge) {
+    final sync = _shellSync;
+    if (sync == null) return;
+    _dropView(sync.rendered.focusedPane.id, edge, viewId);
+  }
+
+  @override
+  void requestSplit(ShellEdge edge) => _shellSync?.requestSplit(edge);
 
   /// Splits the focused pane at [edge] with the most recent view on no
   /// pane, or with a new session when every view is on screen.
@@ -2452,9 +2465,13 @@ class _TerminalPageState extends State<TerminalPage>
                                           ),
                                     ),
                               attentionCount: attention?.attentionCount ?? 0,
-                              onOpenAgentAttention: showAgents
-                                  ? () => _openAgentAttention(attention)
-                                  : null,
+                              onOpenAgentAttention: !showAgents
+                                  ? null
+                                  : widget.shell?.onToggleAgents ??
+                                        () => _openAgentAttention(attention),
+                              extraActions:
+                                  widget.shell?.headerActions?.call() ??
+                                  const [],
                               onOpenSessionGrid: _openSwitcher,
                               onSwipeSession: _swipeSession,
                               onSessionActivated: _openPreferredView,

@@ -21,6 +21,9 @@ import 'package:conduit/features/chat_view/presentation/chat_view_page.dart';
 import 'package:conduit/features/companion_setup/data/companion_bundle.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_controller.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_page.dart';
+import 'package:conduit/features/desktop_shell/data/desktop_shell_store.dart';
+import 'package:conduit/features/desktop_shell/domain/shell_layout.dart';
+import 'package:conduit/features/desktop_shell/presentation/desktop_shell_controller.dart';
 import 'package:conduit/features/hosts/domain/home_preferences.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/home_board_controller.dart';
@@ -390,6 +393,9 @@ void main() {
     bool desktop = false,
     bool thisComputer = false,
     bool withFlow = false,
+    DesktopShellController? shell,
+    AgentAttentionController? attention,
+    void Function(TerminalWorkspaceController workspace)? onWorkspace,
   }) async {
     if (desktop) {
       useDesktopView(tester);
@@ -415,12 +421,14 @@ void main() {
     );
     final workspace = TerminalWorkspaceController(DemoTerminalRepository());
     addTearDown(workspace.dispose);
-    final agentAttention = AgentAttentionController(
-      workspace: workspace,
-      runnerFactory: (_) =>
-          ScriptedAgentCommandRunner([StateError('no polling')]),
-      provider: const HerdrAttentionProvider(),
-    );
+    final agentAttention =
+        attention ??
+        AgentAttentionController(
+          workspace: workspace,
+          runnerFactory: (_) =>
+              ScriptedAgentCommandRunner([StateError('no polling')]),
+          provider: const HerdrAttentionProvider(),
+        );
     addTearDown(agentAttention.dispose);
     final runners = {
       'workstation': HerdrFakeRunner(
@@ -469,6 +477,7 @@ void main() {
       ).apply(workstation),
       claudeWorkingScreen(),
     );
+    onWorkspace?.call(workspace);
 
     final verifier = NoopVerifier();
     await tester.pumpWidget(
@@ -495,6 +504,7 @@ void main() {
           homePreferences: InMemoryHomePreferencesRepository(),
           connectFlow: homeFlow,
           previewRefreshInterval: const Duration(days: 1),
+          desktopShell: shell,
         ),
         systemBars: !desktop,
       ),
@@ -1169,6 +1179,63 @@ void main() {
       await tester.runAsync(pumpEventQueue);
       await pumpFrames(tester, 8);
       await saveShot(tester, '21-desktop-connect-dialog', pixelRatio: 1);
+      await tearDownPage(tester);
+    });
+  });
+
+  /// The desktop shell on Linux: sidebar, tabs, splits and dashboard.
+  Future<DesktopShellController> pumpShellHome(
+    WidgetTester tester, {
+    AgentAttentionController? attention,
+    void Function(TerminalWorkspaceController workspace)? onWorkspace,
+  }) async {
+    final shell = DesktopShellController(store: InMemoryDesktopShellStore());
+    addTearDown(shell.dispose);
+    await pumpHome(
+      tester,
+      desktop: true,
+      thisComputer: true,
+      withFlow: true,
+      shell: shell,
+      attention: attention,
+      onWorkspace: onWorkspace,
+    );
+    await tester.runAsync(pumpEventQueue);
+    await pumpFrames(tester, 6);
+    return shell;
+  }
+
+  testWidgets('22 desktop shell dashboard', (tester) async {
+    await asDesktop(() async {
+      final shell = await pumpShellHome(tester);
+      shell.updatePrefs(
+        (prefs) => prefs.setExpanded('m/workstation/h/w1', true),
+      );
+      shell.showHome = true;
+      await pumpFrames(tester, 6);
+      await saveShot(tester, '22-desktop-shell-dashboard', pixelRatio: 1);
+      await tearDownPage(tester);
+    });
+  });
+
+  testWidgets('23 desktop shell split', (tester) async {
+    await asDesktop(() async {
+      final shell = await pumpShellHome(tester);
+      final views = {
+        'session:workstation#herdr:w1',
+        'session:workstation#herdr:w2',
+      };
+      shell.editLayout(
+        views,
+        (layout) => layout.split(
+          layout.focusedPane.id,
+          ShellEdge.right,
+          'session:workstation#herdr:w1',
+          fallbackView: 'session:workstation#herdr:w2',
+        ),
+      );
+      await pumpFrames(tester, 6);
+      await saveShot(tester, '23-desktop-shell-split', pixelRatio: 1);
       await tearDownPage(tester);
     });
   });

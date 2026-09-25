@@ -152,7 +152,8 @@ DesktopShortcutMatch? matchDesktopShortcut(KeyEvent event) {
     // the OS.
     if (!_mac &&
         shift &&
-        (key == LogicalKeyboardKey.backslash || key == LogicalKeyboardKey.bar)) {
+        (key == LogicalKeyboardKey.backslash ||
+            key == LogicalKeyboardKey.bar)) {
       return match(DesktopAction.splitRight);
     }
     if (!_mac &&

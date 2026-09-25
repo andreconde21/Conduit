@@ -47,6 +47,12 @@ abstract interface class TerminalShellHost {
 
   /// The focused terminal session, if the focus is on one.
   TerminalSessionController? get focusedSession;
+
+  /// Shows [viewId] in a new pane at [edge] of the focused one.
+  void splitView(String viewId, ShellEdge edge);
+
+  /// The next view that opens goes into a new pane at [edge].
+  void requestSplit(ShellEdge edge);
 }
 
 /// How the terminal page runs inside the desktop shell: no route of its
@@ -59,7 +65,15 @@ class TerminalShellEmbedding {
     this.badgeFor,
     this.onFullscreenChanged,
     this.onViewsChanged,
+    this.headerActions,
+    this.onToggleAgents,
   });
+
+  /// Extra buttons for the terminal row (the right panel toggles).
+  final List<Widget> Function()? headerActions;
+
+  /// The Agents button: the shell's right panel instead of a side sheet.
+  final VoidCallback? onToggleAgents;
 
   final DesktopShellController controller;
 

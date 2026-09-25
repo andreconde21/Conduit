@@ -72,8 +72,12 @@ class TerminalHeader extends StatelessWidget {
     this.backIcon = Icons.chevron_left_rounded,
     this.backTooltip = 'Machines',
     this.leavesWhenEmpty = true,
+    this.extraActions = const [],
     super.key,
   });
+
+  /// Buttons before the overflow menu (the desktop shell's panel toggles).
+  final List<Widget> extraActions;
 
   static const height = 40.0;
 
@@ -189,22 +193,24 @@ class TerminalHeader extends StatelessWidget {
               onPressed: onBack,
             ),
             Expanded(
-              child: tabs ?? SessionTabs(
-                workspace: workspace,
-                activeSession: session,
-                palette: palette,
-                brightness: brightness,
-                onChanged: onTabsChanged,
-                fileTabs: fileTabs,
-                activeFileTab: activeFileTab,
-                onFileTabSelected: onFileTabSelected,
-                onFileTabClosed: onFileTabClosed,
-                onSessionActivated: onSessionActivated,
-                onSessionLongPress: onSessionLongPress,
-                multiplexerTabsFor: multiplexerTabsFor,
-                onOpenMultiplexerTabs: onOpenMultiplexerTabs,
-                touchScrolls: !swipeSessions,
-              ),
+              child:
+                  tabs ??
+                  SessionTabs(
+                    workspace: workspace,
+                    activeSession: session,
+                    palette: palette,
+                    brightness: brightness,
+                    onChanged: onTabsChanged,
+                    fileTabs: fileTabs,
+                    activeFileTab: activeFileTab,
+                    onFileTabSelected: onFileTabSelected,
+                    onFileTabClosed: onFileTabClosed,
+                    onSessionActivated: onSessionActivated,
+                    onSessionLongPress: onSessionLongPress,
+                    multiplexerTabsFor: multiplexerTabsFor,
+                    onOpenMultiplexerTabs: onOpenMultiplexerTabs,
+                    touchScrolls: !swipeSessions,
+                  ),
             ),
             if (onOpenSessionGrid != null)
               _RowButton(
@@ -225,6 +231,7 @@ class TerminalHeader extends StatelessWidget {
                 ),
                 onPressed: onOpenAgentAttention!,
               ),
+            ...extraActions,
             _OverflowMenu(
               session: session,
               color: foreground,
