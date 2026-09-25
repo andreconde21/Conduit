@@ -53,6 +53,7 @@ void main() {
     );
     await tester.pump();
     expect(watcher?.isForeground, isTrue);
+    await tester.pump(PreviewReadyController.defaultStartDelay);
     expect(runner.commands.single, contains('conductore-hostd ports'));
     expect(find.byKey(const ValueKey('preview-ready-chip')), findsNothing);
 

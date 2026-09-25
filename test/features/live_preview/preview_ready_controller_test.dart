@@ -158,7 +158,9 @@ void main() {
       expect(runner.commands, isEmpty);
 
       controller.setForeground(true);
-      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      expect(runner.commands, isEmpty);
+      await tester.pump(PreviewReadyController.defaultStartDelay);
       expect(runner.commands, hasLength(1));
       await tester.pump(const Duration(seconds: 5));
       await tester.pump(const Duration(seconds: 5));

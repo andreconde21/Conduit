@@ -36,17 +36,23 @@ class PreviewReadyController extends ChangeNotifier {
   PreviewReadyController({
     required this._runnerFactory,
     this.interval = defaultInterval,
+    this.startDelay = defaultStartDelay,
     this.screenDebounce = defaultScreenDebounce,
     this._canPoll,
   });
 
   static const defaultInterval = Duration(seconds: 5);
+  static const defaultStartDelay = Duration(seconds: 2);
   static const defaultScreenDebounce = Duration(milliseconds: 500);
   static const _commandTimeout = Duration(seconds: 8);
 
   final AgentCommandRunner Function() _runnerFactory;
   final bool Function()? _canPoll;
   final Duration interval;
+
+  /// Wait before the first poll after coming to the foreground, so
+  /// flicking through tabs opens no connections.
+  final Duration startDelay;
 
   /// Longest delay between a screen change and the [scanScreen] after it.
   final Duration screenDebounce;
@@ -78,9 +84,10 @@ class PreviewReadyController extends ChangeNotifier {
   /// Ports dismissed or opened in this session.
   Set<int> get handledPorts => Set.unmodifiable(_handled);
 
-  /// Starts polling (at once, then every [interval]) and screen scanning
-  /// while true. While false nothing runs and the extra SSH connection is
-  /// closed: the phone asks nothing while the session is hidden.
+  /// Starts polling (after [startDelay], then every [interval]) and screen
+  /// scanning while true. While false nothing runs and the extra SSH
+  /// connection is closed: the phone asks nothing while the session is
+  /// hidden.
   void setForeground(bool foreground) {
     if (_disposed || foreground == _foreground) return;
     _foreground = foreground;
@@ -89,8 +96,10 @@ class PreviewReadyController extends ChangeNotifier {
     _screenTimer?.cancel();
     _screenTimer = null;
     if (foreground) {
-      unawaited(poll());
-      _timer = Timer.periodic(interval, (_) => unawaited(poll()));
+      _timer = Timer(startDelay, () {
+        unawaited(poll());
+        _timer = Timer.periodic(interval, (_) => unawaited(poll()));
+      });
       _scheduleScreenScan();
     } else {
       _closeRunner();
