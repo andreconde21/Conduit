@@ -178,7 +178,9 @@ void main() {
 
     testWidgets('tmux target follows the host prefix key', (tester) async {
       final harness = _Harness(
-        host: buildHost('a').copyWith(tmuxPrefixKey: MultiplexerPrefixKey.controlA),
+        host: buildHost(
+          'a',
+        ).copyWith(tmuxPrefixKey: MultiplexerPrefixKey.controlA),
       );
       addTearDown(harness.session.dispose);
       await tester.pumpWidget(harness.build());
@@ -188,9 +190,7 @@ void main() {
       expect(harness.session.log, ['ctrl:keyA', 'text:n']);
     });
 
-    testWidgets('Herdr target follows the host prefix key too', (
-      tester,
-    ) async {
+    testWidgets('Herdr target follows the host prefix key too', (tester) async {
       final harness = _Harness(
         host: buildHost(
           'a',

@@ -8,6 +8,7 @@ import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/sessions/domain/connect_preferences.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/presentation/connect_picker_sheet.dart';
+import 'package:conduit/features/sessions/presentation/herdr_session_focus.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:flutter/material.dart';
@@ -24,12 +25,41 @@ class SessionConnectFlow {
     required this.workspace,
     required this.runnerFactory,
     required this.preferences,
-  });
+  }) : herdr = HerdrSessionFocus(
+         workspace: workspace,
+         runnerFactory: runnerFactory,
+       );
 
   final HostsController hostsController;
   final TerminalWorkspaceController workspace;
   final AgentCommandRunnerFactory runnerFactory;
   final ConnectPreferencesRepository preferences;
+
+  /// Herdr focus across the app's sessions: re-focus on tab switch, deep
+  /// links, and the command channel behind the Herdr gestures.
+  final HerdrSessionFocus herdr;
+
+  /// Opens [host] at an agent's exact place in Herdr (see
+  /// [HerdrSessionFocus.openAgentLocation]).
+  Future<TerminalSessionController?> openAgentLocation(
+    SavedHost host, {
+    required String workspaceId,
+    String tabId = '',
+    String paneId = '',
+    String label = '',
+  }) async {
+    await hostsController.markConnected(host);
+    return herdr.openAgentLocation(
+      host,
+      workspaceId: workspaceId,
+      tabId: tabId,
+      paneId: paneId,
+      label: label,
+      open: (target) => open(host, target),
+    );
+  }
+
+  void dispose() => unawaited(herdr.dispose());
 
   /// Target keys with an open session for [host], for the "Active" badges.
   Set<String> activeTargetKeysFor(SavedHost host) => {

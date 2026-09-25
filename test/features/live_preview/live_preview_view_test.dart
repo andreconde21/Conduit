@@ -7,8 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:webview_flutter_platform_interface/webview_flutter_platform_interface.dart';
 
-import 'live_preview_controller_test.dart'
-    show FakePortForwarder;
+import 'live_preview_controller_test.dart' show FakePortForwarder;
 
 /// Records what the page asks of the platform WebView.
 class FakeWebViewPlatform extends WebViewPlatform {
@@ -118,7 +117,11 @@ class FakeWebViewWidget extends PlatformWebViewWidget {
 
 class FakeWebResourceError extends WebResourceError {
   const FakeWebResourceError()
-    : super(errorCode: -6, description: 'net::ERR_CONNECTION_REFUSED', isForMainFrame: true);
+    : super(
+        errorCode: -6,
+        description: 'net::ERR_CONNECTION_REFUSED',
+        isForMainFrame: true,
+      );
 }
 
 void main() {
@@ -154,7 +157,9 @@ void main() {
     ),
   );
 
-  testWidgets('shows a spinner while connecting, then loads the forward URL', (tester) async {
+  testWidgets('shows a spinner while connecting, then loads the forward URL', (
+    tester,
+  ) async {
     forwarder.gate = Completer<void>();
     await tester.pumpWidget(app());
     final starting = controller.start(3000);
@@ -177,32 +182,45 @@ void main() {
     await tester.enterText(find.byType(TextField), 'admin?tab=1');
     await tester.testTextInput.receiveAction(TextInputAction.go);
     await tester.pump();
-    expect(platform.controller!.loaded.last, Uri.parse('http://127.0.0.1:40000/admin?tab=1'));
+    expect(
+      platform.controller!.loaded.last,
+      Uri.parse('http://127.0.0.1:40000/admin?tab=1'),
+    );
     expect(find.text('/admin?tab=1'), findsOneWidget);
   });
 
-  testWidgets('page navigation updates the address bar; foreign links open outside', (tester) async {
-    await tester.pumpWidget(app());
-    await controller.start(3000);
-    await tester.pump();
-    final navigation = platform.navigation!;
-    navigation.onUrlChange!(const UrlChange(url: 'http://127.0.0.1:40000/docs'));
-    await tester.pump();
-    expect(controller.path, '/docs');
-    expect(find.text('/docs'), findsOneWidget);
+  testWidgets(
+    'page navigation updates the address bar; foreign links open outside',
+    (tester) async {
+      await tester.pumpWidget(app());
+      await controller.start(3000);
+      await tester.pump();
+      final navigation = platform.navigation!;
+      navigation.onUrlChange!(
+        const UrlChange(url: 'http://127.0.0.1:40000/docs'),
+      );
+      await tester.pump();
+      expect(controller.path, '/docs');
+      expect(find.text('/docs'), findsOneWidget);
 
-    final inside = navigation.onNavigationRequest!(
-      const NavigationRequest(url: 'http://127.0.0.1:40000/x', isMainFrame: true),
-    );
-    expect(await inside, NavigationDecision.navigate);
-    final outside = navigation.onNavigationRequest!(
-      const NavigationRequest(url: 'https://example.com/', isMainFrame: true),
-    );
-    expect(await outside, NavigationDecision.prevent);
-    expect(external, [Uri.parse('https://example.com/')]);
-  });
+      final inside = navigation.onNavigationRequest!(
+        const NavigationRequest(
+          url: 'http://127.0.0.1:40000/x',
+          isMainFrame: true,
+        ),
+      );
+      expect(await inside, NavigationDecision.navigate);
+      final outside = navigation.onNavigationRequest!(
+        const NavigationRequest(url: 'https://example.com/', isMainFrame: true),
+      );
+      expect(await outside, NavigationDecision.prevent);
+      expect(external, [Uri.parse('https://example.com/')]);
+    },
+  );
 
-  testWidgets('reload and open-in-browser act on the current URL', (tester) async {
+  testWidgets('reload and open-in-browser act on the current URL', (
+    tester,
+  ) async {
     await tester.pumpWidget(app());
     await controller.start(3000);
     await tester.pump();
@@ -214,24 +232,32 @@ void main() {
     expect(external, [Uri.parse('http://127.0.0.1:40000/')]);
   });
 
-  testWidgets('a forward failure shows the message with retry and change port', (tester) async {
-    forwarder.refused.add(3000);
-    await tester.pumpWidget(app());
-    await controller.start(3000);
-    await tester.pump();
-    expect(find.text('Could not open the preview'), findsOneWidget);
-    expect(find.text('Nothing is listening on port 3000 on Host h.'), findsOneWidget);
-    expect(find.byKey(const Key('webview')), findsNothing);
-    await tester.tap(find.text('Change port'));
-    expect(changePortTaps, 1);
-    forwarder.refused.clear();
-    await tester.tap(find.text('Retry'));
-    await tester.pump();
-    await tester.pump();
-    expect(find.byKey(const Key('webview')), findsOneWidget);
-  });
+  testWidgets(
+    'a forward failure shows the message with retry and change port',
+    (tester) async {
+      forwarder.refused.add(3000);
+      await tester.pumpWidget(app());
+      await controller.start(3000);
+      await tester.pump();
+      expect(find.text('Could not open the preview'), findsOneWidget);
+      expect(
+        find.text('Nothing is listening on port 3000 on Host h.'),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('webview')), findsNothing);
+      await tester.tap(find.text('Change port'));
+      expect(changePortTaps, 1);
+      forwarder.refused.clear();
+      await tester.tap(find.text('Retry'));
+      await tester.pump();
+      await tester.pump();
+      expect(find.byKey(const Key('webview')), findsOneWidget);
+    },
+  );
 
-  testWidgets('a restart on a new local port reloads the WebView', (tester) async {
+  testWidgets('a restart on a new local port reloads the WebView', (
+    tester,
+  ) async {
     await tester.pumpWidget(app());
     await controller.start(3000);
     await tester.pump();
@@ -262,9 +288,7 @@ void main() {
     await tester.pumpWidget(app());
     await controller.start(3000);
     await tester.pump();
-    forwarder.opened.single.errors.add(
-      'Port 3000 refused the connection.',
-    );
+    forwarder.opened.single.errors.add('Port 3000 refused the connection.');
     await tester.pump();
     expect(find.text('Port 3000 refused the connection.'), findsOneWidget);
     await tester.tap(find.text('Dismiss'));
@@ -272,7 +296,9 @@ void main() {
     expect(find.text('Port 3000 refused the connection.'), findsNothing);
   });
 
-  testWidgets('a main-frame load error replaces the page with a notice', (tester) async {
+  testWidgets('a main-frame load error replaces the page with a notice', (
+    tester,
+  ) async {
     await tester.pumpWidget(app());
     await controller.start(3000);
     await tester.pump();
