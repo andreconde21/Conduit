@@ -94,14 +94,8 @@ void main() {
       await show(tester, _permissionPrompt);
 
       expect(find.text('1  Yes'), findsOneWidget);
-      expect(
-        find.text("2  Yes, and don't ask again for git status…"),
-        findsOneWidget,
-      );
-      expect(
-        find.text('3  No, and tell Claude what to do differently'),
-        findsOneWidget,
-      );
+      expect(find.text("2  Yes, don't ask again…"), findsOneWidget);
+      expect(find.text('3  No, tell Claude what…'), findsOneWidget);
       expect(find.text('Esc'), findsOneWidget);
     });
 
@@ -122,9 +116,6 @@ void main() {
       await pumpStrip(tester);
       await show(tester, _permissionPrompt);
 
-      // The Esc chip sits past the right edge until the strip is scrolled.
-      await tester.ensureVisible(find.text('Esc'));
-      await tester.pump();
       await tester.tap(find.text('Esc'));
       await tester.pump();
 
@@ -208,9 +199,7 @@ void main() {
       await pumpStrip(tester);
       await show(tester, _permissionPrompt);
 
-      await tester.longPress(
-        find.text("2  Yes, and don't ask again for git status…"),
-      );
+      await tester.longPress(find.text("2  Yes, don't ask again…"));
       await tester.pump(const Duration(milliseconds: 100));
 
       expect(
@@ -220,6 +209,37 @@ void main() {
         findsOneWidget,
       );
       expect(sent(), isEmpty);
+    });
+
+    testWidgets('on a 360 dp phone every option is on screen, wrapping to '
+        'a second row', (tester) async {
+      tester.view.physicalSize = const Size(1080, 2340);
+      tester.view.devicePixelRatio = 3; // 360 x 780 dp, a Galaxy M53.
+      addTearDown(tester.view.reset);
+      await pumpStrip(tester);
+      await show(tester, _permissionPrompt);
+
+      final screen = Offset.zero & const Size(360, 780);
+      final chips = [
+        find.text('1  Yes'),
+        find.text("2  Yes, don't ask again…"),
+        find.text('3  No, tell Claude what…'),
+        find.text('Esc'),
+      ];
+      final tops = <double>{};
+      for (final chip in chips) {
+        expect(chip, findsOneWidget);
+        final rect = tester.getRect(chip);
+        expect(screen.contains(rect.topLeft), isTrue, reason: '$chip');
+        expect(screen.contains(rect.bottomRight), isTrue, reason: '$chip');
+        tops.add(tester.getRect(chip).top.roundToDouble());
+      }
+      expect(tops.length, inInclusiveRange(1, 2));
+      expect(tester.takeException(), isNull);
+
+      await tester.tap(find.text('3  No, tell Claude what…'));
+      await tester.pump();
+      expect(sent(), ['3']);
     });
 
     testWidgets('disappears when the prompt scrolls away', (tester) async {
@@ -248,6 +268,39 @@ void main() {
 
       await tester.pump(const Duration(milliseconds: 50));
       expect(find.text('1  Yes'), findsOneWidget);
+    });
+  });
+
+  group('compactPromptLabel', () {
+    test('short labels stay as they are', () {
+      expect(compactPromptLabel('Yes'), 'Yes');
+      expect(
+        compactPromptLabel('Default (recommended)'),
+        'Default (recommended)',
+      );
+    });
+
+    test('long labels drop filler and parenthesised hints, then cut at a '
+        'word', () {
+      expect(
+        compactPromptLabel("Yes, and don't ask again for git status…"),
+        "Yes, don't ask again…",
+      );
+      expect(
+        compactPromptLabel(
+          'Yes, allow all edits during this session '
+          '(shift+tab)',
+        ),
+        'Yes, allow all edits…',
+      );
+      expect(
+        compactPromptLabel('No, and tell Claude what to do differently'),
+        'No, tell Claude what…',
+      );
+      expect(
+        compactPromptLabel('Supercalifragilisticexpialidocious'),
+        'Supercalifragilisticex…',
+      );
     });
   });
 }

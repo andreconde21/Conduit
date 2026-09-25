@@ -173,20 +173,22 @@ class _PromptMenuStripState extends State<PromptMenuStrip> {
     final brightness = widget.brightness;
     return Material(
       color: palette.panelFor(brightness),
-      child: SizedBox(
-        height: 44,
-        child: ListView(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(6, 5, 6, 5),
+        // Every option stays on screen: chips wrap onto a second row
+        // instead of scrolling off the right edge of a phone.
+        child: Wrap(
+          key: const ValueKey('prompt-menu-chips'),
+          spacing: 6,
+          runSpacing: 6,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             Padding(
-              padding: const EdgeInsets.only(left: 2, right: 6),
-              child: Center(
-                child: Icon(
-                  Icons.list_alt_rounded,
-                  size: 18,
-                  color: palette.mutedForegroundFor(brightness),
-                ),
+              padding: const EdgeInsets.only(left: 2),
+              child: Icon(
+                Icons.list_alt_rounded,
+                size: 16,
+                color: palette.mutedForegroundFor(brightness),
               ),
             ),
             for (final option in menu.options)
@@ -216,12 +218,45 @@ class _PromptMenuStripState extends State<PromptMenuStrip> {
     switch (menu.input) {
       case PromptMenuInput.digit:
       case PromptMenuInput.digitEnter:
-        return '${option.index + 1}  ${option.label}';
+        return '${option.index + 1}  ${compactPromptLabel(option.label)}';
       case PromptMenuInput.arrows:
       case PromptMenuInput.word:
-        return option.label;
+        return compactPromptLabel(option.label);
     }
   }
+}
+
+/// A chip-sized caption for a menu option: short labels stay as they are;
+/// longer ones drop the filler "and" after a comma, then parenthesised
+/// hints, then are cut at a word boundary within [maxChars]. The full text
+/// is one long-press away.
+String compactPromptLabel(String label, {int maxChars = 22}) {
+  var text = label.trim();
+  if (text.endsWith('…')) {
+    text = text.substring(0, text.length - 1).trimRight();
+  }
+  final cut = text.length != label.trim().length;
+  if (!cut && text.length <= maxChars) {
+    return text;
+  }
+  text = text
+      .replaceAll(RegExp(r',\s+and\s+', caseSensitive: false), ', ')
+      .replaceAll(RegExp(r'\s+'), ' ');
+  if (text.length > maxChars) {
+    text = text
+        .replaceAll(RegExp(r'\s*\([^)]*\)'), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+  if (text.length <= maxChars) {
+    return cut ? '$text…' : text;
+  }
+  var end = text.lastIndexOf(' ', maxChars);
+  if (end <= 0) {
+    end = maxChars;
+  }
+  final head = text.substring(0, end).replaceAll(RegExp(r'[\s,;:.\-–—]+$'), '');
+  return '$head…';
 }
 
 class _MenuButton extends StatelessWidget {
@@ -241,7 +276,7 @@ class _MenuButton extends StatelessWidget {
   final bool selected;
   final VoidCallback onPressed;
 
-  static const _maxWidth = 220.0;
+  static const _maxWidth = 200.0;
 
   @override
   Widget build(BuildContext context) {
@@ -268,11 +303,10 @@ class _MenuButton extends StatelessWidget {
             onTap: onPressed,
             child: Container(
               constraints: const BoxConstraints(
-                minWidth: 44,
+                minWidth: 40,
                 maxWidth: _maxWidth,
               ),
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              alignment: Alignment.center,
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
