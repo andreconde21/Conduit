@@ -26,6 +26,58 @@ enum AgentMonitorKind {
   }
 }
 
+/// How loudly Agent Attention notifies for one host.
+///
+/// Stored as the two legacy flags ([SavedHost.agentNotifyInput],
+/// [SavedHost.agentNotifyFinished]) so older builds keep reading it.
+/// Approvals and errors (permission prompts, an agent blocked on a human)
+/// are loud; a finished agent only notifies at [all]; every other state
+/// change only updates the inbox and the home-screen widget.
+enum AgentNotifyLevel {
+  all,
+  approvalsAndErrors,
+  none;
+
+  String get label => switch (this) {
+    AgentNotifyLevel.all => 'All',
+    AgentNotifyLevel.approvalsAndErrors => 'Approvals and errors',
+    AgentNotifyLevel.none => 'None',
+  };
+
+  String get description => switch (this) {
+    AgentNotifyLevel.all =>
+      'Approvals, agents waiting for you, and finished agents.',
+    AgentNotifyLevel.approvalsAndErrors =>
+      'Only approvals and agents waiting for you. Other changes update the '
+          'inbox quietly.',
+    AgentNotifyLevel.none => 'No notifications. The inbox still updates.',
+  };
+
+  /// The level the legacy flags encode. Input notifications off means
+  /// the user muted approvals, so it maps to [none] even with "finished"
+  /// on (a finished-only setting predates approvals being loud).
+  static AgentNotifyLevel fromFlags({
+    required bool input,
+    required bool finished,
+  }) {
+    if (!input) {
+      return AgentNotifyLevel.none;
+    }
+    return finished
+        ? AgentNotifyLevel.all
+        : AgentNotifyLevel.approvalsAndErrors;
+  }
+
+  bool get inputFlag => this != AgentNotifyLevel.none;
+  bool get finishedFlag => this == AgentNotifyLevel.all;
+
+  /// Permission prompts and agents waiting on a human.
+  bool get notifiesApprovalsAndErrors => this != AgentNotifyLevel.none;
+
+  /// Agents that finished their work.
+  bool get notifiesFinished => this == AgentNotifyLevel.all;
+}
+
 /// The prefix a host's multiplexer (tmux or Herdr) is driven with unless the
 /// host says otherwise.
 const defaultTmuxPrefixKey = MultiplexerPrefixKey.defaultKey;
@@ -205,6 +257,7 @@ class SavedHost {
   final String moshPorts;
   final bool predictiveEchoEnabled;
   final bool startTmuxOnConnect;
+
   /// Prefix sent before tmux and Herdr bindings on this host.
   final MultiplexerPrefixKey tmuxPrefixKey;
   final String tmuxSessionName;
@@ -223,6 +276,12 @@ class SavedHost {
 
   /// Which agent manager to read (see [AgentMonitorKind]).
   final AgentMonitorKind agentMonitor;
+
+  /// The notification level the two notify flags encode.
+  AgentNotifyLevel get agentNotifyLevel => AgentNotifyLevel.fromFlags(
+    input: agentNotifyInput,
+    finished: agentNotifyFinished,
+  );
 
   /// Remote directory shared files are uploaded to (share-to-agent). Empty
   /// means `~/conductore-inbox`; `~` and relative paths resolve under home.
@@ -304,6 +363,7 @@ class SavedHost {
     bool? agentAttentionEnabled,
     bool? agentNotifyInput,
     bool? agentNotifyFinished,
+    AgentNotifyLevel? agentNotifyLevel,
     AgentMonitorKind? agentMonitor,
     String? shareInboxDirectory,
     DateTime? lastConnectedAt,
@@ -339,8 +399,14 @@ class SavedHost {
       connectSnippetId: connectSnippetId ?? this.connectSnippetId,
       agentAttentionEnabled:
           agentAttentionEnabled ?? this.agentAttentionEnabled,
-      agentNotifyInput: agentNotifyInput ?? this.agentNotifyInput,
-      agentNotifyFinished: agentNotifyFinished ?? this.agentNotifyFinished,
+      agentNotifyInput:
+          agentNotifyLevel?.inputFlag ??
+          agentNotifyInput ??
+          this.agentNotifyInput,
+      agentNotifyFinished:
+          agentNotifyLevel?.finishedFlag ??
+          agentNotifyFinished ??
+          this.agentNotifyFinished,
       agentMonitor: agentMonitor ?? this.agentMonitor,
       shareInboxDirectory: shareInboxDirectory ?? this.shareInboxDirectory,
       lastConnectedAt: clearLastConnectedAt
