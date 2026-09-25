@@ -11,6 +11,9 @@ class FakeTts implements TextToSpeech {
   double? rate;
   double? pitch;
   var interactive = true;
+  var installedVoices = const <TtsVoice>[];
+  final voiceQueries = <String>[];
+  final voicesUsed = <String>[];
   final _events = StreamController<TtsEvent>.broadcast(sync: true);
 
   void done() => _events.add(TtsDone(ids.last));
@@ -40,11 +43,15 @@ class FakeTts implements TextToSpeech {
     spoken.add(text);
     ids.add(id);
     languages.add(language);
+    voicesUsed.add(voice);
   }
 
   @override
   Future<void> stop() async => stops += 1;
 
   @override
-  Future<List<TtsVoice>> voices({String language = ''}) async => const [];
+  Future<List<TtsVoice>> voices({String language = ''}) async {
+    voiceQueries.add(language);
+    return installedVoices;
+  }
 }
