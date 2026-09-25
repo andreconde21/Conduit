@@ -79,7 +79,7 @@ void main() {
   group('paths', () {
     test('home directories and other absolute paths', () {
       clean(
-        "PathNotFoundException: Cannot open file, path = "
+        'PathNotFoundException: Cannot open file, path = '
         "'/home/andre/projects/secret-plan.md'",
         ['andre', 'secret-plan', 'projects'],
       );
@@ -141,7 +141,7 @@ void main() {
   });
 
   group('saved machines', () {
-    final host = SavedHost(
+    const host = SavedHost(
       id: 'h1',
       name: 'Kitchen Pi',
       host: 'pi-kitchen',
@@ -149,10 +149,10 @@ void main() {
       username: 'grandma',
       authMethod: SshAuthMethod.password,
       password: 'correcthorse',
-      tags: const ['family'],
+      tags: ['family'],
       tmuxSessionName: 'blog-drafts',
       tmuxStartDirectory: 'srv',
-      snippets: const [
+      snippets: [
         TerminalSnippet(id: 's', label: 'Deploy blog', text: 'make ship'),
       ],
     );

@@ -249,11 +249,15 @@ void main() {
       expect(event['tags'], {'platform': 'android', 'flavor': 'full'});
       expect(event['user'], isNull);
       expect(
-        (event['exception'] as Map)['values'][0]['value'],
+        (((event['exception'] as Map)['values'] as List).single
+            as Map)['value'],
         'Bad state: ssh <user@host> -p <port> failed in <path>',
       );
       expect(
-        [for (final crumb in event['breadcrumbs'] as List) crumb['data']],
+        [
+          for (final crumb in event['breadcrumbs'] as List<dynamic>)
+            (crumb as Map)['data'],
+        ],
         [
           {'to': 'terminal'},
         ],
