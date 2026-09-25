@@ -29,7 +29,7 @@
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Conductore lets you choose files and photos to upload to your machines over SFTP or attach to a coding agent prompt.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Conductore lets you take a photo to upload to your machines over SFTP or attach to a coding agent prompt.</string>
+	<string>Conductore lets you take a photo to upload to your machines over SFTP or attach to a coding agent prompt, and scan the QR code that adds this device to sync.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Conductore does not use your location, but file selection providers may require this permission.</string>
 	<key>CFBundlePackageType</key>

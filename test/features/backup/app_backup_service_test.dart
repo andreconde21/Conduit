@@ -9,11 +9,17 @@ import 'package:conduit/features/backup/data/app_backup_service.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/domain/saved_hosts_repository.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
+import 'package:conduit/features/sessions/domain/session_snapshot.dart';
+import 'package:conduit/features/sync/data/app_local_sync_store.dart';
+import 'package:conduit/features/sync/data/sync_crypto.dart';
+import 'package:conduit/features/sync/domain/sync_record.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../support/test_doubles.dart';
+import '../sync/sync_test_support.dart';
 
 void main() {
   group('AppBackupPasswordPolicy', () {
@@ -26,34 +32,58 @@ void main() {
   });
 
   group('AppBackupService', () {
-    test('exports public backups without login secrets', () async {
+    const password = 'StrongPass123!';
+
+    Future<Map<String, Object?>> openRecords(List<int> bytes) async {
+      final plaintext = await _crypto.open(
+        Uint8List.fromList(bytes),
+        passphrase: password,
+      );
+      final document = SyncDocument.fromJson(
+        jsonDecode(utf8.decode(plaintext)),
+      );
+      return {
+        for (final record in document.records.values) record.key: record.value,
+      };
+    }
+
+    test('exports an encrypted bundle without credentials', () async {
       final fixture = await _Fixture.create();
 
-      final bytes = await fixture.service.exportBackup(includeSecrets: false);
-      final decoded = jsonDecode(utf8.decode(bytes)) as Map<String, Object?>;
-      final payload = decoded['payload'] as Map<String, Object?>;
-      final hosts = payload['hosts'] as List<Object?>;
-      final host = hosts.single as Map<String, Object?>;
-      final hardwareKeys = host['hardwareKeys'] as List<Object?>;
-      final hardwareKey = hardwareKeys.single as Map<String, Object?>;
+      final bytes = await fixture.service.exportBackup(
+        includeSecrets: false,
+        password: password,
+      );
+      final text = utf8.decode(bytes);
+      expect(SyncCrypto.isBundle(bytes), isTrue);
+      expect(text, isNot(contains('Production')));
 
-      expect(decoded['encrypted'], isFalse);
-      expect(host['password'], isEmpty);
-      expect(host['privateKey'], isEmpty);
-      expect(host['passphrase'], isEmpty);
-      expect(hardwareKey['privateKey'], isEmpty);
-      expect(hardwareKey['passphrase'], isEmpty);
-      expect(payload['trustedHostKeys'], isNotEmpty);
+      final records = await openRecords(bytes);
+      final host = records['host:existing']! as Map<String, Object?>;
+      expect(host['name'], 'Production');
+      expect(host.containsKey('password'), isFalse);
+      expect(host.containsKey('hardwareKeys'), isFalse);
+      expect(records.keys.where((k) => k.startsWith('secret:')), isEmpty);
+      expect(records['knownHost:example.com:2222'], isNotNull);
+      expect(records['setting:palette'], AppPalette.catppuccin.name);
+    });
+
+    test('refuses a weak password', () async {
+      final fixture = await _Fixture.create();
+      await expectLater(
+        fixture.service.exportBackup(includeSecrets: false, password: 'short'),
+        throwsA(isA<AppBackupException>()),
+      );
     });
 
     test(
-      'encrypts secret backups and imports them with the password',
+      'exports with credentials and imports them with the password',
       () async {
         final source = await _Fixture.create();
 
         final bytes = await source.service.exportBackup(
           includeSecrets: true,
-          password: 'StrongPass123!',
+          password: password,
         );
         final exported = utf8.decode(bytes);
 
@@ -63,19 +93,15 @@ void main() {
         final target = await _Fixture.create(empty: true);
         final result = await target.service.importBackup(
           bytes,
-          password: 'StrongPass123!',
+          password: password,
         );
 
         expect(result.hostsImported, 1);
-        expect(target.hostsRepository.persisted, hasLength(1));
-        expect(
-          target.hostsRepository.persisted.single.password,
-          'secret-password',
-        );
-        expect(
-          target.hostsRepository.persisted.single.privateKey,
-          'hardware-stub',
-        );
+        expect(result.trustedKeysImported, 1);
+        final host = target.hostsRepository.persisted.single;
+        expect(host.password, 'secret-password');
+        expect(host.hardwareKeys.single.privateKey, 'hardware-stub');
+        expect(host.lastConnectedAt, isNull);
         expect(target.verifier.records, hasLength(1));
         expect(target.themeController.palette, AppPalette.catppuccin);
         expect(target.themeController.terminalKeyboardRows, [
@@ -88,6 +114,35 @@ void main() {
       },
     );
 
+    test('a wrong or missing password is reported', () async {
+      final source = await _Fixture.create();
+      final bytes = await source.service.exportBackup(
+        includeSecrets: false,
+        password: password,
+      );
+      final target = await _Fixture.create(empty: true);
+      await expectLater(
+        target.service.importBackup(bytes),
+        throwsA(
+          isA<AppBackupException>().having(
+            (e) => e.message,
+            'message',
+            contains('password'),
+          ),
+        ),
+      );
+      await expectLater(
+        target.service.importBackup(bytes, password: 'WrongPass123!'),
+        throwsA(
+          isA<AppBackupException>().having(
+            (e) => e.message,
+            'message',
+            contains('password'),
+          ),
+        ),
+      );
+    });
+
     test('backs up and restores the pill toolbar buttons', () async {
       final source = await _Fixture.create();
       const items = [
@@ -97,14 +152,17 @@ void main() {
       ];
       await source.themeController.setTerminalPillItems(items);
 
-      final bytes = await source.service.exportBackup(includeSecrets: false);
+      final bytes = await source.service.exportBackup(
+        includeSecrets: false,
+        password: password,
+      );
       final target = await _Fixture.create(empty: true);
       expect(
         target.themeController.terminalPillItems,
         defaultTerminalPillItems,
       );
 
-      await target.service.importBackup(bytes);
+      await target.service.importBackup(bytes, password: password);
 
       expect(target.themeController.terminalPillItems, items);
     });
@@ -113,7 +171,10 @@ void main() {
       'imports by merging matching hosts and keeping unrelated hosts',
       () async {
         final source = await _Fixture.create();
-        final bytes = await source.service.exportBackup(includeSecrets: false);
+        final bytes = await source.service.exportBackup(
+          includeSecrets: false,
+          password: password,
+        );
         final target = await _Fixture.create(empty: true);
         target.hostsRepository.persisted = [
           buildHost('existing', username: 'before'),
@@ -121,15 +182,15 @@ void main() {
         ];
         await target.hostsController.load();
 
-        await target.service.importBackup(bytes);
+        await target.service.importBackup(bytes, password: password);
 
         expect(target.hostsRepository.persisted, hasLength(2));
-        expect(
-          target.hostsRepository.persisted
-              .firstWhere((host) => host.id == 'existing')
-              .username,
-          'alice',
+        final existing = target.hostsRepository.persisted.firstWhere(
+          (host) => host.id == 'existing',
         );
+        expect(existing.username, 'alice');
+        // Credentials were not in the file: the local ones stay.
+        expect(existing.password, 'pw');
         expect(
           target.hostsRepository.persisted
               .firstWhere((host) => host.id == 'unrelated')
@@ -143,8 +204,44 @@ void main() {
         expect(target.hostsRepository.persistedManualOrder.first, 'existing');
       },
     );
+
+    test('still imports version 1 backups', () async {
+      final legacyHost = buildHost('legacy').toJson();
+      final payload = {
+        'hosts': [legacyHost],
+        'hostSortMode': 'name',
+        'hostManualOrder': <String>[],
+        'theme': {'palette': AppPalette.catppuccin.name},
+        'trustedHostKeys': <Object?>[],
+      };
+      final encrypted = const AppBackupCrypto().encrypt(
+        Uint8List.fromList(utf8.encode(jsonEncode(payload))),
+        password,
+      );
+      final target = await _Fixture.create(empty: true);
+      final result = await target.service.importBackup(
+        Uint8List.fromList(utf8.encode(jsonEncode(encrypted))),
+        password: password,
+      );
+      expect(result.hostsImported, 1);
+      expect(target.hostsRepository.persisted.single.password, 'pw');
+
+      final plain = {
+        'format': 'conduit.backup',
+        'version': 1,
+        'encrypted': false,
+        'payload': payload,
+      };
+      final again = await _Fixture.create(empty: true);
+      await again.service.importBackup(
+        Uint8List.fromList(utf8.encode(jsonEncode(plain))),
+      );
+      expect(again.hostsRepository.persisted.single.id, 'legacy');
+    });
   });
 }
+
+const _crypto = SyncCrypto(params: KdfParams.insecureFast, useIsolate: false);
 
 class _Fixture {
   _Fixture({
@@ -158,7 +255,7 @@ class _Fixture {
   final FakeHostsRepository hostsRepository;
   final HostsController hostsController;
   final ThemeController themeController;
-  final _MemoryVerifier verifier;
+  final MemoryVerifier verifier;
   final AppBackupService service;
 
   static Future<_Fixture> create({bool empty = false}) async {
@@ -207,7 +304,7 @@ class _Fixture {
     );
     await themeController.load();
 
-    final verifier = _MemoryVerifier(
+    final verifier = MemoryVerifier(
       empty
           ? const []
           : [
@@ -224,6 +321,15 @@ class _Fixture {
       hostsController: hostsController,
       themeController: themeController,
       hostKeyVerifier: verifier,
+      localStore: AppLocalSyncStore(
+        hosts: hostsController,
+        theme: themeController,
+        hostKeys: verifier,
+        connectPreferences: MemoryJsonMapStore(),
+        recentDirectoriesStore: MemoryJsonMapStore(),
+        sessions: InMemorySessionSnapshotRepository(),
+      ),
+      crypto: _crypto,
       now: () => DateTime.parse('2026-02-03T04:05:06Z'),
     );
 
@@ -235,31 +341,4 @@ class _Fixture {
       service: service,
     );
   }
-}
-
-class _MemoryVerifier implements HostKeyVerifier {
-  _MemoryVerifier(List<HostKeyRecord> records) : records = List.of(records);
-
-  List<HostKeyRecord> records;
-
-  @override
-  Future<List<HostKeyRecord>> loadTrustedKeys() async => List.of(records);
-
-  @override
-  Future<void> saveTrustedKeys(List<HostKeyRecord> records) async {
-    this.records = List.of(records);
-  }
-
-  @override
-  Future<void> removeTrustedKey(String host, int port) async {
-    records.removeWhere((record) => record.host == host && record.port == port);
-  }
-
-  @override
-  Future<bool> verify({
-    required String host,
-    required int port,
-    required String type,
-    required String fingerprint,
-  }) async => true;
 }

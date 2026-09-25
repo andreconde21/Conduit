@@ -52,7 +52,10 @@ class _BackupSheetState extends State<_BackupSheet> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Backups include appearance, terminal settings, saved machines, order, and trusted host keys.',
+              'Backups include saved machines and their order, trusted host keys, '
+              'snippets, appearance and terminal settings, connect preferences '
+              'and the session list. Every backup is encrypted with a password; '
+              'the file uses the same format as device sync.',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: colorScheme.onSurfaceVariant,
               ),
@@ -60,22 +63,23 @@ class _BackupSheetState extends State<_BackupSheet> {
             const SizedBox(height: 18),
             _BackupActionTile(
               icon: Icons.ios_share_rounded,
-              title: 'Export without secrets',
-              subtitle: 'Passwords and private key material are removed.',
+              title: 'Export without credentials',
+              subtitle: 'Passwords and private keys are left out.',
               onTap: _busy ? null : () => _export(includeSecrets: false),
             ),
             const SizedBox(height: 10),
             _BackupActionTile(
               icon: Icons.enhanced_encryption_rounded,
-              title: 'Export encrypted with secrets',
-              subtitle: 'Credentials are protected with a backup password.',
+              title: 'Export with credentials',
+              subtitle: 'Also passwords, private keys and hardware-key stubs.',
               onTap: _busy ? null : () => _export(includeSecrets: true),
             ),
             const SizedBox(height: 10),
             _BackupActionTile(
               icon: Icons.restore_rounded,
               title: 'Import backup',
-              subtitle: 'Imported machines are merged into this device.',
+              subtitle:
+                  'Backup files and sync bundles are merged into this device.',
               onTap: _busy ? null : _import,
             ),
             if (_busy) ...[
@@ -89,8 +93,8 @@ class _BackupSheetState extends State<_BackupSheet> {
   }
 
   Future<void> _export({required bool includeSecrets}) async {
-    final password = includeSecrets ? await _requestNewPassword() : null;
-    if (includeSecrets && password == null) {
+    final password = await _requestNewPassword();
+    if (password == null) {
       return;
     }
     await _run(() async {
@@ -180,7 +184,7 @@ class _BackupSheetState extends State<_BackupSheet> {
 
   String _backupFileName({required bool includeSecrets}) {
     final date = DateTime.now().toUtc().toIso8601String().split('T').first;
-    final mode = includeSecrets ? 'encrypted' : 'public';
+    final mode = includeSecrets ? 'with-credentials' : 'settings';
     return 'conductore-$mode-$date.${AppBackupService.fileExtension}';
   }
 
