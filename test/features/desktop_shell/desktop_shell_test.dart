@@ -324,6 +324,11 @@ void main() {
       await tester.pump();
       expect(h.workspace.activeSession, a);
 
+      // Locking closes every session at once: the panes are kept for
+      // the sessions that come back.
+      unawaited(h.workspace.closeAll());
+      await settleShell(tester);
+      expect(h.workspace.sessions, isEmpty);
       await tester.pump(const Duration(milliseconds: 50));
       final saved = store.state!['layout'];
       expect(ShellLayout.fromJson(saved).panes.length, 2);

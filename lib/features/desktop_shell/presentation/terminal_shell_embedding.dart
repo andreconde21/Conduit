@@ -176,8 +176,10 @@ class TerminalShellSync {
         ..insert(0, active);
     }
     recent.removeWhere((view) => !views.contains(view));
-    // Activations made from the layout only update the bookkeeping.
-    if (_syncing || controller.layoutHeld) return;
+    // Activations made from the layout only update the bookkeeping. When
+    // every view is gone at once (the app locked, which closes all
+    // sessions), the layout stays for the sessions that come back.
+    if (_syncing || controller.layoutHeld || views.isEmpty) return;
 
     _syncing = true;
     try {
