@@ -112,6 +112,7 @@ class TmuxWindowInfo {
     required this.name,
     this.panes = 1,
     this.active = false,
+    this.activity,
   });
 
   final int index;
@@ -119,16 +120,20 @@ class TmuxWindowInfo {
   final int panes;
   final bool active;
 
+  /// tmux's `window_activity`: when the window last had output.
+  final DateTime? activity;
+
   @override
   bool operator ==(Object other) =>
       other is TmuxWindowInfo &&
       other.index == index &&
       other.name == name &&
       other.panes == panes &&
-      other.active == active;
+      other.active == active &&
+      other.activity == activity;
 
   @override
-  int get hashCode => Object.hash(index, name, panes, active);
+  int get hashCode => Object.hash(index, name, panes, active, activity);
 }
 
 /// tmux commands the home page runs besides the session listing.
@@ -140,11 +145,12 @@ abstract final class HomeTmuxCommands {
         window.isEmpty ? '=$session' : '=$session:$window',
       );
 
-  /// One tab-separated line per window: index, name, pane count, active.
+  /// One tab-separated line per window: index, name, pane count, active,
+  /// last activity (epoch seconds).
   static String listWindows(String session) =>
       'tmux list-windows -t ${_target(session)} -F '
       '"\$(printf \'#{window_index}\\t#{window_name}\\t#{window_panes}'
-      '\\t#{window_active}\')"';
+      '\\t#{window_active}\\t#{window_activity}\')"';
 
   /// Makes [index] the session's current window, so the next attach
   /// shows it.
@@ -165,6 +171,15 @@ abstract final class HomeTmuxCommands {
           name: fields[1].trim(),
           panes: fields.length > 2 ? int.tryParse(fields[2].trim()) ?? 1 : 1,
           active: fields.length > 3 && fields[3].trim() == '1',
+          activity: switch (fields.length > 4
+              ? int.tryParse(fields[4].trim())
+              : null) {
+            final seconds? => DateTime.fromMillisecondsSinceEpoch(
+              seconds * 1000,
+              isUtc: true,
+            ),
+            null => null,
+          },
         ),
       );
     }

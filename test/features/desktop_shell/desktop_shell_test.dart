@@ -683,4 +683,56 @@ void main() {
     expect(find.byType(DesktopHome), findsOneWidget);
     await tearDownShell(tester);
   }, variant: _linux);
+
+  testWidgets('the dashboard: Needs you, usage, previews and workspaces', (
+    tester,
+  ) async {
+    final h = await pumpShell(
+      tester,
+      usage: (context) => const Text('Usage 42%'),
+    );
+    // The waiting agent, by its pane title.
+    final review = SidebarKeys.herdrTab('workstation', 'w1', 'w1:t2');
+    final card = find.byKey(ValueKey('dashboard-needs-you-$review'));
+    expect(card, findsOneWidget);
+    expect(
+      find.descendant(of: card, matching: find.text('Proofing PR 398')),
+      findsOneWidget,
+    );
+    // The usage feature fills the dashboard's slot and the sidebar's.
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('dashboard-usage-slot')),
+        matching: find.text('Usage 42%'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('sidebar-usage-slot')),
+        matching: find.text('Usage 42%'),
+      ),
+      findsOneWidget,
+    );
+    // Other workspaces per machine; a tile opens its session.
+    final build = find.byKey(
+      ValueKey(
+        'dashboard-other-${SidebarKeys.tmuxSession('workstation', 'build')}',
+      ),
+    );
+    await tester.ensureVisible(build);
+    await tester.tap(build);
+    await settleShell(tester);
+    expect(h.workspace.sessions.single.host.id, 'workstation#tmux:build');
+    expect(_home(tester).terminalVisible, isTrue);
+    // Back home, the session is a live preview and no longer "other".
+    h.shell.showHome = true;
+    await tester.pump();
+    expect(
+      find.byKey(const ValueKey('dashboard-session-workstation#tmux:build')),
+      findsOneWidget,
+    );
+    expect(build, findsNothing);
+    await tearDownShell(tester);
+  }, variant: _linux);
 }

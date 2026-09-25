@@ -1323,7 +1323,7 @@ void main() {
           onDispose: () {},
         ),
       );
-      await pumpFrames(tester, 4);
+      await pumpFrames(tester);
       final views = home.embedding.host!.viewIds.toSet();
       shell.editLayout(
         views,

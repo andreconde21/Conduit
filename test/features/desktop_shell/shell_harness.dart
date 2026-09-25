@@ -75,7 +75,7 @@ class ShellHarness {
   HerdrFakeRunner runnerFor(SavedHost host) =>
       runners[baseHostId(host.id)] ?? HerdrFakeRunner.tmuxOnly();
 
-  Widget page({bool? shellMode}) => MaterialApp(
+  Widget page({bool? shellMode, WidgetBuilder? usage}) => MaterialApp(
     home: HostsPage(
       hostsController: hosts,
       lockController: AppLockController(AlwaysAuthenticates()),
@@ -100,6 +100,7 @@ class ShellHarness {
       previewRefreshInterval: const Duration(days: 1),
       desktopShell: shell,
       shellMode: shellMode,
+      usageSummary: usage,
     ),
   );
 }
@@ -110,6 +111,7 @@ Future<ShellHarness> pumpShell(
   Size size = const Size(1280, 800),
   double pixelRatio = 1,
   bool? shellMode,
+  WidgetBuilder? usage,
   void Function(ShellHarness harness)? before,
 }) async {
   tester.view.physicalSize = size * pixelRatio;
@@ -150,7 +152,7 @@ Future<ShellHarness> pumpShell(
   );
   addTearDown(harness.shell.dispose);
   before?.call(harness);
-  await tester.pumpWidget(harness.page(shellMode: shellMode));
+  await tester.pumpWidget(harness.page(shellMode: shellMode, usage: usage));
   await settleShell(tester);
   return harness;
 }

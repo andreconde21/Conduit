@@ -434,11 +434,37 @@ class DesktopHomeState extends State<DesktopHome> {
     };
   }
 
+  /// Each listed tmux session's activity when its windows were listed.
+  final Map<String, DateTime?> _windowsListedAt = {};
+
   void _rebuildTree() {
     if (!mounted) return;
     _tree = SidebarTreeBuilder.build(_inputs(), _controller.prefs);
+    _refreshListedWindows();
     _feedUnread();
     setState(() => _unreadKeys = _controller.unread.unreadKeys);
+  }
+
+  /// A tmux session whose windows are listed and that had output since:
+  /// list them again, so each window's activity (and unread mark) follows.
+  void _refreshListedWindows() {
+    for (final machine in _tree) {
+      for (final node in machine.children) {
+        final target = node.target;
+        if (target is! TmuxSessionTarget) continue;
+        final name = target.session.name;
+        if (_controller.tmuxWindowsFor(node.machineId, name) == null) continue;
+        final key = node.key;
+        final activity = target.session.lastActivity;
+        if (!_windowsListedAt.containsKey(key)) {
+          _windowsListedAt[key] = activity;
+          continue;
+        }
+        if (_windowsListedAt[key] == activity) continue;
+        _windowsListedAt[key] = activity;
+        _expand(node);
+      }
+    }
   }
 
   void _feedUnread() {
@@ -448,6 +474,14 @@ class DesktopHomeState extends State<DesktopHome> {
       for (final machine in tree) {
         for (final node in machine.descendantsAndSelf.skip(1)) {
           final target = node.target;
+          if (target is TmuxWindowTarget) {
+            final activity = target.window.activity;
+            if (activity != null) {
+              changed =
+                  tracker.observe(node.key, activity.millisecondsSinceEpoch) ||
+                  changed;
+            }
+          }
           if (target is TmuxSessionTarget) {
             final activity = target.session.lastActivity;
             if (activity != null) {
