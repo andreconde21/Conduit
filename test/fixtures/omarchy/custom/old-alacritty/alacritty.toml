@@ -1,0 +1,19 @@
+[colors.primary]
+background = "#f4efe6"
+foreground = '#3b3228'
+
+[colors.selection]
+background = "0xd9cbb4"
+
+[colors.normal]
+black = "#f4efe6"
+red = "#b0413e"
+green = "#4d7a3a"
+yellow = "#9a6f16"
+blue = "#2f6b9a" # a comment
+magenta = "#8a4d8a"
+cyan = "#2f7f7a"
+white = "#3b3228"
+
+[colors.bright]
+black = "#a8998a"

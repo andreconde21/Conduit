@@ -1,12 +1,18 @@
+import 'dart:async';
+
+import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/chat_view/data/conductore_chat_client.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_controller.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_page.dart';
+import 'package:conduit/features/companion_setup/data/companion_probe.dart';
+import 'package:conduit/features/companion_setup/domain/companion_status.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_controller.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_page.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/voice/presentation/dictation_controller.dart';
 import 'package:flutter/material.dart';
 
@@ -16,6 +22,187 @@ bool chatViewAvailable(AgentAttentionController attention, SavedHost host) =>
     attention.isMonitoring(host.id) &&
     attention.providerFor(host.id).id ==
         const ConductoreHostAttentionProvider().id;
+
+List<AgentInfo> _live(Iterable<AgentInfo> agents) => [
+  for (final agent in agents)
+    if (agent.state != AgentAttentionState.finished) agent,
+];
+
+/// The Claude session among [agents] that the terminal session on [host]
+/// is showing: the live agent in the session's own tmux session or Herdr
+/// tab, else the only live agent. Null when there is none or the choice is
+/// ambiguous.
+AgentInfo? matchChatAgent(SavedHost host, Iterable<AgentInfo> agents) {
+  final live = _live(agents);
+  if (live.isEmpty) {
+    return null;
+  }
+  final target = ConnectTarget.fromSessionHostId(host.id);
+  final Iterable<AgentInfo> matches;
+  if (target?.kind == ConnectTargetKind.herdr && target!.tabId.isNotEmpty) {
+    matches = live.where((agent) => agent.tab == target.tabId);
+  } else if (host.startTmuxOnConnect && host.tmuxSessionName.isNotEmpty) {
+    final name = host.tmuxSessionName;
+    matches = live.where(
+      (agent) =>
+          agent.tab == name || (agent.tab?.startsWith('$name:') ?? false),
+    );
+  } else {
+    matches = const [];
+  }
+  if (matches.length == 1) {
+    return matches.single;
+  }
+  return live.length == 1 ? live.single : null;
+}
+
+/// [matchChatAgent] over what the agent monitor already knows; null when
+/// [host] is not monitored through the companion (see
+/// [checkChatViewAccess] for asking the machine itself).
+AgentInfo? chatAgentForSession(
+  AgentAttentionController attention,
+  SavedHost host,
+) {
+  if (!chatViewAvailable(attention, host)) {
+    return null;
+  }
+  return matchChatAgent(
+    host,
+    attention.statusFor(host.id)?.agents ?? const <AgentInfo>[],
+  );
+}
+
+/// Whether Chat View can open for a machine, decided by the companion on
+/// it rather than by the monitoring setting.
+class ChatViewAccess {
+  const ChatViewAccess.ready({required this.agents, required this.monitored})
+    : title = null,
+      problem = null,
+      canSetUp = false;
+
+  const ChatViewAccess.blocked({
+    required String this.title,
+    required String this.problem,
+    this.canSetUp = true,
+  }) : agents = const [],
+       monitored = false;
+
+  /// The machine's live Claude sessions, when [ready].
+  final List<AgentInfo> agents;
+
+  /// Whether they came from the running agent monitor (else from a direct
+  /// `conductore-hostd status`).
+  final bool monitored;
+
+  /// Dialog title and text naming exactly what failed, when blocked.
+  final String? title;
+  final String? problem;
+
+  /// Whether the Agent hooks screen can fix it.
+  final bool canSetUp;
+
+  bool get ready => problem == null;
+}
+
+/// The saved machine behind a (possibly derived) session host, as the
+/// Agent hooks screen caches it.
+SavedHost _machine(SavedHost host) => host.copyWith(id: baseHostId(host.id));
+
+/// Decides whether Chat View can open for [host] by asking its companion:
+/// the monitor's list when it already watches [host] through the
+/// companion, else a companion check ([companion]'s cached or fresh one,
+/// or a direct probe) and a `conductore-hostd status` for the sessions.
+/// Works whether or not "Monitor coding agents" is on.
+Future<ChatViewAccess> checkChatViewAccess({
+  required AgentAttentionController attention,
+  required SavedHost host,
+  CompanionSetupController? companion,
+}) async {
+  if (chatViewAvailable(attention, host)) {
+    return ChatViewAccess.ready(
+      agents: _live(attention.statusFor(host.id)?.agents ?? const []),
+      monitored: true,
+    );
+  }
+  final machine = _machine(host);
+  CompanionStatus status;
+  if (companion != null) {
+    final cached = companion.statusFor(machine);
+    status = cached != null && cached.state.isWorking
+        ? cached
+        : await companion.refresh(machine);
+  } else {
+    final (runner, :owned) = attention.runnerFor(host);
+    try {
+      status = await const CompanionProbe().check(runner);
+    } finally {
+      if (owned) await runner.close();
+    }
+  }
+  if (!status.state.isWorking) {
+    return _blockedBy(status, host);
+  }
+  final (runner, :owned) = attention.runnerFor(host);
+  try {
+    final snapshot = await const ConductoreHostAttentionProvider().fetchAgents(
+      runner,
+    );
+    return ChatViewAccess.ready(
+      agents: _live(snapshot.agents),
+      monitored: false,
+    );
+  } catch (error) {
+    final detail = error is AppFailure ? error.userMessage : '$error';
+    return ChatViewAccess.blocked(
+      title: 'Could not list Claude sessions',
+      problem:
+          'The companion${_version(status)} is installed on ${host.name}, '
+          'but "conductore-hostd status" failed: $detail',
+      canSetUp: false,
+    );
+  } finally {
+    if (owned) await runner.close();
+  }
+}
+
+String _version(CompanionStatus status) {
+  final version = status.installedVersion;
+  return version == null ? '' : ' $version';
+}
+
+ChatViewAccess _blockedBy(CompanionStatus status, SavedHost host) {
+  final name = host.name;
+  return switch (status.state) {
+    CompanionState.notInstalled => ChatViewAccess.blocked(
+      title: 'Chat view needs the companion',
+      problem:
+          '"conductore-hostd" was not found on $name'
+          '${status.user == null ? '' : ' for ${status.user}'}. '
+          '${ConductoreChatClient.installHint}',
+    ),
+    CompanionState.hooksMissing => ChatViewAccess.blocked(
+      title: 'Claude Code hooks are not registered',
+      problem:
+          'The companion${_version(status)} is installed on $name, but '
+          'Claude Code\'s hooks are not registered, so it cannot see '
+          'sessions. Register them from Agent hooks.',
+    ),
+    CompanionState.outdated => ChatViewAccess.blocked(
+      title: 'The companion needs an update',
+      problem:
+          'The companion on $name is version '
+          '${status.installedVersion ?? 'unknown'}; this app needs '
+          '$kCompanionMinVersion or newer. Update it from Agent hooks.',
+    ),
+    _ => ChatViewAccess.blocked(
+      title: 'Could not check the companion',
+      problem:
+          'Checking the companion on $name failed: '
+          '${[status.message, status.errorDetail].nonNulls.join(' ').trim()}',
+      canSetUp: false,
+    ),
+  };
+}
 
 /// Opens the chat view for [agent] on [host] as a full-screen route.
 /// [onOpenTerminal] runs after the route is popped by its Terminal button
@@ -71,6 +258,9 @@ Future<void> openChatView({
         onSetUpCompanion: CompanionSetupScope.maybeOf(routeContext) == null
             ? null
             : () => showCompanionSetup(routeContext, host),
+        onEnableMonitoring: attention.monitoringEnabled(host)
+            ? null
+            : () => attention.enableMonitoring(host),
         onOpenTerminal: () {
           toTerminal = true;
           Navigator.of(routeContext).pop();
@@ -85,26 +275,25 @@ Future<void> openChatView({
 }
 
 /// Explains why the chat view cannot open for [host] and how to fix it.
+/// [access] names the failed condition; without it (no agent monitor in
+/// this build, so nothing could be checked) the install steps are shown.
 Future<void> showChatViewUnavailable(
   BuildContext context, {
-  required AgentAttentionController? attention,
   required SavedHost host,
+  ChatViewAccess? access,
 }) {
-  final monitored = attention?.isMonitoring(host.id) ?? false;
-  final message = !host.agentAttentionEnabled || !monitored
-      ? 'Chat view reads the session through the Conductore companion. '
-            'Turn on agent monitoring for ${host.name} (machine settings, '
-            'Agent monitor: Companion or Automatic) and connect to it.\n\n'
-            '${ConductoreChatClient.installHint}'
-      : '${host.name} reports its agents through '
-            '${attention!.providerFor(host.id).label}, not the Conductore '
-            'companion. ${ConductoreChatClient.installHint} Then refresh '
-            'the Agents panel.';
-  final canSetUp = CompanionSetupScope.maybeOf(context) != null;
+  final title = access?.title ?? 'Chat view needs the companion';
+  final message =
+      access?.problem ??
+      'Chat view reads the session through the Conductore companion on '
+          '${host.name}. ${ConductoreChatClient.installHint}';
+  final canSetUp =
+      (access?.canSetUp ?? true) &&
+      CompanionSetupScope.maybeOf(context) != null;
   return showDialog<void>(
     context: context,
     builder: (dialogContext) => AlertDialog(
-      title: const Text('Chat view needs the companion'),
+      title: Text(title),
       content: SelectableText(message),
       actions: [
         TextButton(
@@ -116,7 +305,7 @@ Future<void> showChatViewUnavailable(
             key: const ValueKey('chat-unavailable-agent-hooks'),
             onPressed: () {
               Navigator.of(dialogContext).pop();
-              showCompanionSetup(context, host);
+              showCompanionSetup(context, _machine(host));
             },
             child: const Text('Agent hooks'),
           ),
@@ -130,14 +319,10 @@ Future<void> showChatViewUnavailable(
 /// the picker was dismissed.
 Future<AgentInfo?> pickChatAgent(
   BuildContext context, {
-  required AgentAttentionController attention,
   required SavedHost host,
+  required List<AgentInfo> agents,
 }) async {
-  final agents = [
-    for (final agent
-        in attention.statusFor(host.id)?.agents ?? const <AgentInfo>[])
-      if (agent.state != AgentAttentionState.finished) agent,
-  ];
+  agents = _live(agents);
   if (agents.isEmpty) {
     ScaffoldMessenger.maybeOf(context)?.showSnackBar(
       SnackBar(
@@ -216,9 +401,55 @@ class _AgentChangeSignal extends ChangeNotifier {
   }
 }
 
-/// The terminal overflow's "Open chat view": explains the missing
-/// companion, else picks the session on [host] and opens its chat.
-/// [onOpenTerminal] gets the agent whose TUI to show afterwards.
+/// Checks [host]'s companion while a small progress dialog shows (a
+/// direct check is an SSH round trip or two); returns right away when the
+/// agent monitor already has the answer.
+Future<ChatViewAccess?> checkChatViewAccessWithProgress(
+  BuildContext context, {
+  required AgentAttentionController attention,
+  required SavedHost host,
+}) async {
+  final companion = CompanionSetupScope.maybeOf(context);
+  final check = checkChatViewAccess(
+    attention: attention,
+    host: host,
+    companion: companion,
+  );
+  if (chatViewAvailable(attention, host)) {
+    return check;
+  }
+  final navigator = Navigator.of(context);
+  var open = true;
+  unawaited(
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        key: const ValueKey('chat-access-checking'),
+        content: Row(
+          children: [
+            const SizedBox.square(
+              dimension: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            const SizedBox(width: 16),
+            Expanded(child: Text('Checking the companion on ${host.name}…')),
+          ],
+        ),
+      ),
+    ).whenComplete(() => open = false),
+  );
+  try {
+    return await check;
+  } finally {
+    if (open && navigator.mounted) navigator.pop();
+  }
+}
+
+/// The terminal overflow's "Open chat view": asks the companion on [host]
+/// (whether or not agent monitoring is on), explains exactly what is
+/// missing, else picks the session and opens its chat. [onOpenTerminal]
+/// gets the agent whose TUI to show afterwards.
 Future<void> openChatViewForHost({
   required BuildContext context,
   required AgentAttentionController? attention,
@@ -226,11 +457,25 @@ Future<void> openChatViewForHost({
   required ValueChanged<AgentInfo> onOpenTerminal,
   DictationController? dictation,
 }) async {
-  if (attention == null || !chatViewAvailable(attention, host)) {
-    await showChatViewUnavailable(context, attention: attention, host: host);
+  if (attention == null) {
+    await showChatViewUnavailable(context, host: host);
     return;
   }
-  final agent = await pickChatAgent(context, attention: attention, host: host);
+  final access = await checkChatViewAccessWithProgress(
+    context,
+    attention: attention,
+    host: host,
+  );
+  if (access == null || !context.mounted) {
+    return;
+  }
+  if (!access.ready) {
+    await showChatViewUnavailable(context, host: host, access: access);
+    return;
+  }
+  final agent =
+      matchChatAgent(host, access.agents) ??
+      await pickChatAgent(context, host: host, agents: access.agents);
   if (agent == null || !context.mounted) {
     return;
   }

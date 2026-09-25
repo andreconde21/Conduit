@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Conductore mark: a prompt chevron and a conductor's baton, in
+     Omarchy's Everforest colours. 108dp adaptive canvas; the glyph sits in
+     the 60dp box at 24dp, inside the 66dp safe zone. Same geometry as
+     ConductoreMarkPainter (lib/core/presentation/conduit_brand.dart). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M32.4,39.6 L49.2,54 L32.4,68.4"
+        android:strokeColor="#A7C080"
+        android:strokeWidth="6.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M55.8,70.8 L76.8,36"
+        android:strokeColor="#D3C6AA"
+        android:strokeWidth="3.3"
+        android:strokeLineCap="round" />
+    <path
+        android:fillColor="#E09D7F"
+        android:pathData="M50.7,70.8 a5.1,5.1 0 1,0 10.2,0 a5.1,5.1 0 1,0 -10.2,0 Z" />
+</vector>

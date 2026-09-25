@@ -11,7 +11,7 @@ void main() {
       expect(defaults.twoFingerScroll, isTrue);
       expect(defaults.headerSwipeOpensSessions, isTrue);
       expect(defaults.edgeSwipeOpensAgents, isTrue);
-      expect(defaults.herdrPinch, HerdrPinchAction.zoomPane);
+      expect(defaults.herdrPinch, HerdrPinchAction.fontSize);
       expect(defaults.herdrTwoFingerVertical, HerdrVerticalSwipe.workspaces);
       expect(defaults.herdrTwoFingerPanes, isTrue);
     });
@@ -22,7 +22,7 @@ void main() {
         windowSwitchTarget: TerminalWindowSwitchTarget.herdr,
         pinchZoom: false,
         headerSwipeOpensSessions: false,
-        herdrPinch: HerdrPinchAction.fontSize,
+        herdrPinch: HerdrPinchAction.zoomPane,
         herdrTwoFingerVertical: HerdrVerticalSwipe.scrollback,
         herdrTwoFingerPanes: false,
       );
@@ -55,6 +55,30 @@ void main() {
       expect(partial.windowSwitchTarget, TerminalWindowSwitchTarget.tmux);
       expect(partial.twoFingerScroll, isTrue);
       expect(partial.swipeSwitchesWindow, isTrue);
+    });
+
+    test('a record from before schema 2 migrates pinch to font size', () {
+      // Preview 7 and earlier always stored the old zoom-pane default.
+      final legacy = TerminalGesturePreferences.decode(
+        '{"pinchZoom": true, "windowSwitchTarget": "herdr", '
+        '"herdrPinch": "zoomPane", "herdrTwoFingerPanes": false}',
+      );
+      expect(legacy.herdrPinch, HerdrPinchAction.fontSize);
+      expect(legacy.pinchZoom, isTrue);
+      expect(legacy.windowSwitchTarget, TerminalWindowSwitchTarget.herdr);
+      expect(legacy.herdrTwoFingerPanes, isFalse);
+
+      // Saving again marks the record current, so the choice sticks.
+      final reencoded = TerminalGesturePreferences.decode(legacy.encode());
+      expect(reencoded, legacy);
+    });
+
+    test('an explicit zoom-pane choice survives once saved as schema 2', () {
+      final chosen = TerminalGesturePreferences.defaults.copyWith(
+        herdrPinch: HerdrPinchAction.zoomPane,
+      );
+      final decoded = TerminalGesturePreferences.decode(chosen.encode());
+      expect(decoded.herdrPinch, HerdrPinchAction.zoomPane);
     });
 
     test('copyWith changes only the named field', () {

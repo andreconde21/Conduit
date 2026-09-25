@@ -222,6 +222,7 @@ class _CompanionSetupPageState extends State<CompanionSetupPage> {
         builder: (context, _) {
           final status = _controller.statusFor(_host);
           final checking = _controller.isChecking(_host);
+          final attention = CompanionSetupScope.agentAttentionOf(context);
           return ListView(
             key: const ValueKey('companion-setup-list'),
             padding: EdgeInsets.fromLTRB(16, 8, 16, 24 + bottomInset),
@@ -231,6 +232,30 @@ class _CompanionSetupPageState extends State<CompanionSetupPage> {
                 checking: checking,
                 bundledVersion: _bundledVersion,
               ),
+              if (status != null &&
+                  status.state.isWorking &&
+                  attention != null &&
+                  !attention.monitoringEnabled(_host))
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: MaterialBanner(
+                    key: const ValueKey('companion-monitoring-off'),
+                    leading: const Icon(Icons.monitor_heart_outlined),
+                    content: const Text(
+                      'Agent monitoring is off for this machine, so its '
+                      'approvals and sessions do not reach the phone.',
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () async {
+                          await attention.enableMonitoring(_host);
+                          if (mounted) setState(() {});
+                        },
+                        child: const Text('Turn on'),
+                      ),
+                    ],
+                  ),
+                ),
               const SizedBox(height: 12),
               if (_busy != null)
                 Padding(

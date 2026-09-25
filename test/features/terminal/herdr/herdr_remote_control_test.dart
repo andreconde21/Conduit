@@ -153,4 +153,149 @@ void main() {
       expect(await control.focusWorkspace('w1'), isFalse);
     });
   });
+
+  group('New pane (Herdr 0.9.1 CLI)', () {
+    const paneList =
+        '{"id":"cli:pane:list","result":{"panes":['
+        '{"pane_id":"w1:p1","workspace_id":"w1","tab_id":"w1:t1",'
+        '"cwd":"/srv/app","focused":false},'
+        '{"pane_id":"w1:p2","workspace_id":"w1","tab_id":"w1:t1",'
+        '"cwd":"/srv/my app","foreground_cwd":"/srv/my app","focused":true}'
+        '],"type":"pane_list"}}';
+
+    FakeHerdrRunner scripted({bool createFails = false}) => FakeHerdrRunner((
+      command,
+    ) {
+      if (command.contains('pane list')) {
+        return const AgentCommandResult(
+          stdout: paneList,
+          stderr: '',
+          exitCode: 0,
+        );
+      }
+      if (createFails) {
+        return const AgentCommandResult(
+          stdout:
+              '{"error":{"code":"pane_not_found","message":"pane not '
+              'found"},"id":"cli:pane:split"}',
+          stderr: '',
+          exitCode: 1,
+        );
+      }
+      return const AgentCommandResult(stdout: '{}', stderr: '', exitCode: 0);
+    });
+
+    test('reads the focused pane with its workspace and directory', () {
+      expect(
+        HerdrRemoteControl.focusedPane(paneList),
+        const HerdrFocusedPane(
+          paneId: 'w1:p2',
+          workspaceId: 'w1',
+          tabId: 'w1:t1',
+          cwd: '/srv/my app',
+        ),
+      );
+      expect(
+        HerdrRemoteControl.focusedPane(
+          '{"panes":[{"pane_id":"w2:p1","foreground_cwd":"/tmp",'
+          '"focused":true}]}',
+        )?.cwd,
+        '/tmp',
+      );
+      expect(HerdrRemoteControl.focusedPane('not json'), isNull);
+    });
+
+    const expected = {
+      HerdrNewPane.splitRight:
+          "exec herdr pane split w1:p2 --direction right --cwd '\\''/srv/my "
+          "app'\\'' --focus",
+      HerdrNewPane.splitDown:
+          "exec herdr pane split w1:p2 --direction down --cwd '\\''/srv/my "
+          "app'\\'' --focus",
+      HerdrNewPane.newTab:
+          "exec herdr tab create --workspace w1 --cwd '\\''/srv/my app'\\'' "
+          '--focus',
+      HerdrNewPane.newWorkspace:
+          "exec herdr workspace create --cwd '\\''/srv/my app'\\'' --focus",
+    };
+    for (final MapEntry(key: kind, value: command) in expected.entries) {
+      test('${kind.name} runs `$command` after `pane list`', () async {
+        final runner = scripted();
+
+        expect(await HerdrRemoteControl.createPaneOn(runner, kind), isTrue);
+
+        expect(runner.commands, hasLength(2));
+        expect(runner.commands[0], contains('exec herdr pane list'));
+        expect(runner.commands[1], contains(command));
+      });
+    }
+
+    test('a named session passes --session to both commands', () async {
+      final runner = scripted();
+
+      await HerdrRemoteControl.createPaneOn(
+        runner,
+        HerdrNewPane.splitRight,
+        const HerdrCommands('work'),
+      );
+
+      expect(runner.commands, [
+        contains('exec herdr --session work pane list'),
+        contains('exec herdr --session work pane split w1:p2'),
+      ]);
+    });
+
+    test('a split needs a focused pane; a tab or workspace does not', () async {
+      final runner = FakeHerdrRunner(
+        (command) => const AgentCommandResult(
+          stdout: '{"result":{"panes":[]}}',
+          stderr: '',
+          exitCode: 0,
+        ),
+      );
+
+      expect(
+        await HerdrRemoteControl.createPaneOn(runner, HerdrNewPane.splitDown),
+        isFalse,
+      );
+      expect(runner.commands, hasLength(1));
+      expect(
+        await HerdrRemoteControl.createPaneOn(runner, HerdrNewPane.newTab),
+        isTrue,
+      );
+      expect(runner.commands.last, contains('exec herdr tab create --focus'));
+      expect(
+        await HerdrRemoteControl.createPaneOn(
+          runner,
+          HerdrNewPane.newWorkspace,
+        ),
+        isTrue,
+      );
+      expect(
+        runner.commands.last,
+        contains('exec herdr workspace create --focus'),
+      );
+    });
+
+    test('reports failure when Herdr rejects the command', () async {
+      final runner = scripted(createFails: true);
+
+      expect(
+        await HerdrRemoteControl.createPaneOn(runner, HerdrNewPane.splitRight),
+        isFalse,
+      );
+    });
+
+    test('the shared control runs the same two commands', () async {
+      final runner = scripted();
+      final control = HerdrRemoteControl(runnerFactory: () => runner);
+      addTearDown(control.close);
+
+      expect(await control.createPane(HerdrNewPane.newTab), isTrue);
+      expect(runner.commands, [
+        contains('pane list'),
+        contains('exec herdr tab create --workspace w1'),
+      ]);
+    });
+  });
 }

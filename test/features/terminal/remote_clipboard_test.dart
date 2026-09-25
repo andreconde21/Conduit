@@ -101,7 +101,7 @@ void main() {
     await repository.save(
       const ThemePreferences(
         themeMode: ThemeMode.dark,
-        palette: AppPalette.synthwave,
+        palette: AppPalette.everforest,
         remoteClipboardEnabled: false,
       ),
     );

@@ -6,6 +6,7 @@ import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/hosts/domain/multiplexer_prefix_key.dart';
 import 'package:conduit/features/terminal/domain/herdr_keymap.dart';
 import 'package:conduit/features/terminal/domain/herdr_navigator.dart';
+import 'package:conduit/features/terminal/domain/herdr_remote_control.dart';
 import 'package:conduit/features/terminal/presentation/herdr_shortcuts.dart';
 import 'package:flutter/material.dart';
 
@@ -29,6 +30,13 @@ class HerdrShortcutPick extends HerdrNavigatorPick {
   const HerdrShortcutPick(this.shortcut);
 
   final HerdrShortcut shortcut;
+}
+
+/// Open a new pane, tab or workspace in the focused pane's directory.
+class HerdrNewPanePick extends HerdrNavigatorPick {
+  const HerdrNewPanePick(this.kind);
+
+  final HerdrNewPane kind;
 }
 
 /// Jump to tab [number] (1–9) of the focused workspace: Herdr's default
@@ -228,6 +236,8 @@ class _HerdrNavigatorSheetState extends State<HerdrNavigatorSheet> {
             ),
           ),
         const SizedBox(height: 12),
+        _newPaneRow(theme),
+        const SizedBox(height: 16),
         _sectionLabel(theme, 'Panes'),
         const SizedBox(height: 6),
         ..._buildPaneSection(theme),
@@ -276,6 +286,52 @@ class _HerdrNavigatorSheetState extends State<HerdrNavigatorSheet> {
                   ),
                 ),
             ],
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// The prominent one-tap row: split right, split down, new tab, new
+  /// workspace, each opening in the focused pane's directory.
+  Widget _newPaneRow(ThemeData theme) {
+    final accent = _palette.accent;
+    return Row(
+      children: [
+        for (final (index, kind) in HerdrNewPane.values.indexed) ...[
+          if (index > 0) const SizedBox(width: 6),
+          Expanded(
+            child: Material(
+              color: Color.alphaBlend(
+                accent.withValues(alpha: 0.14),
+                _palette.panelElevatedFor(_brightness),
+              ),
+              borderRadius: BorderRadius.circular(14),
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                key: ValueKey('herdr-new-${kind.name}'),
+                onTap: () => Navigator.of(context).pop(HerdrNewPanePick(kind)),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 10,
+                  ),
+                  child: Column(
+                    children: [
+                      Icon(kind.icon, color: accent),
+                      const SizedBox(height: 4),
+                      Text(
+                        kind.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.labelMedium,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           ),
         ],
       ],

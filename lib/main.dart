@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_theme.dart';
+import 'package:conduit/core/theme/omarchy_theme_sync_controller.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
+import 'package:conduit/core/theme/theme_licenses.dart';
 import 'package:conduit/core/theme/theme_preferences_repository.dart';
 import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
 import 'package:conduit/features/agent_attention/data/herdr_attention_provider.dart';
@@ -62,6 +64,7 @@ void main() {
   WidgetsFlutterBinding.ensureInitialized();
   registerLocalShellLicenses();
   registerMultiplexerLogoLicenses();
+  registerThemeLicenses();
   unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
 
   const secureStorage = FlutterSecureStorage();
@@ -97,6 +100,16 @@ void main() {
     provider: const HerdrAttentionProvider(),
     companionProvider: const ConductoreHostAttentionProvider(),
     notifier: const PlatformAgentAttentionNotifier(),
+    persistMonitoringEnabled: (savedHostId) async {
+      final host = hostsController.hosts
+          .where((host) => host.id == savedHostId)
+          .firstOrNull;
+      if (host != null && !host.agentAttentionEnabled) {
+        await hostsController.upsert(
+          host.copyWith(agentAttentionEnabled: true),
+        );
+      }
+    },
   );
   final recentDirectories = RecentDirectoriesController(
     const SecureRecentDirectoriesStore(secureStorage),
@@ -141,12 +154,24 @@ void main() {
     sftpRepository: sftpRepository,
   );
 
-  unawaited(themeController.load());
+  // Follows a machine's Omarchy theme (Appearance settings); syncs once
+  // the saved theme is loaded, then on every resume.
+  final omarchyThemeSync = OmarchyThemeSyncController(
+    theme: themeController,
+    hosts: () async {
+      await hostsController.firstLoad;
+      return hostsController.hosts;
+    },
+    runnerFactory: (host) => SshAgentCommandRunner(hostKeyVerifier, host),
+  );
+  themeController.omarchySync = omarchyThemeSync;
+  unawaited(themeController.load().then((_) => omarchyThemeSync.start()));
   unawaited(shareTarget.start());
 
   runApp(
     CompanionSetupScope(
       controller: companionSetup,
+      agentAttention: agentAttention,
       child: ConduitApp(
         themeController: themeController,
         lockController: lockController,
@@ -388,7 +413,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
             brightness: Brightness.dark,
             palette: widget.themeController.palette,
           ),
-          themeMode: widget.themeController.themeMode,
+          themeMode: widget.themeController.effectiveThemeMode,
           builder: (context, child) {
             final overlayStyle = AppTheme.systemUiOverlayStyle(
               Theme.of(context).brightness,

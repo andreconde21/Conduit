@@ -10,6 +10,8 @@ import 'package:conduit/features/sessions/domain/connect_preferences.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/presentation/connect_picker_sheet.dart';
 import 'package:conduit/features/sessions/presentation/herdr_session_focus.dart';
+import 'package:conduit/features/sessions/presentation/tmux_session_focus.dart';
+import 'package:conduit/features/terminal/domain/tmux_navigator.dart';
 import 'package:conduit/features/terminal/presentation/recent_directories_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
@@ -31,6 +33,10 @@ class SessionConnectFlow {
   }) : herdr = HerdrSessionFocus(
          workspace: workspace,
          runnerFactory: runnerFactory,
+       ),
+       tmux = TmuxSessionFocus(
+         workspace: workspace,
+         runnerFactory: runnerFactory,
        );
 
   final HostsController hostsController;
@@ -45,6 +51,9 @@ class SessionConnectFlow {
   /// Herdr focus across the app's sessions: re-focus on tab switch, deep
   /// links, and the command channel behind the Herdr gestures.
   final HerdrSessionFocus herdr;
+
+  /// Deep links to agents running in tmux (the companion's tmux location).
+  final TmuxSessionFocus tmux;
 
   /// Opens [host] at an agent's exact place in Herdr (see
   /// [HerdrSessionFocus.openAgentLocation]).
@@ -71,16 +80,29 @@ class SessionConnectFlow {
   final ValueNotifier<int> terminalRequests = ValueNotifier<int>(0);
 
   /// Deep link to [agent] on [host] (a notification, the agent sheet, the
-  /// home-screen widget): with a Herdr location, the exact workspace, tab
-  /// and pane; otherwise the host's open session, if any. Asks for the
-  /// terminal to be shown when something was opened.
+  /// home-screen widget): with a tmux location (the companion reports
+  /// `tab` = `session:window`, `pane` = `%N`), the tab attached to that
+  /// tmux session with the pane selected; with a Herdr location, the exact
+  /// workspace, tab and pane; otherwise the host's open session, if any.
+  /// Asks for the terminal to be shown when something was opened.
   Future<TerminalSessionController?> openAgent(
     SavedHost host,
     AgentInfo agent,
   ) async {
     final workspaceId = agent.workspace ?? '';
+    final tmuxLocation = TmuxAgentLocation.parse(
+      tab: agent.tab,
+      pane: agent.pane,
+    );
     TerminalSessionController? session;
-    if (workspaceId.isNotEmpty && !host.isLocal) {
+    if (tmuxLocation != null && !host.isLocal) {
+      await hostsController.markConnected(host);
+      session = await tmux.openAgentLocation(
+        host,
+        tmuxLocation,
+        open: (target) => open(host, target),
+      );
+    } else if (workspaceId.isNotEmpty && !host.isLocal) {
       session = await openAgentLocation(
         host,
         workspaceId: workspaceId,
