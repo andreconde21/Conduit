@@ -687,7 +687,8 @@ class HomeBoardController extends ChangeNotifier {
     }
   }
 
-  /// Groups [agents] under their [workspaces], resolving tab labels.
+  /// Groups [agents] under their [workspaces], resolving tab labels, and
+  /// gives each workspace its [tabs].
   /// Agents whose workspace is not listed are dropped; workspace order is
   /// Herdr's; panes are ordered by tab number, then pane id.
   static List<HomeBoardWorkspace> buildBoard(
@@ -699,7 +700,15 @@ class HomeBoardController extends ChangeNotifier {
     return [
       for (final workspace in workspaces)
         HomeBoardWorkspace(
-          workspace: workspace,
+          // The workspace's tabs in Herdr's order, for the desktop sidebar.
+          workspace: workspace.tabs.isNotEmpty
+              ? workspace
+              : workspace.withTabs(
+                  [
+                    for (final tab in tabs)
+                      if (tab.workspaceId == workspace.id) tab,
+                  ]..sort((a, b) => (a.number ?? 0).compareTo(b.number ?? 0)),
+                ),
           panes:
               [
                 for (final agent in agents)
