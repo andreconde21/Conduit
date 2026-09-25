@@ -355,6 +355,17 @@ void main() {
           TmuxWindowInfo(index: 3, name: 'vim'),
         ],
       );
+      // tmux's window_activity, for the desktop sidebar's unread markers.
+      expect(
+        HomeTmuxCommands.parseWindows(
+          '2\tlogs\t1\t0\t1790229600\n',
+        ).single.activity,
+        DateTime.fromMillisecondsSinceEpoch(1790229600000, isUtc: true),
+      );
+      expect(
+        HomeTmuxCommands.listWindows('main'),
+        contains('#{window_activity}'),
+      );
     });
   });
 

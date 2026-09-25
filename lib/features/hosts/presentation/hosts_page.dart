@@ -16,7 +16,13 @@ import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
+import 'package:conduit/features/chat_view/presentation/chat_view_launcher.dart';
+import 'package:conduit/features/chat_view/presentation/chat_view_presenter.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_page.dart';
+import 'package:conduit/features/desktop_shell/data/desktop_shell_store.dart';
+import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
+import 'package:conduit/features/desktop_shell/presentation/desktop_home.dart';
+import 'package:conduit/features/desktop_shell/presentation/desktop_shell_controller.dart';
 import 'package:conduit/features/hosts/data/secure_home_preferences_repository.dart';
 import 'package:conduit/features/hosts/domain/home_preferences.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
@@ -101,8 +107,24 @@ class HostsPage extends StatefulWidget {
     this.previewRefreshInterval = const Duration(seconds: 2),
     this.paneRefocusDelay = const Duration(seconds: 4),
     this.hostChannels,
+    this.desktopShell,
+    this.shellMode,
+    this.usageSummary,
     super.key,
   });
+
+  /// The desktop shell's state (sidebar, splits, unread). Null makes the
+  /// page own one in secure storage when it runs as the shell.
+  final DesktopShellController? desktopShell;
+
+  /// Whether the page is the desktop shell (sidebar, tabs and splits, a
+  /// dashboard) instead of the phone home: null decides by the device
+  /// (desktops, and tablets 900 dp wide or more, at the first build).
+  final bool? shellMode;
+
+  /// Replaces the desktop shell's usage summary; null shows the app's
+  /// usage controller ([UsageScope]) when there is one.
+  final UsageSummaryBuilder? usageSummary;
 
   final HostsController hostsController;
   final AppLockController lockController;
@@ -183,6 +205,25 @@ class _MachineGroup {
 
 class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
   bool _terminalPageOpen = false;
+
+  /// Decided at the first build and kept: switching layouts under open
+  /// sessions would pull the terminal out from under them.
+  bool? _shellMode;
+  DesktopShellController? _ownedShell;
+  final _desktopHomeKey = GlobalKey<DesktopHomeState>();
+
+  bool get _isShell => _shellMode ?? false;
+
+  DesktopShellController get _shell =>
+      widget.desktopShell ??
+      (_ownedShell ??= DesktopShellController(
+        store: const SecureDesktopShellStore(conductoreSecureStorage),
+      ));
+
+  /// Where dialogs and Chat View open from: inside the shell (below its
+  /// Chat View presenter), else this page.
+  BuildContext get _actionContext =>
+      (_isShell ? _desktopHomeKey.currentContext : null) ?? context;
   bool _showingHostKeyPrompt = false;
   bool _appResumed = true;
   bool _routeVisible = true;
@@ -221,7 +262,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // The page exists only while unlocked: this is the app start (or the
       // unlock after a lock) the saved sessions come back on.
-      unawaited(widget.sessionRestore?.restore());
+      unawaited(_restoreSessions());
       unawaited(widget.hostsController.load());
       unawaited(widget.localShellController.refresh());
       unawaited(_loadPreferences());
@@ -231,6 +272,19 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
       unawaited(_loadTrustedEndpoints());
     });
     widget.promptCoordinator.addListener(_handlePromptChanged);
+  }
+
+  /// Brings back the last run's sessions; the shell keeps its saved split
+  /// layout until they are back.
+  Future<void> _restoreSessions() async {
+    try {
+      await Future.wait([
+        ?widget.sessionRestore?.restore(),
+        if (_isShell) _shell.load(),
+      ]);
+    } finally {
+      if (mounted && _isShell) _shell.releaseLayout();
+    }
   }
 
   @override
@@ -269,6 +323,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     _refocusTimer?.cancel();
     widget.homeBoards?.setVisible(false);
     _ownedBoards?.dispose();
+    _ownedShell?.dispose();
     super.dispose();
   }
 
@@ -327,6 +382,8 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     if (visible) {
       // Back from the terminal a first connection may have trusted a key.
       unawaited(_loadTrustedEndpoints());
+      // The shell's dashboard redraws its own previews.
+      if (_isShell) return;
       _previewTimer ??= Timer.periodic(widget.previewRefreshInterval, (_) {
         if (mounted && widget.workspaceController.hasSessions) {
           setState(() {});
@@ -338,8 +395,15 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     }
   }
 
-  /// Saved machines the filter shows, in the machine list's order.
+  /// Saved machines the filter shows, in the machine list's order (every
+  /// machine in the desktop shell, whose sidebar lists them all).
   List<SavedHost> get _shownHosts {
+    if (_isShell) {
+      return [
+        for (final host in widget.hostsController.sortedMachines)
+          if (!host.isLocal) host,
+      ];
+    }
     final filter = _filter;
     return [
       for (final host in widget.hostsController.sortedMachines)
@@ -427,6 +491,15 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    if (_shellMode == null) {
+      _shellMode =
+          widget.shellMode ?? usesDesktopShell(MediaQuery.sizeOf(context));
+      if (_shellMode!) {
+        // Every machine gets a board in the shell, whatever the filter.
+        WidgetsBinding.instance.addPostFrameCallback((_) => _syncBoards());
+      }
+    }
+    if (_isShell) return _buildShell(context);
     final palette = widget.themeController.palette;
     final boards = _boards;
     return QuickSwitcherShortcut(
@@ -482,6 +555,134 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     );
   }
 
+  /// The desktop shell: sidebar, tabs and splits, dashboard.
+  Widget _buildShell(BuildContext context) {
+    final shell = _shell;
+    return QuickSwitcherShortcut(
+      onInvoke: () => unawaited(_openSwitcher(fromKeyboard: true)),
+      child: Scaffold(
+        body: ChatViewPresenter(
+          present: (request) {
+            final host = _desktopHomeKey.currentState?.embedding.host;
+            if (host == null) return false;
+            shell.showHome = false;
+            return host.presentChat(request);
+          },
+          child: DesktopHome(
+            key: _desktopHomeKey,
+            controller: shell,
+            hostsController: widget.hostsController,
+            workspace: widget.workspaceController,
+            agentAttention: widget.agentAttention,
+            themeController: widget.themeController,
+            boards: _boards,
+            connectFlow: widget.connectFlow,
+            sessionRestore: widget.sessionRestore,
+            usageSummary: widget.usageSummary,
+            previewRefreshInterval: widget.previewRefreshInterval,
+            terminalBuilder: (embedding) => TerminalPage(
+              workspace: widget.workspaceController,
+              themeController: widget.themeController,
+              sftpRepository: widget.sftpRepository,
+              agentAttention: widget.agentAttention,
+              hostKeyVerifier: widget.hostKeyVerifier,
+              connectFlow: widget.connectFlow,
+              homeBoards: _boards,
+              hostChannels: widget.hostChannels,
+              shell: embedding,
+            ),
+            actions: DesktopHomeActions(
+              openTarget: _openSidebarTarget,
+              newSession: _newSession,
+              openSwitcher: _openSwitcher,
+              openSettings: _openSettings,
+              addMachine: _openForm,
+              machineMenu: _handleMenu,
+              openSession: (session) {
+                widget.workspaceController.activate(session);
+                unawaited(_openTerminalWorkspace());
+                _openPreferredChat(session);
+              },
+              sessionActions: _showSessionActions,
+              noticeAction: _handleNoticeAction,
+              openChat: _openChatForAgent,
+              lock: widget.lockController.enabled ? _lock : null,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// A sidebar row: the workspace, tab, pane, tmux session or window it
+  /// stands for, or the open session.
+  Future<void> _openSidebarTarget(SidebarTarget target) async {
+    switch (target) {
+      case MachineTarget(:final host):
+        await _connect(host, forcePicker: true);
+      case HerdrWorkspaceTarget(:final host, :final workspace):
+        await _openPane(host, workspace, null);
+      case AgentPaneTarget(:final host, :final workspace, :final pane):
+        await _openPane(host, workspace, pane);
+      case HerdrTabTarget(:final host, :final workspace, :final tab):
+        final flow = widget.connectFlow;
+        if (flow == null) {
+          await _openPane(host, workspace, null);
+          return;
+        }
+        await flow.openAgentLocation(
+          host,
+          workspaceId: workspace.id,
+          tabId: tab.id,
+          label: workspace.label,
+        );
+        if (!mounted) return;
+        await _openTerminalWorkspace();
+      case TmuxSessionTarget(:final host, :final session):
+        await _openTmux(host, session.name);
+      case TmuxWindowTarget(:final host, :final session, :final window):
+        await _openTmux(host, session, window: window.index);
+      case OpenSessionTarget(:final sessionHostId):
+        final session = widget.workspaceController.sessions
+            .where((session) => session.host.id == sessionHostId)
+            .firstOrNull;
+        if (session == null) return;
+        widget.workspaceController.activate(session);
+        await _openTerminalWorkspace();
+    }
+  }
+
+  /// The agents panel's and the dashboard's Chat buttons.
+  Future<void> _openChatForAgent(SavedHost host, AgentInfo agent) async {
+    final attention = widget.agentAttention;
+    final chatContext = _actionContext;
+    final access = await checkChatViewAccessWithProgress(
+      chatContext,
+      attention: attention,
+      host: host,
+    );
+    if (access == null || !mounted || !chatContext.mounted) return;
+    if (!access.ready) {
+      await showChatViewUnavailable(chatContext, host: host, access: access);
+      return;
+    }
+    await openChatView(
+      context: chatContext,
+      attention: attention,
+      host: host,
+      agent: agent,
+      pasteImages: widget.themeController.pasteImagesAsFiles,
+      onOpenTerminal: () {
+        final flow = widget.connectFlow;
+        if (flow != null) {
+          unawaited(flow.openAgent(host, agent));
+        } else {
+          unawaited(attention.focusAgent(host.id, agent));
+        }
+      },
+    );
+  }
+
   bool _switcherOpen = false;
 
   /// The quick switcher from home (the top bar's button, Ctrl+K): what is
@@ -498,7 +699,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     final QuickSwitcherChoice? choice;
     try {
       choice = await showQuickSwitcher(
-        context,
+        _actionContext,
         source: source,
         fontFamily: widget.themeController.terminalFont.fontFamily,
         fromKeyboard: fromKeyboard,
@@ -511,7 +712,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     switch (choice) {
       case QuickSwitcherOpen(:final item):
         await openSwitcherItem(
-          context,
+          _actionContext,
           item,
           source: source,
           showTerminal: () => unawaited(_openTerminalWorkspace()),
@@ -1335,7 +1536,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
   void _openPreferredChat(TerminalSessionController session) {
     final attention = widget.agentAttention;
     openPreferredChatView(
-      context,
+      _actionContext,
       attention: attention,
       host: session.host,
       onOpenTerminal: (agent) {
@@ -1439,6 +1640,11 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
   }
 
   Future<void> _openTerminalWorkspace() async {
+    if (_isShell) {
+      // The shell's main area shows the terminal instead of a new route.
+      _shell.showHome = false;
+      return;
+    }
     if (_terminalPageOpen) return;
     _terminalPageOpen = true;
     await Navigator.of(context).push(
