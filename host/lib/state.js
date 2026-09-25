@@ -4,7 +4,7 @@
 //
 // State shape (also what `status` prints):
 //   { version: 1, seq: N, agents: { [sessionId]: Agent } }
-//   Agent = { sessionId, name, cwd, tmux, herdr, state, lastEvent, lastToolName,
+//   Agent = { sessionId, name, cwd, transcriptPath, tmux, herdr, state, lastEvent, lastToolName,
 //             lastMessage, startedAt, updatedAt, endedAt, pending: [PendingRequest] }
 //   PendingRequest = { id, toolName, summary, toolInput, createdAt }
 //
@@ -34,6 +34,7 @@ function newAgent (sessionId, now) {
     sessionId,
     name: null,
     cwd: null,
+    transcriptPath: null,
     tmux: null,
     herdr: null,
     state: 'working',
@@ -71,9 +72,21 @@ function summarize (toolName, input) {
   return truncate((line || JSON.stringify(input)).replace(/\s+/g, ' ').trim(), SUMMARY_MAX)
 }
 
+// Claude Code prefixes its terminal title (which tmux copies into the window
+// name) with status glyphs: "⚠ claude", "✳ Fix tests", "● …". Strip leading
+// symbols, emoji, variation selectors and whitespace so names stay readable.
+const LEADING_GLYPHS = /^[\s\p{So}\p{Sm}\p{Sk}\p{Po}\p{Pd}\p{Extended_Pictographic}\u2190-\u23ff\u2500-\u27bf\u2800-\u28ff\ufe0f\u200d]+/u
+
+function cleanName (name) {
+  if (typeof name !== 'string') return null
+  const cleaned = name.replace(LEADING_GLYPHS, '').trim()
+  return cleaned || null
+}
+
 function pickName (event, cwd) {
-  const win = event.tmux && event.tmux.windowName
-  if (event.herdr && event.herdr.name) return event.herdr.name
+  const herdrName = event.herdr && cleanName(event.herdr.name)
+  if (herdrName) return herdrName
+  const win = event.tmux && cleanName(event.tmux.windowName)
   if (win && !GENERIC_WINDOW_NAMES.has(win.toLowerCase())) return win
   if (cwd) return path.basename(cwd) || cwd
   return null
@@ -81,6 +94,7 @@ function pickName (event, cwd) {
 
 function applyContext (agent, event) {
   if (event.cwd) agent.cwd = event.cwd
+  if (typeof event.transcript_path === 'string' && event.transcript_path) agent.transcriptPath = event.transcript_path
   if (event.tmux) agent.tmux = { session: event.tmux.session, window: event.tmux.window, paneId: event.tmux.paneId, windowName: event.tmux.windowName || null }
   if (event.herdr) agent.herdr = event.herdr
   const name = pickName(event, agent.cwd)
@@ -249,5 +263,6 @@ module.exports = {
   prune,
   snapshot,
   summarize,
+  cleanName,
   clone
 }

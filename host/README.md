@@ -8,7 +8,7 @@ SSH exec commands: no ports, no relay, nothing listening on the network.
 
     Claude Code ──hooks──▶ conductore-hook ──unix socket──▶ conductore-hostd
                                                                   ▲
-    phone ──ssh user@host "conductore-hostd status|events|decide"─┘
+    phone ──ssh user@host "conductore-hostd status|events|decide|transcript|send"─┘
 
 Requirements: Node.js 18 or newer (Claude Code already needs it), Linux or
 macOS. No npm dependencies. Optional: tmux and/or Herdr for "focus".
@@ -101,6 +101,7 @@ Every command prints one JSON document on stdout and exits 0, or prints
       "sessionId": "0f2c…",
       "name": "reviewer",
       "cwd": "/home/andre/Projects/Foo",
+      "transcriptPath": "/home/andre/.claude/projects/-home-andre-Projects-Foo/0f2c….jsonl",
       "tmux": { "session": "main", "window": 2, "paneId": "%5", "windowName": "reviewer" },
       "herdr": { "workspaceId": "w1", "tabId": "w1:t1", "paneId": "w1:p1", "name": null },
       "state": "needs_permission",
@@ -125,8 +126,11 @@ Every command prints one JSON document on stdout and exits 0, or prints
 ```
 
 * `name`: Herdr agent name, else the tmux window name (unless it is a generic
-  process name like `node`), else the basename of `cwd`.
-* `tmux` / `herdr` are `null` when unknown.
+  process name like `node` or `claude`), else the basename of `cwd`. Leading
+  status glyphs from Claude Code's terminal title (`⚠`, `✳`, `●`, emoji,
+  spinner dots) are stripped first.
+* `tmux` / `herdr` are `null` when unknown. `transcriptPath` is the
+  `transcript_path` of the latest hook event (null until one carried it).
 * `lastMessage`: last assistant text (Stop), notification text, or the
   question of an AskUserQuestion; capped at 500 chars.
 * `pending[].summary`: one line (command, file path, URL, …) capped at 200
@@ -177,12 +181,96 @@ Runs `herdr agent focus <paneId>` when the agent has a Herdr pane, else
 `tmux select-window -t <session>:<window>` and `tmux select-pane -t <paneId>`.
 Prints `{"ok":true,"via":"tmux","target":"main:2","paneId":"%5"}`.
 
+### `conductore-hostd transcript <sessionId> [--since <offset> | --before <offset>] [--tail-bytes N] [--max-bytes 262144]`
+
+Reads the session's Claude Code transcript (JSONL) for the phone's chat view.
+
+```json
+{"sessionId":"0f2c…","offset":183422,"size":183422,"start":0,"skipped":0,
+ "agent":{"name":"Foo","state":"working","lastMessage":null,"startedAt":1790286139217,"updatedAt":1790286139530,"endedAt":null,"pending":[]},
+ "entries":[
+  {"type":"user","uuid":"u1","parentUuid":null,"timestamp":"2026-09-25T10:00:00.000Z","isSidechain":false,
+   "message":{"role":"user","content":"fix the failing test"}},
+  {"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"…","isSidechain":false,
+   "message":{"role":"assistant","model":"claude-…","content":[
+     {"type":"thinking","hasText":true},
+     {"type":"text","text":"Running the suite first."},
+     {"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"npm test"}}]}},
+  {"type":"user","uuid":"u2","parentUuid":"a1","timestamp":"…","isSidechain":false,
+   "message":{"role":"user","content":[
+     {"type":"tool_result","tool_use_id":"toolu_1","is_error":true,"content":"Exit code 1\n…","truncated":true}]}},
+  {"type":"summary","summary":"Fix failing test","leafUuid":"a1"}
+]}
+```
+
+* `agent` is the session's live status (fields as in `status`, `pending`
+  included), so one poll refreshes both the thread and the header.
+* Without `--since` it returns the last `--tail-bytes` (default: `--max-bytes`)
+  of the file; `start` is the byte offset of the first line returned, so
+  `--before <start>` pages backwards (it returns the whole lines in the
+  `--max-bytes` window that ends there, with a new `start`; `start` 0 means
+  the beginning of the file).
+* `--since <offset>` continues from a previous `offset`. Only whole lines are
+  returned: a line still being written stays for the next call, and `offset`
+  points at its first byte. At most `--max-bytes` (default 256 KB, max 4 MB)
+  are read per call; poll again until `offset` equals `size`.
+* `reset: true`: `--since` was past the end (the file was replaced), so this
+  is a fresh tail read. `oversized: true`: one line was longer than
+  `--max-bytes` and was skipped.
+* Kept line types: `user`, `assistant`, `system` (`subtype`, `content`
+  capped at 500 chars, `level`) and `summary`. Attachments, queue
+  operations, file-history snapshots, cost state and other bookkeeping lines
+  are dropped. `isMeta`, `isCompactSummary` and `isApiErrorMessage` are
+  passed through when set.
+* Content blocks: `text` (capped at 32 KB, `truncated` when cut), `thinking`
+  (text never sent, only `hasText`), `tool_use` (`id`, `name`, `input`; long
+  string fields cut to 1 KB once the input exceeds 4 KB, else
+  `{"_truncated":true,"preview":"…"}`), `tool_result` (`tool_use_id`,
+  `is_error`, text `content` capped at 4 KB, `images` = number of images
+  dropped), `image` (`{"omitted":true,"mediaType":…}`).
+* Errors: `unknown session <id>`, `no transcript recorded for this session
+  yet …`, `transcript not found: <path>`.
+
+### `conductore-hostd send <sessionId> [--text "..." | --text-b64 <base64>] [--no-enter]`
+
+Types a prompt into the agent's live pane and presses Enter, so the running
+Claude Code session receives it exactly as if typed in the terminal. The
+text comes from `--text`, `--text-b64` (what the phone uses: no quoting
+issues) or stdin; at most 100 000 characters.
+
+```json
+{"ok":true,"sessionId":"0f2c…","via":"tmux","paneId":"%5","chars":24,"enter":true}
+```
+
+* Herdr pane first: `herdr agent prompt <paneId> <text>` (Herdr's own
+  submit, multiline-safe; it refuses an agent that is blocked on a prompt).
+  With `--no-enter`: `herdr pane send-text`. If Herdr fails for another
+  reason and the agent also has a tmux pane, tmux is tried.
+* tmux: single line `tmux send-keys -t <pane> -l -- <text>`; multiline
+  `tmux load-buffer -b conductore-<rand> -` (text on stdin) then
+  `tmux paste-buffer -p -d -b … -t <pane>` (bracketed paste, so newlines do
+  not submit). Enter follows as a separate `send-keys … Enter` after 150 ms
+  (`CONDUCTORE_SEND_ENTER_DELAY_MS`): Claude Code treats text and CR in one
+  read as a paste and would insert a newline instead of submitting.
+* Everything goes through `execFile`/`spawn` with an argument array; the
+  text never passes through a shell.
+* Errors: `unknown session <id>`, `session has ended`, `agent is waiting for
+  a permission decision; answer it first` (typing would answer the prompt),
+  `session not in tmux or Herdr`, and the multiplexer's own error.
+
+### `conductore-hostd interrupt <sessionId>`
+
+Presses Escape in the agent's pane (`herdr pane send-keys <pane> esc`, else
+`tmux send-keys -t <pane> Escape`), which interrupts Claude Code's current
+turn. Allowed while a permission prompt is up (Escape dismisses it).
+Prints `{"ok":true,"sessionId":"…","via":"tmux","paneId":"%5","key":"Escape"}`.
+
 ### Others
 
 * `install` / `uninstall`: `{"ok":true,"settings":"…/settings.json","events":[…]}` / `{"ok":true,"removed":[…],"daemonStopped":true}`
 * `doctor`: `{"ok":true,"user":"andre","checks":[{"name":"hooks registered","ok":true,"detail":"9 events"}, …]}`
 * `stop`: `{"ok":true,"running":true,"stopped":true}` or `{"ok":true,"running":false}`
-* `version`: `{"version":"0.1.0","protocol":1,"node":"22.23.1"}`
+* `version`: `{"version":"0.2.0","protocol":1,"node":"22.23.1"}`
 
 ## Permission decisions
 
@@ -237,9 +325,14 @@ Code still evaluates ask rules against `updatedInput` (not used here).
 * The phone must have SSH access as that same user (key-based, over the
   tailnet in the intended setup). There is no other authentication layer, so
   protect the SSH key as you would the host.
-* The daemon never executes tool input. It stores and reports it; `focus`
-  and the hook run only `tmux`, `herdr` and `node` through `execFile`, with
-  arguments passed as an array (no shell).
+* The daemon never executes tool input. It stores and reports it; `focus`,
+  `send`, `interrupt` and the hook run only `tmux`, `herdr` and `node`
+  through `execFile`/`spawn`, with arguments passed as an array (no shell).
+* `send` types into the agent's pane, which is what the SSH user could do by
+  attaching to tmux/Herdr anyway. It refuses while a permission prompt is
+  waiting so a prompt cannot answer it by accident.
+* `transcript` only reads the `transcript_path` Claude Code reported for a
+  known session (absolute, `.jsonl`), and drops thinking text and images.
 * An `always` decision persists an allow rule in the project's
   `.claude/settings.local.json` (or wherever Claude Code suggested), exactly
   as choosing "always" in the terminal would. Review
@@ -257,6 +350,8 @@ cd host && node --test test/*.test.js
 ```
 
 `test/state.test.js` covers the reducer, `test/settings.test.js` the
-settings merge, and `test/daemon.test.js` spawns a real daemon on a temp
+settings merge, `test/transcript.test.js` the transcript reader,
+`test/chat.test.js` the `transcript`/`send`/`interrupt` commands (with fake
+`tmux`/`herdr` binaries that record their arguments), and `test/daemon.test.js` spawns a real daemon on a temp
 socket and drives the real hook client and CLI through the permission and
 long-poll flows.
