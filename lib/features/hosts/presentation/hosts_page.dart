@@ -58,6 +58,7 @@ import 'package:conduit/features/terminal/presentation/terminal_session_controll
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:conduit/features/this_computer/data/host_channels.dart';
 import 'package:conduit/features/this_computer/domain/local_shell_launch.dart';
+import 'package:conduit/features/usage/presentation/usage_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
@@ -454,6 +455,11 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
                           machine: _machineChip(),
                         ),
                       ),
+                      // Limit rings and today's tokens (companion usage).
+                      if (UsageScope.maybeOf(context) case final usage?)
+                        SliverToBoxAdapter(
+                          child: UsageHomeBar(controller: usage),
+                        ),
                       ..._buildMain(context),
                       const SliverToBoxAdapter(
                         child: SizedBox(key: ValueKey('home-end'), height: 24),

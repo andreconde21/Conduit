@@ -47,6 +47,61 @@ class AgentStatusEntry {
   int get hashCode => Object.hash(name, host, state);
 }
 
+/// One account limit window as the widget's ring shows it: `5h` or `7d`,
+/// the share used (0 once the window reset) and whether it is at the
+/// warning level (80 % and up).
+class AgentStatusLimit {
+  const AgentStatusLimit({
+    required this.label,
+    required this.usedPct,
+    this.resetsAt,
+  });
+
+  final String label;
+
+  /// 0 to 100, rounded.
+  final int usedPct;
+  final DateTime? resetsAt;
+
+  /// Mirrors `kUsageWarningPct` / `kUsageCriticalPct` of the app.
+  String get level => usedPct >= 95
+      ? 'critical'
+      : usedPct >= 80
+      ? 'warning'
+      : 'normal';
+
+  Map<String, Object?> toJson() => {
+    'label': label,
+    'usedPct': usedPct,
+    'level': level,
+    if (resetsAt case final at?) 'resetsAt': at.toUtc().millisecondsSinceEpoch,
+  };
+
+  static AgentStatusLimit? fromJson(Object? json) {
+    if (json is! Map || json['label'] is! String || json['usedPct'] is! num) {
+      return null;
+    }
+    final resets = json['resetsAt'];
+    return AgentStatusLimit(
+      label: json['label'] as String,
+      usedPct: (json['usedPct'] as num).round(),
+      resetsAt: resets is int
+          ? DateTime.fromMillisecondsSinceEpoch(resets, isUtc: true)
+          : null,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is AgentStatusLimit &&
+      other.label == label &&
+      other.usedPct == usedPct &&
+      other.resetsAt == resetsAt;
+
+  @override
+  int get hashCode => Object.hash(label, usedPct, resetsAt);
+}
+
 /// What the native widget and tile render, pushed from Dart whenever the
 /// agent dashboard changes.
 ///
@@ -58,10 +113,11 @@ class AgentStatusSnapshot {
     required this.attentionCount,
     required this.agents,
     required this.updatedAt,
+    this.limits = const [],
   });
 
-  /// Payload format version; bump when the shape changes.
-  static const version = 1;
+  /// Payload format version; bump when the shape changes. 2: [limits].
+  static const version = 2;
 
   /// Most agents listed; the widget has room for four rows at most.
   static const maxAgents = 4;
@@ -78,12 +134,16 @@ class AgentStatusSnapshot {
 
   final DateTime updatedAt;
 
+  /// Claude's 5-hour and weekly windows (the widget's rings), when known.
+  final List<AgentStatusLimit> limits;
+
   /// Builds the snapshot for every monitored host, sorting agents so the
   /// ones a human should look at come first.
   factory AgentStatusSnapshot.build({
     required Iterable<({String hostName, List<AgentInfo> agents})> hosts,
     required bool monitoring,
     required DateTime now,
+    List<AgentStatusLimit> limits = const [],
   }) {
     final entries = <AgentStatusEntry>[
       for (final host in hosts)
@@ -108,6 +168,7 @@ class AgentStatusSnapshot {
           .length,
       agents: [for (final (_, entry) in ranked.take(maxAgents)) entry],
       updatedAt: now,
+      limits: limits,
     );
   }
 
@@ -135,12 +196,14 @@ class AgentStatusSnapshot {
     'attentionCount': attentionCount,
     'updatedAt': updatedAt.toUtc().millisecondsSinceEpoch,
     'agents': [for (final agent in agents) agent.toJson()],
+    'limits': [for (final limit in limits) limit.toJson()],
   };
 
   String encode() => jsonEncode(toJson());
 
   static AgentStatusSnapshot fromJson(Map<String, Object?> json) {
     final agents = json['agents'];
+    final limits = json['limits'];
     return AgentStatusSnapshot(
       monitoring: json['monitoring'] as bool? ?? false,
       attentionCount: json['attentionCount'] as int? ?? 0,
@@ -153,6 +216,10 @@ class AgentStatusSnapshot {
         json['updatedAt'] as int? ?? 0,
         isUtc: true,
       ),
+      limits: [
+        if (limits is List)
+          for (final limit in limits) ?AgentStatusLimit.fromJson(limit),
+      ],
     );
   }
 
@@ -165,7 +232,8 @@ class AgentStatusSnapshot {
       other.monitoring == monitoring &&
       other.attentionCount == attentionCount &&
       other.updatedAt == updatedAt &&
-      _listEquals(other.agents, agents);
+      _listEquals(other.agents, agents) &&
+      _listEquals(other.limits, limits);
 
   @override
   int get hashCode => Object.hash(
@@ -173,9 +241,10 @@ class AgentStatusSnapshot {
     attentionCount,
     updatedAt,
     Object.hashAll(agents),
+    Object.hashAll(limits),
   );
 
-  static bool _listEquals(List<AgentStatusEntry> a, List<AgentStatusEntry> b) {
+  static bool _listEquals<T>(List<T> a, List<T> b) {
     if (a.length != b.length) {
       return false;
     }

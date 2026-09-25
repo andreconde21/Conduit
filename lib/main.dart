@@ -76,6 +76,9 @@ import 'package:conduit/features/this_computer/data/host_channels.dart';
 import 'package:conduit/features/this_computer/data/local_agent_command_runner.dart';
 import 'package:conduit/features/this_computer/data/local_file_repository.dart';
 import 'package:conduit/features/this_computer/data/secure_this_computer_store.dart';
+import 'package:conduit/features/usage/data/usage_preferences.dart';
+import 'package:conduit/features/usage/presentation/usage_controller.dart';
+import 'package:conduit/features/usage/presentation/usage_widgets.dart';
 import 'package:conduit/features/voice/presentation/voice_settings_scope.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -180,8 +183,19 @@ void main() {
   );
   // Mirrors the agent dashboard onto the Android home-screen widget and
   // quick-settings tile for the app's whole lifetime.
+  // Usage at a glance (companion `usage`): the home bar, the Agents
+  // panel's Usage tab, the widget's limit rings and the 80 % alert.
+  final usage = UsageController(
+    source: AttentionUsageHostSource(
+      attention: agentAttention,
+      hosts: hostsController,
+    ),
+    preferences: const SecureUsagePreferencesStore(secureStorage),
+    notifier: const PlatformAgentAttentionNotifier(),
+  );
   AgentStatusWidgetPusher.forController(
     agentAttention,
+    usage: usage,
     channel: PlatformAgentStatusWidgetChannel.instance,
   ).start();
   const fileExport = FilePickerFileExport();
@@ -325,25 +339,28 @@ void main() {
             child: CompanionSetupScope(
               controller: companionSetup,
               agentAttention: agentAttention,
-              child: ConduitApp(
-                themeController: themeController,
-                lockController: lockController,
-                hostsController: hostsController,
-                terminalRepository: terminalRepository,
-                workspaceController: workspaceController,
-                localShellController: localShellController,
-                hostKeyVerifier: hostKeyVerifier,
-                promptCoordinator: promptCoordinator,
-                sftpRepository: sftpRepository,
-                sftpBookmarksRepository: sftpBookmarksRepository,
-                agentAttention: agentAttention,
-                backupService: backupService,
-                fileExport: fileExport,
-                connectFlow: connectFlow,
-                shareTarget: shareTarget,
-                sessionRestore: sessionRestore,
-                localDataChanges: localDataChanges,
-                hostChannels: hostChannels,
+              child: UsageScope(
+                controller: usage,
+                child: ConduitApp(
+                  themeController: themeController,
+                  lockController: lockController,
+                  hostsController: hostsController,
+                  terminalRepository: terminalRepository,
+                  workspaceController: workspaceController,
+                  localShellController: localShellController,
+                  hostKeyVerifier: hostKeyVerifier,
+                  promptCoordinator: promptCoordinator,
+                  sftpRepository: sftpRepository,
+                  sftpBookmarksRepository: sftpBookmarksRepository,
+                  agentAttention: agentAttention,
+                  backupService: backupService,
+                  fileExport: fileExport,
+                  connectFlow: connectFlow,
+                  shareTarget: shareTarget,
+                  sessionRestore: sessionRestore,
+                  localDataChanges: localDataChanges,
+                  hostChannels: hostChannels,
+                ),
               ),
             ),
           ),

@@ -24,6 +24,7 @@ import 'package:conduit/features/terminal/presentation/trusted_keys_page.dart';
 import 'package:conduit/features/terminal/presentation/widgets/desktop_shortcuts_sheet.dart';
 import 'package:conduit/features/terminal/presentation/widgets/pill_configurator_sheet.dart';
 import 'package:conduit/features/this_computer/domain/local_shell_launch.dart';
+import 'package:conduit/features/usage/presentation/usage_widgets.dart';
 import 'package:conduit/features/voice/presentation/speech_settings_controls.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -333,6 +334,23 @@ class SettingsSectionBody extends StatelessWidget {
             );
           },
         ),
+      if (PlatformFeatures.agentNotifications)
+        if (UsageScope.maybeOf(context) case final usage?) ...[
+          _gap,
+          ListenableBuilder(
+            listenable: usage,
+            builder: (context, _) => SettingsSwitchCard(
+              key: const ValueKey('settings-usage-alert'),
+              icon: Icons.notifications_active_outlined,
+              title: 'Alert near the 5-hour limit',
+              subtitle:
+                  'Notify when 80% of the Claude 5-hour window is used, once '
+                  'per window, with the time it resets. This device only.',
+              value: usage.preferences.alertEnabled,
+              onChanged: usage.setAlertEnabled,
+            ),
+          ),
+        ],
       if (attention != null) ...[
         _gap,
         const SettingsHeading('Usage'),

@@ -5,6 +5,8 @@ import 'dart:async';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/home_widget/domain/agent_status_snapshot.dart';
 import 'package:conduit/features/home_widget/domain/agent_status_widget_channel.dart';
+import 'package:conduit/features/usage/domain/usage_report.dart';
+import 'package:conduit/features/usage/presentation/usage_controller.dart';
 import 'package:flutter/foundation.dart';
 
 /// Keeps the native widget and tile in sync with the agent dashboard.
@@ -24,14 +26,18 @@ class AgentStatusWidgetPusher {
        _channel = channel;
 
   /// Wires the pusher to the live [AgentAttentionController].
+  /// With [usage], the widget also shows Claude's limit rings.
   factory AgentStatusWidgetPusher.forController(
     AgentAttentionController controller, {
     required AgentStatusWidgetChannel channel,
+    UsageController? usage,
     Duration debounce = const Duration(milliseconds: 500),
   }) {
     return AgentStatusWidgetPusher(
-      source: controller,
-      snapshot: () => snapshotOf(controller),
+      source: usage == null
+          ? controller
+          : Listenable.merge([controller, usage]),
+      snapshot: () => snapshotOf(controller, usage: usage),
       channel: channel,
       debounce: debounce,
     );
@@ -49,8 +55,13 @@ class AgentStatusWidgetPusher {
   bool _disposed = false;
 
   /// Builds the snapshot the widget shows for [controller]'s current state.
-  static AgentStatusSnapshot snapshotOf(AgentAttentionController controller) {
+  static AgentStatusSnapshot snapshotOf(
+    AgentAttentionController controller, {
+    UsageController? usage,
+    DateTime? now,
+  }) {
     final hosts = controller.monitoredHosts;
+    final at = now ?? DateTime.now();
     return AgentStatusSnapshot.build(
       hosts: [
         for (final host in hosts)
@@ -60,9 +71,26 @@ class AgentStatusWidgetPusher {
           ),
       ],
       monitoring: hosts.isNotEmpty,
-      now: DateTime.now(),
+      now: at,
+      limits: usage == null
+          ? const []
+          : widgetLimits(usage.summary.claudeLimits, at),
     );
   }
+
+  /// The 5-hour and weekly windows as the widget's rings.
+  static List<AgentStatusLimit> widgetLimits(
+    List<UsageLimit> limits,
+    DateTime now,
+  ) => [
+    for (final limit in limits)
+      if (limit.isFiveHour || limit.isWeekly)
+        AgentStatusLimit(
+          label: limit.label,
+          usedPct: limit.effectivePct(now).round(),
+          resetsAt: limit.resetsAt,
+        ),
+  ];
 
   /// Pushes the current state immediately and starts listening for changes.
   void start() {
