@@ -109,8 +109,12 @@ Widget shotApp({
     key: shotKey,
     child: MaterialApp(
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.build(brightness: Brightness.light, palette: palette),
-      darkTheme: AppTheme.build(brightness: Brightness.dark, palette: palette),
+      theme: _systemSans(
+        AppTheme.build(brightness: Brightness.light, palette: palette),
+      ),
+      darkTheme: _systemSans(
+        AppTheme.build(brightness: Brightness.dark, palette: palette),
+      ),
       themeMode: palette.brightness == Brightness.dark
           ? ThemeMode.dark
           : ThemeMode.light,
@@ -127,6 +131,19 @@ Widget shotApp({
         );
       },
       home: home,
+    ),
+  );
+}
+
+/// Popup menu items use a text style without a font family, which a
+/// device draws in its system sans but flutter_test in boxes: name Roboto.
+ThemeData _systemSans(ThemeData theme) {
+  final menu = theme.popupMenuTheme;
+  final style = menu.textStyle?.copyWith(fontFamily: 'Roboto');
+  return theme.copyWith(
+    popupMenuTheme: menu.copyWith(
+      textStyle: style,
+      labelTextStyle: WidgetStatePropertyAll(style),
     ),
   );
 }
