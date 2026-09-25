@@ -37,6 +37,7 @@ class ThemeController extends ChangeNotifier {
   List<TerminalPillItem> _terminalPillItems = defaultTerminalPillItems;
   bool _menuButtonsEnabled = true;
   bool _remoteClipboardEnabled = true;
+  bool _restoreSessionsOnLaunch = true;
   TerminalGesturePreferences _terminalGestures =
       TerminalGesturePreferences.defaults;
   String _speechLanguage = '';
@@ -90,6 +91,9 @@ class ThemeController extends ChangeNotifier {
 
   /// Whether OSC 52 copies from the remote reach the phone clipboard.
   bool get remoteClipboardEnabled => _remoteClipboardEnabled;
+
+  /// Whether the open sessions come back after the app restarts.
+  bool get restoreSessionsOnLaunch => _restoreSessionsOnLaunch;
   TerminalGesturePreferences get terminalGestures => _terminalGestures;
 
   /// BCP-47 tag dictation listens in; empty means the device locale.
@@ -113,6 +117,7 @@ class ThemeController extends ChangeNotifier {
     _terminalPillItems = List.of(preferences.terminalPillItems);
     _menuButtonsEnabled = preferences.menuButtonsEnabled;
     _remoteClipboardEnabled = preferences.remoteClipboardEnabled;
+    _restoreSessionsOnLaunch = preferences.restoreSessionsOnLaunch;
     _terminalGestures = preferences.terminalGestures;
     _speechLanguage = preferences.speechLanguage;
     _omarchySyncHostId = preferences.omarchySyncHostId;
@@ -342,6 +347,15 @@ class ThemeController extends ChangeNotifier {
     await _save();
   }
 
+  Future<void> setRestoreSessionsOnLaunch(bool enabled) async {
+    if (_restoreSessionsOnLaunch == enabled) {
+      return;
+    }
+    _restoreSessionsOnLaunch = enabled;
+    notifyListeners();
+    await _save();
+  }
+
   Future<void> setTerminalGestures(TerminalGesturePreferences gestures) async {
     if (_terminalGestures == gestures) {
       return;
@@ -382,6 +396,7 @@ class ThemeController extends ChangeNotifier {
         terminalGestures: _terminalGestures,
         speechLanguage: _speechLanguage,
         remoteClipboardEnabled: _remoteClipboardEnabled,
+        restoreSessionsOnLaunch: _restoreSessionsOnLaunch,
         omarchySyncHostId: _omarchySyncHostId,
         omarchySyncedTheme: _omarchySyncedTheme,
       ),

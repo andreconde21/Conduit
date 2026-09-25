@@ -31,7 +31,9 @@ import 'package:conduit/features/local_shell/data/local_terminal_repository.dart
 import 'package:conduit/features/local_shell/local_shell_licenses.dart';
 import 'package:conduit/features/local_shell/presentation/local_shell_controller.dart';
 import 'package:conduit/features/sessions/data/secure_connect_preferences_repository.dart';
+import 'package:conduit/features/sessions/data/secure_session_snapshot_repository.dart';
 import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
+import 'package:conduit/features/sessions/presentation/session_restore_controller.dart';
 import 'package:conduit/features/sftp/data/dart_ssh_sftp_repository.dart';
 import 'package:conduit/features/sftp/data/file_picker_file_export.dart';
 import 'package:conduit/features/sftp/data/secure_sftp_bookmarks_repository.dart';
@@ -170,7 +172,28 @@ void main() {
     runnerFactory: (host) => SshAgentCommandRunner(hostKeyVerifier, host),
   );
   themeController.omarchySync = omarchyThemeSync;
-  unawaited(themeController.load().then((_) => omarchyThemeSync.start()));
+  final themeLoaded = themeController.load();
+  unawaited(themeLoaded.then((_) => omarchyThemeSync.start()));
+
+  // Keeps the open-session list in secure storage and brings it back
+  // after the app lock (setting: Restore sessions on launch).
+  late final SessionRestoreController sessionRestore;
+  sessionRestore = SessionRestoreController(
+    workspace: workspaceController,
+    repository: const SecureSessionSnapshotRepository(secureStorage),
+    findHost: (hostId) async {
+      await hostsController.firstLoad;
+      return hostsController.hosts
+          .where((host) => host.id == hostId)
+          .firstOrNull;
+    },
+    ready: themeLoaded.then((_) {
+      sessionRestore.enabled = themeController.restoreSessionsOnLaunch;
+    }),
+  );
+  themeController.addListener(
+    () => sessionRestore.enabled = themeController.restoreSessionsOnLaunch,
+  );
   unawaited(shareTarget.start());
 
   runApp(
@@ -193,6 +216,7 @@ void main() {
         fileExport: fileExport,
         connectFlow: connectFlow,
         shareTarget: shareTarget,
+        sessionRestore: sessionRestore,
       ),
     ),
   );
@@ -215,6 +239,7 @@ class ConduitApp extends StatefulWidget {
     required this.fileExport,
     this.connectFlow,
     this.shareTarget,
+    this.sessionRestore,
     super.key,
   });
 
@@ -235,6 +260,7 @@ class ConduitApp extends StatefulWidget {
 
   /// Share-to-agent flow; null disables the Android share target.
   final ShareTargetController? shareTarget;
+  final SessionRestoreController? sessionRestore;
 
   @override
   State<ConduitApp> createState() => _ConduitAppState();
@@ -469,6 +495,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
                 backupService: widget.backupService,
                 fileExport: widget.fileExport,
                 connectFlow: widget.connectFlow,
+                sessionRestore: widget.sessionRestore,
               );
               return _wrapShareTargetHost(
                 AgentStatusLaunchListener(

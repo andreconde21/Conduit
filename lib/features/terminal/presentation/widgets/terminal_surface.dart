@@ -23,6 +23,7 @@ class TerminalSurface extends StatefulWidget {
     this.onPathTap,
     this.onLinkTap,
     this.onLinkLongPress,
+    this.autoConnect = true,
     super.key,
   });
 
@@ -48,6 +49,11 @@ class TerminalSurface extends StatefulWidget {
   /// the logical line it sits on. The word selection the long press makes
   /// stays unless the callback resolves to true (an action was taken).
   final Future<bool> Function(String url, String line)? onLinkLongPress;
+
+  /// Whether a disconnected session connects as soon as this view is
+  /// built. False for a background tab that waits to be shown (a session
+  /// restored from the last app run); it connects when this turns true.
+  final bool autoConnect;
 
   @override
   State<TerminalSurface> createState() => _TerminalSurfaceState();
@@ -89,7 +95,8 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
         _pointerInputsFor(widget.terminalMouseInput),
       );
     }
-    if (oldWidget.session != widget.session) {
+    if (oldWidget.session != widget.session ||
+        (!oldWidget.autoConnect && widget.autoConnect)) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _connectIfNeeded());
     }
   }
@@ -108,6 +115,7 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
     if (!mounted) return;
     final session = widget.session;
     if (session.shouldConnect) {
+      if (!widget.autoConnect) return;
       await session.connect();
     } else if (session.isConnected) {
       session.forceResize();

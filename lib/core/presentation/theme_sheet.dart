@@ -465,6 +465,29 @@ class _TerminalAppearanceControls extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 14),
+        Material(
+          color: colorScheme.surface,
+          shape: RoundedRectangleBorder(
+            side: BorderSide(color: colorScheme.outlineVariant),
+            borderRadius: AppTheme.borderRadius,
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: SwitchListTile(
+            key: const ValueKey('restore-sessions-switch'),
+            secondary: const Icon(Icons.restore_page_rounded),
+            title: const Text('Restore sessions on launch'),
+            subtitle: Text(
+              'Bring back the open sessions after the app restarts. tmux and '
+              'Herdr sessions reattach; plain shells start fresh.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+            value: controller.restoreSessionsOnLaunch,
+            onChanged: controller.setRestoreSessionsOnLaunch,
+          ),
+        ),
+        const SizedBox(height: 14),
         Container(
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
           decoration: BoxDecoration(

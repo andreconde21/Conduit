@@ -154,6 +154,7 @@ class AppBackupService {
       ),
       'menuButtonsEnabled': _themeController.menuButtonsEnabled,
       'remoteClipboardEnabled': _themeController.remoteClipboardEnabled,
+      'restoreSessionsOnLaunch': _themeController.restoreSessionsOnLaunch,
       'terminalGestures': _themeController.terminalGestures.toJson(),
       'speechLanguage': _themeController.speechLanguage,
     };
@@ -239,6 +240,12 @@ class AppBackupService {
     final remoteClipboardEnabled = json['remoteClipboardEnabled'];
     if (remoteClipboardEnabled is bool) {
       await _themeController.setRemoteClipboardEnabled(remoteClipboardEnabled);
+    }
+    final restoreSessionsOnLaunch = json['restoreSessionsOnLaunch'];
+    if (restoreSessionsOnLaunch is bool) {
+      await _themeController.setRestoreSessionsOnLaunch(
+        restoreSessionsOnLaunch,
+      );
     }
 
     final terminalGestures = json['terminalGestures'];
