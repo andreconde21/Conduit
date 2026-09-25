@@ -1,3 +1,4 @@
+import 'package:conduit/core/presentation/terminal_route.dart';
 import 'package:conduit/core/theme/terminal_pill_items.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
@@ -532,6 +533,162 @@ void main() {
       companion.dispose();
       workspace.dispose();
       await tester.pump(const Duration(days: 2));
+    });
+  });
+
+  group('back from Chat View', () {
+    const homeLabel = 'Home page';
+
+    // Home with a button that pushes the terminal page as a terminal
+    // route, the way the home page does.
+    Future<void> pumpHome(
+      WidgetTester tester,
+      TerminalWorkspaceController workspace,
+      AgentAttentionController attention,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Column(
+                children: [
+                  const Text(homeLabel),
+                  TextButton(
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        settings: terminalRouteSettings,
+                        builder: (_) => TerminalPage(
+                          workspace: workspace,
+                          themeController: themeController,
+                          sftpRepository: NoNetworkSftpRepository(),
+                          agentAttention: attention,
+                        ),
+                      ),
+                    ),
+                    child: const Text('Open terminal'),
+                  ),
+                  TextButton(
+                    onPressed: () => openChatView(
+                      context: context,
+                      attention: attention,
+                      host: workspace.sessions.single.host,
+                      agent: chatAgentForSession(
+                        attention,
+                        workspace.sessions.single.host,
+                      )!,
+                      onOpenTerminal: () {},
+                    ),
+                    child: const Text('Open chat'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+    }
+
+    Future<void> settle(WidgetTester tester) async {
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 600));
+    }
+
+    // Lets the Chat button hint SnackBar time out.
+    Future<void> drain(WidgetTester tester) async {
+      for (var i = 0; i < 12; i += 1) {
+        await tester.pump(const Duration(milliseconds: 500));
+      }
+    }
+
+    Future<void> openChatFromTerminal(WidgetTester tester) async {
+      await tester.tap(find.text('Open terminal'));
+      await settle(tester);
+      expect(find.byType(TerminalPage), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('toolbar-chat')));
+      await settle(tester);
+      expect(find.byType(ChatViewPage), findsOneWidget);
+    }
+
+    testWidgets('opened from the terminal, back goes straight home', (
+      tester,
+    ) async {
+      final host = companion(buildHost('h'));
+      final (attention, workspace) = await monitor(
+        tester,
+        host,
+        status([agent('a')]),
+      );
+      await pumpHome(tester, workspace, attention);
+      await openChatFromTerminal(tester);
+
+      await tester.binding.handlePopRoute();
+      await settle(tester);
+
+      expect(find.byType(ChatViewPage), findsNothing);
+      expect(find.byType(TerminalPage), findsNothing);
+      expect(find.text(homeLabel), findsOneWidget);
+      // The session was not closed.
+      expect(workspace.sessions, hasLength(1));
+      await drain(tester);
+    });
+
+    testWidgets('the AppBar back arrow also goes home', (tester) async {
+      final host = companion(buildHost('h'));
+      final (attention, workspace) = await monitor(
+        tester,
+        host,
+        status([agent('a')]),
+      );
+      await pumpHome(tester, workspace, attention);
+      await openChatFromTerminal(tester);
+
+      await tester.tap(find.byType(BackButton));
+      await settle(tester);
+
+      expect(find.byType(TerminalPage), findsNothing);
+      expect(find.text(homeLabel), findsOneWidget);
+      await drain(tester);
+    });
+
+    testWidgets('the Terminal button still switches to the terminal', (
+      tester,
+    ) async {
+      final host = companion(buildHost('h'));
+      final (attention, workspace) = await monitor(
+        tester,
+        host,
+        status([agent('a')]),
+      );
+      await pumpHome(tester, workspace, attention);
+      await openChatFromTerminal(tester);
+
+      await tester.tap(find.text('Terminal'));
+      await settle(tester);
+
+      expect(find.byType(ChatViewPage), findsNothing);
+      expect(find.byType(TerminalPage), findsOneWidget);
+      await drain(tester);
+    });
+
+    testWidgets('opened from home, back returns home', (tester) async {
+      final host = companion(buildHost('h'));
+      final (attention, workspace) = await monitor(
+        tester,
+        host,
+        status([agent('a')]),
+      );
+      await pumpHome(tester, workspace, attention);
+
+      await tester.tap(find.text('Open chat'));
+      await settle(tester);
+      expect(find.byType(ChatViewPage), findsOneWidget);
+
+      await tester.binding.handlePopRoute();
+      await settle(tester);
+
+      expect(find.byType(ChatViewPage), findsNothing);
+      expect(find.text(homeLabel), findsOneWidget);
     });
   });
 }

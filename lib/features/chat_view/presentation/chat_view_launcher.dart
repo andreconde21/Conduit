@@ -4,6 +4,7 @@ import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/core/connection_problem.dart';
 import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/connection_details.dart';
+import 'package:conduit/core/presentation/terminal_route.dart';
 import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
@@ -437,7 +438,12 @@ Future<void> openChatView({
     agentChanges: changes,
   );
   var toTerminal = false;
-  await Navigator.of(context).push(
+  final navigator = Navigator.of(context);
+  // Opened over a terminal page (its Chat button, a session that opens in
+  // Chat View): back leaves that page too, straight home. The Terminal
+  // button is how to switch modes.
+  final over = topRouteOf(navigator);
+  await navigator.push(
     MaterialPageRoute<void>(
       builder: (routeContext) => ChatViewPage(
         controller: controller,
@@ -463,6 +469,13 @@ Future<void> openChatView({
   changes.dispose();
   if (toTerminal) {
     onOpenTerminal();
+  } else if (over != null &&
+      isTerminalRoute(over) &&
+      over.isCurrent &&
+      navigator.mounted) {
+    // Like back on the terminal page: sessions stay open in the workspace,
+    // and a PopScope there still gets its say.
+    await navigator.maybePop();
   }
 }
 
