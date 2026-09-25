@@ -5,13 +5,17 @@ import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
+import 'package:conduit/features/agent_attention/data/remote_tool_command.dart';
 import 'package:conduit/features/agent_attention/data/ssh_agent_command_runner.dart';
+import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
+import 'package:conduit/features/chat_view/presentation/chat_view_launcher.dart';
 import 'package:conduit/features/diff_view/data/ssh_git_diff_source.dart';
 import 'package:conduit/features/diff_view/presentation/diff_view.dart';
 import 'package:conduit/features/diff_view/presentation/diff_view_controller.dart';
 import 'package:conduit/features/diff_view/presentation/diff_view_tab.dart';
+import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/live_preview/data/secure_live_preview_port_store.dart';
 import 'package:conduit/features/live_preview/data/ssh_port_forwarder.dart';
 import 'package:conduit/features/live_preview/domain/live_preview_port_store.dart';
@@ -20,16 +24,23 @@ import 'package:conduit/features/live_preview/presentation/live_preview_port_dia
 import 'package:conduit/features/live_preview/presentation/live_preview_tab.dart';
 import 'package:conduit/features/live_preview/presentation/live_preview_view.dart';
 import 'package:conduit/features/prompt_menus/presentation/prompt_menu_strip.dart';
+import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
 import 'package:conduit/features/sessions/presentation/session_grid_page.dart';
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/discard_changes_dialog.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/sftp_file_viewer.dart';
+import 'package:conduit/features/share_target/data/sftp_share_uploader.dart';
 import 'package:conduit/features/share_target/domain/share_inbox.dart';
 import 'package:conduit/features/share_target/presentation/share_target_controller.dart';
 import 'package:conduit/features/share_target/presentation/share_target_scope.dart';
+import 'package:conduit/features/terminal/data/platform_prompt_image_source.dart';
+import 'package:conduit/features/terminal/data/prompt_image_preparer.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
+import 'package:conduit/features/terminal/domain/prompt_image.dart';
+import 'package:conduit/features/terminal/domain/recent_directories.dart';
 import 'package:conduit/features/terminal/domain/security_key_interaction.dart';
+import 'package:conduit/features/terminal/domain/terminal_link_detector.dart';
 import 'package:conduit/features/terminal/presentation/gestures/terminal_gesture_layer.dart';
 import 'package:conduit/features/terminal/presentation/security_key_picker_dialog.dart';
 import 'package:conduit/features/terminal/presentation/security_key_pin_dialog.dart';
@@ -39,9 +50,12 @@ import 'package:conduit/features/terminal/presentation/terminal_session_controll
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:conduit/features/terminal/presentation/widgets/empty_terminal_state.dart';
 import 'package:conduit/features/terminal/presentation/widgets/floating_toolbar.dart';
+import 'package:conduit/features/terminal/presentation/widgets/image_crop_page.dart';
 import 'package:conduit/features/terminal/presentation/widgets/prompt_composer_sheet.dart';
+import 'package:conduit/features/terminal/presentation/widgets/recent_directories_sheet.dart';
 import 'package:conduit/features/terminal/presentation/widgets/session_tools_menu.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_header.dart';
+import 'package:conduit/features/terminal/presentation/widgets/terminal_link_sheet.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_surface.dart';
 import 'package:conduit/features/voice/data/platform_speech_recognizer.dart';
 import 'package:conduit/features/voice/domain/speech_recognizer.dart';
@@ -52,6 +66,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 class TerminalPage extends StatefulWidget {
@@ -66,6 +81,7 @@ class TerminalPage extends StatefulWidget {
     ),
     this.connectFlow,
     this.speechRecognizer,
+    this.promptImageSource,
     super.key,
   });
 
@@ -82,12 +98,17 @@ class TerminalPage extends StatefulWidget {
 
   /// Remembers the last previewed port per host.
   final LivePreviewPortStore livePreviewPortStore;
+
   /// Optional connect flow for the session grid's "+" tile.
   final SessionConnectFlow? connectFlow;
 
   /// Voice input for Chat mode. Null means the platform default (Android's
   /// on-device recognizer; no mic elsewhere).
   final SpeechRecognizer? speechRecognizer;
+
+  /// Where Chat mode's image button takes images from. Null means the
+  /// platform picker and clipboard.
+  final PromptImageSource? promptImageSource;
 
   @override
   State<TerminalPage> createState() => _TerminalPageState();
@@ -114,6 +135,8 @@ class _TerminalPageState extends State<TerminalPage> {
   int _composeRevision = 0;
   DictationController? _dictation;
   ShareTargetController? _shareTarget;
+  final Map<TerminalSessionController, StreamSubscription<String>>
+  _clipboardSubscriptions = {};
 
   @override
   void initState() {
@@ -137,6 +160,7 @@ class _TerminalPageState extends State<TerminalPage> {
       _promptSecurityKeySelection,
     );
     widget.workspace.addListener(_handleWorkspaceChanged);
+    _syncRemoteClipboardSubscriptions();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _focusedSession = widget.workspace.activeSession;
       _focusNode.requestFocus();
@@ -199,6 +223,10 @@ class _TerminalPageState extends State<TerminalPage> {
       _promptSecurityKeySelection,
     );
     widget.workspace.removeListener(_handleWorkspaceChanged);
+    for (final subscription in _clipboardSubscriptions.values) {
+      unawaited(subscription.cancel());
+    }
+    _clipboardSubscriptions.clear();
     _focusNode.dispose();
     _fileTabs.dispose();
     super.dispose();
@@ -220,7 +248,44 @@ class _TerminalPageState extends State<TerminalPage> {
     return showSecurityKeyPickerDialog(context, request);
   }
 
+  /// Follows every open session's OSC 52 copies, background tabs
+  /// included, so a copy made in one tab is not lost while another shows.
+  void _syncRemoteClipboardSubscriptions() {
+    final sessions = widget.workspace.sessions.toSet();
+    _clipboardSubscriptions.removeWhere((session, subscription) {
+      if (sessions.contains(session)) {
+        return false;
+      }
+      unawaited(subscription.cancel());
+      return true;
+    });
+    for (final session in sessions) {
+      _clipboardSubscriptions[session] ??= session.remoteClipboardWrites.listen(
+        (text) => _handleRemoteClipboardWrite(session, text),
+      );
+    }
+  }
+
+  void _handleRemoteClipboardWrite(
+    TerminalSessionController session,
+    String text,
+  ) {
+    if (!mounted || !widget.themeController.remoteClipboardEnabled) {
+      return;
+    }
+    unawaited(Clipboard.setData(ClipboardData(text: text)));
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text('Copied from ${session.host.name}'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+  }
+
   void _handleWorkspaceChanged() {
+    _syncRemoteClipboardSubscriptions();
     final active = widget.workspace.activeSession;
     if (active == null || active == _focusedSession) return;
     _focusedSession = active;
@@ -275,6 +340,113 @@ class _TerminalPageState extends State<TerminalPage> {
       );
   }
 
+  /// A tapped link: a snackbar to open or copy it. Links to the host's own
+  /// ports (localhost:3000) open in the live preview, since the phone's
+  /// browser would look for them on the phone.
+  void _handleLinkTap(TerminalSessionController session, String url) {
+    final previewPort = _previewPortFor(session, url);
+    final messenger = ScaffoldMessenger.of(context);
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Expanded(
+                child: Text(url, maxLines: 1, overflow: TextOverflow.ellipsis),
+              ),
+              TextButton(
+                onPressed: () {
+                  messenger.hideCurrentSnackBar();
+                  _copyToClipboard(url, 'Link copied');
+                },
+                child: const Text('Copy'),
+              ),
+            ],
+          ),
+          duration: const Duration(seconds: 5),
+          action: SnackBarAction(
+            label: previewPort == null ? 'Open' : 'Preview',
+            onPressed: () => previewPort == null
+                ? unawaited(_openInBrowser(url))
+                : unawaited(
+                    _openLivePreview(
+                      session,
+                      port: previewPort,
+                      path: previewPathOf(url),
+                    ),
+                  ),
+          ),
+        ),
+      );
+  }
+
+  Future<bool> _handleLinkLongPress(
+    TerminalSessionController session,
+    String url,
+    String line,
+  ) async {
+    final previewPort = _previewPortFor(session, url);
+    final action = await showTerminalLinkSheet(
+      context,
+      url: url,
+      previewPort: previewPort,
+    );
+    if (!mounted || action == null) {
+      return false;
+    }
+    switch (action) {
+      case TerminalLinkAction.openInBrowser:
+        unawaited(_openInBrowser(url));
+      case TerminalLinkAction.openInPreview:
+        unawaited(
+          _openLivePreview(
+            session,
+            port: previewPort,
+            path: previewPathOf(url),
+          ),
+        );
+      case TerminalLinkAction.copyLink:
+        _copyToClipboard(url, 'Link copied');
+      case TerminalLinkAction.copyText:
+        _copyToClipboard(line, 'Line copied');
+    }
+    return true;
+  }
+
+  int? _previewPortFor(TerminalSessionController session, String url) {
+    if (session.host.isLocal || widget.hostKeyVerifier == null) {
+      return null;
+    }
+    return loopbackPreviewPort(url);
+  }
+
+  Future<void> _openInBrowser(String url) async {
+    final uri = Uri.tryParse(url);
+    var opened = false;
+    if (uri != null) {
+      try {
+        opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } catch (_) {
+        opened = false;
+      }
+    }
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('No app can open it')));
+    }
+  }
+
+  void _copyToClipboard(String text, String message) {
+    unawaited(Clipboard.setData(ClipboardData(text: text)));
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
+      );
+  }
+
   Future<void> _closeFileTab(TerminalFileTab tab) async {
     if (tab.viewerKey.currentState?.isDirty ?? false) {
       final discard = await confirmDiscardChanges(context, fileName: tab.title);
@@ -303,6 +475,7 @@ class _TerminalPageState extends State<TerminalPage> {
       isConnected: () => session.isConnected,
       bracketedPasteSupported: () => session.bracketedPasteSupported,
       dictation: _dictation,
+      imageAttacher: _promptImageAttacher(session),
     );
     if (!mounted) {
       return;
@@ -311,6 +484,111 @@ class _TerminalPageState extends State<TerminalPage> {
     // inline bar so it shows the latest text.
     setState(() => _composeRevision += 1);
     _focusNode.requestFocus();
+  }
+
+  /// Images go to the same per-host inbox as files shared into the app,
+  /// and the composer inserts the uploaded path for the agent to read.
+  PromptImageAttacher _promptImageAttacher(TerminalSessionController session) {
+    final preparer = PromptImagePreparer();
+    return PromptImageAttacher(
+      source: widget.promptImageSource ?? PlatformPromptImageSource(),
+      crop: (image) => showImageCropPage(context, image),
+      prepare: preparer.prepare,
+      upload: (image) async {
+        final paths = await SftpShareUploader(
+          widget.sftpRepository,
+        ).upload(session.host, [image]);
+        return paths.single;
+      },
+    );
+  }
+
+  /// "cd to…" from the Tmux+ menu or the Herdr navigator: the machine's
+  /// recent directories, acted on in the way that fits the session.
+  Future<void> _openRecentDirectories(TerminalSessionController session) async {
+    final directories = widget.connectFlow?.recentDirectories;
+    if (directories == null) {
+      return;
+    }
+    final host = session.host;
+    final hostId = baseHostId(host.id);
+    final list = await directories.load(hostId);
+    if (!mounted) {
+      return;
+    }
+    final runnerFactory = widget.connectFlow?.runnerFactory;
+    final inHerdr =
+        ConnectTarget.fromSessionHostId(host.id)?.kind ==
+        ConnectTargetKind.herdr;
+    final canRunCommands =
+        runnerFactory != null &&
+        !host.isLocal &&
+        host.authMethod != SshAuthMethod.hardwareKey;
+    final actions = <RecentDirectoryAction>[
+      if (inHerdr && canRunCommands) RecentDirectoryAction.herdrTab,
+      if (host.startTmuxOnConnect) RecentDirectoryAction.tmuxWindow,
+      RecentDirectoryAction.cd,
+    ];
+    final pick = await showRecentDirectoriesSheet(
+      context: context,
+      hostName: host.name,
+      directories: list,
+      actions: actions,
+      currentDirectory: session.workingDirectory,
+    );
+    if (pick == null || !mounted) {
+      _focusNode.requestFocus();
+      return;
+    }
+    unawaited(directories.record(hostId, pick.directory));
+    switch (pick.action) {
+      case RecentDirectoryAction.cd:
+        session.sendText(cdCommand(pick.directory));
+        _sendEnterSoon(session);
+      case RecentDirectoryAction.tmuxWindow:
+        session.sendPrefix(host.tmuxPrefixKey);
+        session.sendText(':');
+        session.sendText(tmuxNewWindowCommand(pick.directory));
+        _sendEnterSoon(session);
+      case RecentDirectoryAction.herdrTab:
+        final runner = runnerFactory!(host);
+        try {
+          final result = await runner.run(
+            remoteToolCommand('herdr', herdrNewTabArguments(pick.directory)),
+            timeout: const Duration(seconds: 10),
+          );
+          if (result.exitCode != 0 && mounted) {
+            final detail = result.stderr.trim().split('\n').first;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  'Herdr could not open a tab there'
+                  '${detail.isEmpty ? '' : ': $detail'}',
+                ),
+              ),
+            );
+          }
+        } catch (error) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Herdr could not open a tab: $error')),
+            );
+          }
+        } finally {
+          unawaited(runner.close());
+        }
+    }
+    if (mounted) {
+      _focusNode.requestFocus();
+    }
+  }
+
+  /// Enter as its own write, like the compose bar: TUIs treat a line that
+  /// arrives with its CR in one read as a paste.
+  void _sendEnterSoon(TerminalSessionController session) {
+    Future<void>.delayed(TerminalSessionController.composedEnterDelay, () {
+      session.sendKey(TerminalKey.enter);
+    });
   }
 
   Future<void> _openAgentAttention(AgentAttentionController attention) async {
@@ -330,10 +608,45 @@ class _TerminalPageState extends State<TerminalPage> {
         Navigator.of(context).pop();
         _focusNode.requestFocus();
       },
+      onOpenChat: (host, agent) {
+        Navigator.of(context).pop();
+        if (!chatViewAvailable(attention, host)) {
+          // Herdr-only machines have no transcript or prompt relay.
+          unawaited(
+            showChatViewUnavailable(context, attention: attention, host: host),
+          );
+          return;
+        }
+        unawaited(
+          openChatView(
+            context: context,
+            attention: attention,
+            host: host,
+            agent: agent,
+            dictation: _dictation,
+            onOpenTerminal: () => _showAgentTerminal(attention, host, agent),
+          ),
+        );
+      },
     );
     if (mounted) {
       _focusNode.requestFocus();
     }
+  }
+
+  /// After the chat view: show the agent's session and focus its pane.
+  void _showAgentTerminal(
+    AgentAttentionController attention,
+    SavedHost host,
+    AgentInfo agent,
+  ) {
+    if (!mounted) return;
+    final session = widget.workspace.sessions
+        .where((session) => session.host.id == host.id)
+        .firstOrNull;
+    if (session != null) widget.workspace.activate(session);
+    unawaited(attention.focusAgent(host.id, agent));
+    _showTerminal();
   }
 
   Future<void> _openSessionGrid() async {
@@ -398,7 +711,13 @@ class _TerminalPageState extends State<TerminalPage> {
     }
   }
 
-  Future<void> _openLivePreview(TerminalSessionController session) async {
+  /// Opens the host's live preview tab. With [port] (a tapped
+  /// localhost link) the port dialog is skipped and [path] is loaded.
+  Future<void> _openLivePreview(
+    TerminalSessionController session, {
+    int? port,
+    String? path,
+  }) async {
     final verifier = widget.hostKeyVerifier;
     if (verifier == null) {
       return;
@@ -410,6 +729,16 @@ class _TerminalPageState extends State<TerminalPage> {
         .firstOrNull;
     if (existing != null) {
       _fileTabs.activate(existing);
+      final controller = existing.controller;
+      if (port != null &&
+          (controller.remotePort != port ||
+              controller.path !=
+                  LivePreviewController.normalizePath(path ?? '/'))) {
+        controller.setPath(path ?? '/');
+        // Restarting rebinds the local port, which reloads the WebView on
+        // the new path.
+        unawaited(controller.start(port));
+      }
       return;
     }
     final controller = LivePreviewController(
@@ -418,24 +747,30 @@ class _TerminalPageState extends State<TerminalPage> {
       portStore: widget.livePreviewPortStore,
       commandRunner: SshAgentCommandRunner(verifier, host),
     );
-    final initialPort = await controller.suggestedPort();
-    if (!mounted) {
-      controller.dispose();
-      return;
+    final int? chosenPort;
+    if (port != null) {
+      chosenPort = port;
+      controller.setPath(path ?? '/');
+    } else {
+      final initialPort = await controller.suggestedPort();
+      if (!mounted) {
+        controller.dispose();
+        return;
+      }
+      chosenPort = await showLivePreviewPortDialog(
+        context,
+        initialPort: initialPort,
+        detectPorts: controller.detectPorts,
+        hostName: host.name,
+      );
     }
-    final port = await showLivePreviewPortDialog(
-      context,
-      initialPort: initialPort,
-      detectPorts: controller.detectPorts,
-      hostName: host.name,
-    );
-    if (port == null || !mounted) {
+    if (chosenPort == null || !mounted) {
       controller.dispose();
       return;
     }
     controller.attachSession(session, () => session.isConnected);
     _fileTabs.add(LivePreviewTab(host: host, controller: controller));
-    unawaited(controller.start(port));
+    unawaited(controller.start(chosenPort));
   }
 
   Future<void> _changePreviewPort(LivePreviewTab tab) async {
@@ -559,6 +894,23 @@ class _TerminalPageState extends State<TerminalPage> {
                             onNewSession: connectFlow == null
                                 ? null
                                 : () => _openNewSession(connectFlow),
+                            onOpenChatView:
+                                attention == null ||
+                                    activeSession == null ||
+                                    activeSession.host.isLocal
+                                ? null
+                                : () => openChatViewForHost(
+                                    context: context,
+                                    attention: attention,
+                                    host: activeSession.host,
+                                    dictation: _dictation,
+                                    onOpenTerminal: (agent) =>
+                                        _showAgentTerminal(
+                                          attention,
+                                          activeSession.host,
+                                          agent,
+                                        ),
+                                  ),
                             attentionCount: attention?.attentionCount ?? 0,
                             onOpenAgentAttention: showAgents
                                 ? () => _openAgentAttention(attention)
@@ -658,6 +1010,14 @@ class _TerminalPageState extends State<TerminalPage> {
                                         },
                                         onPathTap: (path) =>
                                             _handlePathTap(session, path),
+                                        onLinkTap: (url) =>
+                                            _handleLinkTap(session, url),
+                                        onLinkLongPress: (url, line) =>
+                                            _handleLinkLongPress(
+                                              session,
+                                              url,
+                                              line,
+                                            ),
                                       ),
                                     ),
                                   for (final tab in fileTabs)
@@ -771,6 +1131,12 @@ class _TerminalPageState extends State<TerminalPage> {
                           _focusNode.requestFocus();
                         },
                         onRemoteMouseTrackingActivated: _maybeShowTouchModeHint,
+                        onOpenRecentDirectories:
+                            widget.connectFlow?.recentDirectories == null
+                            ? null
+                            : () => unawaited(
+                                _openRecentDirectories(activeSession),
+                              ),
                         onEnterTmuxScrollMode: () {
                           setState(() => _tmuxScrollMode = true);
                           _focusNode.requestFocus();

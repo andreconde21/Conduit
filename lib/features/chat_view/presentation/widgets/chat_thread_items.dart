@@ -1,0 +1,746 @@
+import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
+import 'package:conduit/features/chat_view/domain/chat_items.dart';
+import 'package:conduit/features/chat_view/domain/chat_tool_summary.dart';
+import 'package:conduit/features/chat_view/presentation/widgets/chat_markdown.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+const _mono = 'monospace';
+
+/// The user's prompt, right-aligned.
+class ChatUserBubble extends StatelessWidget {
+  const ChatUserBubble({required this.item, super.key});
+
+  final ChatUserMessage item;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Align(
+      alignment: Alignment.centerRight,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.sizeOf(context).width * 0.85,
+        ),
+        child: GestureDetector(
+          onLongPress: () => _copy(context, item.text),
+          child: Container(
+            margin: const EdgeInsets.only(left: 40, top: 6, bottom: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+            decoration: BoxDecoration(
+              color: scheme.primaryContainer,
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(16),
+                topRight: Radius.circular(16),
+                bottomLeft: Radius.circular(16),
+                bottomRight: Radius.circular(4),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  item.text,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: scheme.onPrimaryContainer,
+                    fontFamily: item.isCommand ? _mono : null,
+                  ),
+                ),
+                if (item.imageCount > 0) ...[
+                  const SizedBox(height: 6),
+                  _ImageChip(count: item.imageCount),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The agent's reply, full width, rendered as Markdown.
+class ChatAssistantBubble extends StatelessWidget {
+  const ChatAssistantBubble({required this.item, super.key});
+
+  final ChatAssistantText item;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return GestureDetector(
+      onLongPress: () => _copy(context, item.text),
+      child: Padding(
+        padding: const EdgeInsets.only(top: 6, bottom: 6, right: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ChatMarkdown(item.text, style: theme.textTheme.bodyMedium),
+            if (item.truncated)
+              Text(
+                'Message shortened; the full text is in the terminal.',
+                style: theme.textTheme.bodySmall,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class ChatThinkingRow extends StatelessWidget {
+  const ChatThinkingRow({required this.item, super.key});
+
+  final ChatThinking item;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Icon(
+            Icons.psychology_outlined,
+            size: 16,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            item.count > 1 ? 'Thought (${item.count} steps)' : 'Thought',
+            style: theme.textTheme.bodySmall?.copyWith(
+              fontStyle: FontStyle.italic,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class ChatNoticeRow extends StatelessWidget {
+  const ChatNoticeRow({required this.item, super.key});
+
+  final ChatNotice item;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final (icon, color) = switch (item.kind) {
+      ChatNoticeKind.error => (Icons.error_outline_rounded, scheme.error),
+      ChatNoticeKind.interrupted => (
+        Icons.stop_circle_outlined,
+        scheme.onSurfaceVariant,
+      ),
+      ChatNoticeKind.compacted => (
+        Icons.compress_rounded,
+        scheme.onSurfaceVariant,
+      ),
+      ChatNoticeKind.info => (
+        Icons.info_outline_rounded,
+        scheme.onSurfaceVariant,
+      ),
+    };
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          Expanded(child: Divider(color: scheme.outlineVariant)),
+          const SizedBox(width: 8),
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              item.text,
+              style: theme.textTheme.bodySmall?.copyWith(color: color),
+              maxLines: 4,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(child: Divider(color: scheme.outlineVariant)),
+        ],
+      ),
+    );
+  }
+}
+
+/// A compact, expandable card for one tool call. Failures are flagged in
+/// red; Task/Agent calls list their subagent's tool calls inside.
+class ChatToolCard extends StatefulWidget {
+  const ChatToolCard({required this.item, super.key});
+
+  final ChatToolCall item;
+
+  @override
+  State<ChatToolCard> createState() => _ChatToolCardState();
+}
+
+class _ChatToolCardState extends State<ChatToolCard> {
+  bool _expanded = false;
+
+  static IconData iconFor(ChatToolKind kind) => switch (kind) {
+    ChatToolKind.bash => Icons.terminal_rounded,
+    ChatToolKind.edit => Icons.edit_note_rounded,
+    ChatToolKind.write => Icons.note_add_outlined,
+    ChatToolKind.read => Icons.description_outlined,
+    ChatToolKind.search => Icons.search_rounded,
+    ChatToolKind.web => Icons.public_rounded,
+    ChatToolKind.task => Icons.account_tree_outlined,
+    ChatToolKind.other => Icons.build_outlined,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final item = widget.item;
+    final summary = ChatToolSummary.of(item);
+    final failed = item.failed;
+    final border = failed ? scheme.error : scheme.outlineVariant;
+    final exit = summary.exitCode;
+    final status = item.running
+        ? const SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
+        : failed
+        ? Icon(Icons.error_rounded, size: 18, color: scheme.error)
+        : Icon(Icons.check_rounded, size: 18, color: scheme.tertiary);
+    final small = theme.textTheme.bodySmall;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Material(
+        color: failed
+            ? scheme.errorContainer.withValues(alpha: 0.25)
+            : scheme.surfaceContainerLow,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+          side: BorderSide(color: border),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => setState(() => _expanded = !_expanded),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      iconFor(item.kind),
+                      size: 18,
+                      color: failed ? scheme.error : scheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      summary.title,
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        summary.subject,
+                        maxLines: _expanded ? 6 : 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: small?.copyWith(fontFamily: _mono),
+                      ),
+                    ),
+                    if (item.kind == ChatToolKind.bash &&
+                        exit != null &&
+                        exit != 0) ...[
+                      const SizedBox(width: 6),
+                      Text(
+                        'exit $exit',
+                        style: small?.copyWith(
+                          color: scheme.error,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(width: 6),
+                    status,
+                  ],
+                ),
+                if (summary.detail case final detail?)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 26, top: 2),
+                    child: Text(
+                      detail,
+                      style: small,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                if (item.kind == ChatToolKind.task && item.children.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 26, top: 2),
+                    child: Text(
+                      '${item.children.length} tool call'
+                      '${item.children.length == 1 ? '' : 's'}'
+                      '${item.children.any((c) => c.failed) ? ', some failed' : ''}',
+                      style: small,
+                    ),
+                  ),
+                if (summary.diff.isNotEmpty && _expanded)
+                  _DiffPreview(lines: summary.diff),
+                if (summary.resultPreview case final preview?)
+                  if (_expanded || failed || item.kind == ChatToolKind.bash)
+                    _Output(
+                      text: _expanded
+                          ? (item.result?.content ?? preview)
+                          : preview,
+                      error: failed,
+                      maxLines: _expanded ? null : 6,
+                    ),
+                if (_expanded && item.kind == ChatToolKind.task)
+                  for (final child in item.children)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 12),
+                      child: ChatToolCard(item: child),
+                    ),
+                if (item.result case final result? when _expanded) ...[
+                  if (summary.resultPreview == null &&
+                      result.content.trim().isNotEmpty)
+                    _Output(text: result.content, error: failed),
+                  if (result.images > 0) _ImageChip(count: result.images),
+                  if (result.truncated)
+                    Text(
+                      'Output shortened; the rest is in the terminal.',
+                      style: small,
+                    ),
+                ],
+                if (_expanded && item.inputTruncated)
+                  Text('Input shortened by the host.', style: small),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DiffPreview extends StatelessWidget {
+  const _DiffPreview({required this.lines});
+
+  final List<ChatDiffLine> lines;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final style = theme.textTheme.bodySmall?.copyWith(fontFamily: _mono);
+    return Container(
+      margin: const EdgeInsets.only(top: 6),
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final line in lines)
+              Text(
+                '${line.sign} ${line.text}',
+                style: style?.copyWith(
+                  color: switch (line.sign) {
+                    '+' => Colors.green.shade600,
+                    '-' => Colors.red.shade400,
+                    _ => theme.colorScheme.onSurfaceVariant,
+                  },
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Output extends StatelessWidget {
+  const _Output({required this.text, required this.error, this.maxLines});
+
+  final String text;
+  final bool error;
+  final int? maxLines;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      margin: const EdgeInsets.only(top: 6),
+      padding: const EdgeInsets.all(6),
+      constraints: const BoxConstraints(maxHeight: 320),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: SingleChildScrollView(
+        child: Text(
+          text,
+          maxLines: maxLines,
+          overflow: maxLines == null ? null : TextOverflow.ellipsis,
+          style: theme.textTheme.bodySmall?.copyWith(
+            fontFamily: _mono,
+            color: error ? theme.colorScheme.error : null,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ImageChip extends StatelessWidget {
+  const _ImageChip({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return Chip(
+      visualDensity: VisualDensity.compact,
+      avatar: const Icon(Icons.image_outlined, size: 16),
+      label: Text(
+        count == 1 ? 'Image (open the terminal to view)' : '$count images',
+      ),
+    );
+  }
+}
+
+/// TodoWrite as a checklist.
+class ChatTodoCard extends StatelessWidget {
+  const ChatTodoCard({required this.item, super.key});
+
+  final ChatTodoList item;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final done = item.todos
+        .where((t) => t.status == ChatTodoStatus.completed)
+        .length;
+    return _CardShell(
+      icon: Icons.checklist_rounded,
+      title: 'Tasks $done/${item.todos.length}',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final todo in item.todos)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    switch (todo.status) {
+                      ChatTodoStatus.completed => Icons.check_box_rounded,
+                      ChatTodoStatus.inProgress =>
+                        Icons.indeterminate_check_box_outlined,
+                      ChatTodoStatus.pending =>
+                        Icons.check_box_outline_blank_rounded,
+                    },
+                    size: 18,
+                    color: todo.status == ChatTodoStatus.inProgress
+                        ? scheme.primary
+                        : scheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      todo.content,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        decoration: todo.status == ChatTodoStatus.completed
+                            ? TextDecoration.lineThrough
+                            : null,
+                        fontWeight: todo.status == ChatTodoStatus.inProgress
+                            ? FontWeight.w700
+                            : null,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// ExitPlanMode: the plan, rendered, with its status. Approving happens on
+/// the approval card below it when the companion relays the prompt.
+class ChatPlanCard extends StatelessWidget {
+  const ChatPlanCard({required this.item, super.key});
+
+  final ChatPlan item;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final (label, color) = switch (item.status) {
+      ChatPlanStatus.pending => ('Waiting for approval', scheme.primary),
+      ChatPlanStatus.approved => ('Approved', scheme.tertiary),
+      ChatPlanStatus.rejected => ('Not approved', scheme.error),
+    };
+    return _CardShell(
+      icon: Icons.map_outlined,
+      title: 'Plan',
+      trailing: Text(
+        label,
+        style: theme.textTheme.labelMedium?.copyWith(
+          color: color,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ChatMarkdown(item.plan, style: theme.textTheme.bodyMedium),
+          if (item.status == ChatPlanStatus.rejected &&
+              (item.feedback?.trim().isNotEmpty ?? false)) ...[
+            const SizedBox(height: 6),
+            Text(
+              item.feedback!.trim(),
+              style: theme.textTheme.bodySmall?.copyWith(color: scheme.error),
+              maxLines: 4,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// AskUserQuestion: the questions and their options. While unanswered and
+/// the agent waits, each option is a button that types its number into the
+/// terminal menu ([onPick] gets the 1-based number).
+class ChatQuestionCard extends StatelessWidget {
+  const ChatQuestionCard({required this.item, required this.onPick, super.key});
+
+  final ChatQuestion item;
+
+  /// Null when options cannot be picked now (answered, or the agent is not
+  /// waiting on this question).
+  final ValueChanged<int>? onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return _CardShell(
+      icon: Icons.help_outline_rounded,
+      title: item.answered ? 'Question answered' : 'Question',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final question in item.questions) ...[
+            if (question.header case final header?)
+              Text(header, style: theme.textTheme.labelMedium),
+            Text(question.question, style: theme.textTheme.bodyMedium),
+            const SizedBox(height: 6),
+            for (var i = 0; i < question.options.length; i++)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    alignment: Alignment.centerLeft,
+                  ),
+                  onPressed: onPick == null ? null : () => onPick!(i + 1),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('${i + 1}. ${question.options[i].label}'),
+                      if (question.options[i].description case final d?)
+                        Text(d, style: theme.textTheme.bodySmall),
+                    ],
+                  ),
+                ),
+              ),
+            const SizedBox(height: 6),
+          ],
+          if (item.answer case final answer?)
+            Text(
+              answer.trim(),
+              style: theme.textTheme.bodySmall,
+              maxLines: 6,
+              overflow: TextOverflow.ellipsis,
+            )
+          else if (onPick != null && item.questions.length > 1)
+            Text(
+              'Answer the questions in order; each tap picks for the one '
+              'the terminal shows.',
+              style: theme.textTheme.bodySmall,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A permission prompt relayed by the companion, answered in the thread.
+class ChatApprovalCard extends StatelessWidget {
+  const ChatApprovalCard({
+    required this.request,
+    required this.busy,
+    required this.onDecide,
+    super.key,
+  });
+
+  final PendingPermissionRequest request;
+  final bool busy;
+  final ValueChanged<PermissionVerdict> onDecide;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isPlan = request.toolName == 'ExitPlanMode';
+    String label(PermissionVerdict verdict) => switch (verdict) {
+      PermissionVerdict.allow => isPlan ? 'Approve' : 'Allow',
+      PermissionVerdict.deny => isPlan ? 'Keep planning' : 'Deny',
+      PermissionVerdict.always => isPlan ? 'Approve, auto-edit' : 'Always',
+    };
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: scheme.errorContainer.withValues(alpha: 0.3),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: scheme.error),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.shield_outlined, size: 18, color: scheme.error),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  isPlan ? 'Approve the plan?' : 'Allow ${request.toolName}?',
+                  style: theme.textTheme.titleSmall,
+                ),
+              ),
+            ],
+          ),
+          if (!isPlan) ...[
+            const SizedBox(height: 6),
+            Text(
+              request.summary,
+              style: theme.textTheme.bodyMedium?.copyWith(fontFamily: _mono),
+              maxLines: 6,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: busy
+                      ? null
+                      : () => onDecide(PermissionVerdict.deny),
+                  child: Text(label(PermissionVerdict.deny)),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: FilledButton.tonal(
+                  onPressed: busy
+                      ? null
+                      : () => onDecide(PermissionVerdict.always),
+                  child: Text(label(PermissionVerdict.always)),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: FilledButton(
+                  onPressed: busy
+                      ? null
+                      : () => onDecide(PermissionVerdict.allow),
+                  child: Text(label(PermissionVerdict.allow)),
+                ),
+              ),
+            ],
+          ),
+          if (busy)
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: LinearProgressIndicator(),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CardShell extends StatelessWidget {
+  const _CardShell({
+    required this.icon,
+    required this.title,
+    required this.child,
+    this.trailing,
+  });
+
+  final IconData icon;
+  final String title;
+  final Widget child;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 18, color: scheme.onSurfaceVariant),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  title,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              ?trailing,
+            ],
+          ),
+          const SizedBox(height: 6),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+void _copy(BuildContext context, String text) {
+  Clipboard.setData(ClipboardData(text: text));
+  ScaffoldMessenger.maybeOf(context)
+    ?..hideCurrentSnackBar()
+    ..showSnackBar(const SnackBar(content: Text('Copied')));
+}

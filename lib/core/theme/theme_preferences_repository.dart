@@ -26,6 +26,7 @@ class ThemePreferences {
     this.menuButtonsEnabled = true,
     this.terminalGestures = TerminalGesturePreferences.defaults,
     this.speechLanguage = '',
+    this.remoteClipboardEnabled = true,
   });
 
   final ThemeMode themeMode;
@@ -61,6 +62,10 @@ class ThemePreferences {
 
   /// BCP-47 tag dictation listens in; empty means the device locale.
   final String speechLanguage;
+
+  /// Whether text the remote copies with OSC 52 lands on the phone
+  /// clipboard. On by default, like most desktop terminals.
+  final bool remoteClipboardEnabled;
 }
 
 class ThemePreferencesRepository {
@@ -86,6 +91,8 @@ class ThemePreferencesRepository {
   static const _menuButtonsEnabledKey = 'conduit.menu_buttons_enabled.v1';
   static const _terminalGesturesKey = 'conduit.terminal_gestures.v1';
   static const _speechLanguageKey = 'conduit.speech_language.v1';
+  static const _remoteClipboardEnabledKey =
+      'conduit.remote_clipboard_enabled.v1';
 
   final FlutterSecureStorage _storage;
 
@@ -129,6 +136,9 @@ class ThemePreferencesRepository {
     );
     final rawTerminalGestures = await _storage.read(key: _terminalGesturesKey);
     final rawSpeechLanguage = await _storage.read(key: _speechLanguageKey);
+    final rawRemoteClipboardEnabled = await _storage.read(
+      key: _remoteClipboardEnabledKey,
+    );
     final terminalFontSize = double.tryParse(rawTerminalFontSize ?? '');
     final terminalKeyboardRows = _appendUnseenBuiltIns(
       _parseTerminalKeyboardRows(
@@ -173,6 +183,9 @@ class ThemePreferencesRepository {
           rawMenuButtonsEnabled == null || rawMenuButtonsEnabled == 'true',
       terminalGestures: TerminalGesturePreferences.decode(rawTerminalGestures),
       speechLanguage: rawSpeechLanguage?.trim() ?? '',
+      remoteClipboardEnabled:
+          rawRemoteClipboardEnabled == null ||
+          rawRemoteClipboardEnabled == 'true',
     );
   }
 
@@ -252,6 +265,10 @@ class ThemePreferencesRepository {
     await _storage.write(
       key: _speechLanguageKey,
       value: preferences.speechLanguage,
+    );
+    await _storage.write(
+      key: _remoteClipboardEnabledKey,
+      value: preferences.remoteClipboardEnabled.toString(),
     );
   }
 

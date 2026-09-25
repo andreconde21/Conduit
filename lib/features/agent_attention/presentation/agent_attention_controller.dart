@@ -149,6 +149,17 @@ class AgentAttentionController extends ChangeNotifier {
 
   bool isMonitoring(String hostId) => _monitors.containsKey(hostId);
 
+  /// A runner for extra commands on [host] (the chat view): the monitor's
+  /// own connection while [host] is monitored, which the caller must not
+  /// close, else a new one the caller owns (`owned`) and closes.
+  (AgentCommandRunner, {bool owned}) runnerFor(SavedHost host) {
+    final monitor = _monitors[host.id];
+    if (monitor != null) {
+      return (monitor.runner, owned: false);
+    }
+    return (_runnerFactory(host), owned: true);
+  }
+
   AgentHostStatus? statusFor(String hostId) => _monitors[hostId]?.status;
 
   /// Whether a decision for [requestId] is in flight.

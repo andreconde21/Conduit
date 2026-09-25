@@ -7,7 +7,13 @@ import 'package:conduit/features/terminal/presentation/widgets/session_tabs.dart
 import 'package:flutter/material.dart';
 
 /// Actions in the terminal row's overflow menu.
-enum TerminalHeaderAction { reconnect, fullscreen, newSession, closeSession }
+enum TerminalHeaderAction {
+  chatView,
+  reconnect,
+  fullscreen,
+  newSession,
+  closeSession,
+}
 
 /// The terminal's single chrome row (~40 dp): back, the scrollable session
 /// and file tabs, then the session grid, the agents badge and an overflow
@@ -30,6 +36,7 @@ class TerminalHeader extends StatelessWidget {
     this.onReconnect,
     this.onToggleFullscreen,
     this.onNewSession,
+    this.onOpenChatView,
     this.attentionCount = 0,
     this.onOpenAgentAttention,
     this.actions = const [],
@@ -61,6 +68,10 @@ class TerminalHeader extends StatelessWidget {
 
   /// Opens a new session through the connect flow; null hides the entry.
   final VoidCallback? onNewSession;
+
+  /// Opens the chat view of the active session's Claude agent; null hides
+  /// the entry.
+  final VoidCallback? onOpenChatView;
 
   /// Number of monitored agents currently needing attention (badge).
   final int attentionCount;
@@ -139,6 +150,7 @@ class TerminalHeader extends StatelessWidget {
               onReconnect: onReconnect,
               onToggleFullscreen: onToggleFullscreen,
               onNewSession: onNewSession,
+              onOpenChatView: onOpenChatView,
               onClose: session == null
                   ? null
                   : () async {
@@ -191,6 +203,7 @@ class _OverflowMenu extends StatelessWidget {
     required this.onToggleFullscreen,
     required this.onNewSession,
     required this.onClose,
+    this.onOpenChatView,
   });
 
   final TerminalSessionController? session;
@@ -199,6 +212,7 @@ class _OverflowMenu extends StatelessWidget {
   final VoidCallback? onToggleFullscreen;
   final VoidCallback? onNewSession;
   final VoidCallback? onClose;
+  final VoidCallback? onOpenChatView;
 
   @override
   Widget build(BuildContext context) {
@@ -215,6 +229,7 @@ class _OverflowMenu extends StatelessWidget {
         padding: EdgeInsets.zero,
       ),
       onSelected: (action) => switch (action) {
+        TerminalHeaderAction.chatView => onOpenChatView?.call(),
         TerminalHeaderAction.reconnect => onReconnect?.call(),
         TerminalHeaderAction.fullscreen => onToggleFullscreen?.call(),
         TerminalHeaderAction.newSession => onNewSession?.call(),
@@ -248,6 +263,11 @@ class _OverflowMenu extends StatelessWidget {
                   ),
                 ],
               ),
+            ),
+          if (onOpenChatView != null)
+            const PopupMenuItem(
+              value: TerminalHeaderAction.chatView,
+              child: _MenuRow(Icons.forum_outlined, 'Open chat view'),
             ),
           if (onReconnect != null)
             const PopupMenuItem(

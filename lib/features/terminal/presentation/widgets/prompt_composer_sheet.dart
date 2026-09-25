@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:conduit/features/terminal/domain/prompt_image.dart';
 import 'package:conduit/features/voice/presentation/dictation_button.dart';
 import 'package:conduit/features/voice/presentation/dictation_controller.dart';
 import 'package:flutter/material.dart';
@@ -34,6 +37,7 @@ Future<void> showPromptComposerSheet({
   required bool Function() isConnected,
   bool Function()? bracketedPasteSupported,
   DictationController? dictation,
+  PromptImageAttacher? imageAttacher,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -48,6 +52,7 @@ Future<void> showPromptComposerSheet({
       isConnected: isConnected,
       bracketedPasteSupported: bracketedPasteSupported,
       dictation: dictation,
+      imageAttacher: imageAttacher,
     ),
   );
 }
@@ -62,6 +67,7 @@ class PromptComposerSheet extends StatefulWidget {
     required this.isConnected,
     this.bracketedPasteSupported,
     this.dictation,
+    this.imageAttacher,
     super.key,
   });
 
@@ -76,6 +82,10 @@ class PromptComposerSheet extends StatefulWidget {
   /// Voice input; null hides the mic (no recognizer on this platform).
   final DictationController? dictation;
 
+  /// Attaches images (gallery, camera, clipboard) by uploading them to the
+  /// host and inserting the remote path; null hides the image button.
+  final PromptImageAttacher? imageAttacher;
+
   @override
   State<PromptComposerSheet> createState() => _PromptComposerSheetState();
 }
@@ -85,6 +95,7 @@ class _PromptComposerSheetState extends State<PromptComposerSheet> {
   final _focusNode = FocusNode();
   late bool _submitEnter;
   bool _sending = false;
+  bool _attaching = false;
   String? _error;
 
   @override
@@ -172,6 +183,61 @@ class _PromptComposerSheetState extends State<PromptComposerSheet> {
     _focusNode.requestFocus();
   }
 
+  Future<void> _attachImage(PromptImageOrigin origin) async {
+    final attacher = widget.imageAttacher;
+    if (attacher == null || _attaching || _sending) {
+      return;
+    }
+    setState(() {
+      _attaching = true;
+      _error = null;
+    });
+    try {
+      final picked = await attacher.source.pick(origin);
+      if (!mounted) {
+        return;
+      }
+      if (picked == null) {
+        if (origin == PromptImageOrigin.clipboard) {
+          _showError('There is no image on the clipboard.');
+        }
+        return;
+      }
+      final crop = await attacher.crop(picked);
+      if (!mounted || crop == null) {
+        return;
+      }
+      final prepared = await attacher.prepare(picked, crop);
+      final remotePath = await attacher.upload(prepared);
+      if (!mounted) {
+        return;
+      }
+      final value = _controller.value;
+      final selection = value.selection;
+      final start = selection.isValid ? selection.start : value.text.length;
+      final end = selection.isValid ? selection.end : value.text.length;
+      final inserted = insertPromptImagePath(
+        value.text,
+        start,
+        end,
+        remotePath,
+      );
+      _controller.value = TextEditingValue(
+        text: inserted.text,
+        selection: TextSelection.collapsed(offset: inserted.cursor),
+      );
+      _focusNode.requestFocus();
+    } catch (error) {
+      if (mounted) {
+        _showError('Could not attach the image: $error');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _attaching = false);
+      }
+    }
+  }
+
   void _selectAll() {
     _controller.selection = TextSelection(
       baseOffset: 0,
@@ -226,8 +292,16 @@ class _PromptComposerSheetState extends State<PromptComposerSheet> {
             children: [
               Row(
                 children: [
-                  Text('Chat mode', style: theme.textTheme.titleMedium),
-                  const Spacer(),
+                  // Five icon buttons fit a 360 dp phone only when the
+                  // title may shrink.
+                  Expanded(
+                    child: Text(
+                      'Chat mode',
+                      style: theme.textTheme.titleMedium,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                   if (widget.dictation != null)
                     DictationButton(
                       controller: widget.dictation!,
@@ -236,6 +310,48 @@ class _PromptComposerSheetState extends State<PromptComposerSheet> {
                       enabled: !_sending,
                       onMessage: _showError,
                     ),
+                  if (widget.imageAttacher != null)
+                    _attaching
+                        ? const Padding(
+                            padding: EdgeInsets.all(12),
+                            child: SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          )
+                        : PopupMenuButton<PromptImageOrigin>(
+                            tooltip: 'Attach image',
+                            icon: const Icon(
+                              Icons.add_photo_alternate_outlined,
+                            ),
+                            enabled: !_sending,
+                            onSelected: (origin) =>
+                                unawaited(_attachImage(origin)),
+                            itemBuilder: (context) => const [
+                              PopupMenuItem(
+                                value: PromptImageOrigin.gallery,
+                                child: ListTile(
+                                  leading: Icon(Icons.photo_library_outlined),
+                                  title: Text('Gallery'),
+                                ),
+                              ),
+                              PopupMenuItem(
+                                value: PromptImageOrigin.camera,
+                                child: ListTile(
+                                  leading: Icon(Icons.photo_camera_outlined),
+                                  title: Text('Camera'),
+                                ),
+                              ),
+                              PopupMenuItem(
+                                value: PromptImageOrigin.clipboard,
+                                child: ListTile(
+                                  leading: Icon(Icons.content_paste_go_rounded),
+                                  title: Text('Paste image'),
+                                ),
+                              ),
+                            ],
+                          ),
                   IconButton(
                     tooltip: 'Paste clipboard',
                     icon: const Icon(Icons.content_paste_rounded),
