@@ -178,7 +178,10 @@ async function transcriptCmd (args) {
   if (!file) return fail('no transcript recorded for this session yet (it appears with the next hook event)')
   if (!path.isAbsolute(file) || !file.endsWith('.jsonl')) return fail('transcript path is not an absolute .jsonl file')
   try {
-    return out({ sessionId, ...transcript.readTranscript(file, opts) })
+    const a = found.agent
+    // The agent's live status rides along so one poll refreshes the whole view.
+    const agent = { name: a.name, state: a.state, lastMessage: a.lastMessage, startedAt: a.startedAt, updatedAt: a.updatedAt, endedAt: a.endedAt, pending: a.pending || [] }
+    return out({ sessionId, agent, ...transcript.readTranscript(file, opts) })
   } catch (err) {
     if (err.code === 'ENOENT') return fail(`transcript not found: ${file}`)
     return fail(`cannot read transcript: ${err.message}`)

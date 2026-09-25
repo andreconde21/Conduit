@@ -184,7 +184,9 @@ Prints `{"ok":true,"via":"tmux","target":"main:2","paneId":"%5"}`.
 Reads the session's Claude Code transcript (JSONL) for the phone's chat view.
 
 ```json
-{"sessionId":"0f2c…","offset":183422,"size":183422,"start":0,"skipped":0,"entries":[
+{"sessionId":"0f2c…","offset":183422,"size":183422,"start":0,"skipped":0,
+ "agent":{"name":"Foo","state":"working","lastMessage":null,"startedAt":1790286139217,"updatedAt":1790286139530,"endedAt":null,"pending":[]},
+ "entries":[
   {"type":"user","uuid":"u1","parentUuid":null,"timestamp":"2026-09-25T10:00:00.000Z","isSidechain":false,
    "message":{"role":"user","content":"fix the failing test"}},
   {"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"…","isSidechain":false,
@@ -199,6 +201,8 @@ Reads the session's Claude Code transcript (JSONL) for the phone's chat view.
 ]}
 ```
 
+* `agent` is the session's live status (fields as in `status`, `pending`
+  included), so one poll refreshes both the thread and the header.
 * Without `--since` it returns the last `--tail-bytes` (default: `--max-bytes`)
   of the file; `start` is the byte offset of the first line returned, so
   `--before <start>` pages backwards (it returns the whole lines in the

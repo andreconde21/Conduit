@@ -87,6 +87,8 @@ test('transcript returns whole lines and the offset of the partial one', async (
   const r = await cli(['transcript', 'tm'])
   assert.equal(r.code, 0)
   assert.equal(r.json.sessionId, 'tm')
+  assert.equal(r.json.agent.state, 'waiting_input')
+  assert.deepEqual(r.json.agent.pending, [])
   assert.deepEqual(r.json.entries.map(e => e.uuid), ['u1', 'a1'])
   const whole = fs.readFileSync(transcriptFile, 'utf8').lastIndexOf('\n') + 1
   assert.equal(r.json.offset, whole)
