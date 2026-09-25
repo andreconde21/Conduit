@@ -159,6 +159,35 @@ class HostsController extends ChangeNotifier {
     }
   }
 
+  /// Replaces the saved machines with [hosts] (device sync). Unlike
+  /// [mergeImported], machines missing from [hosts] are removed. The sort
+  /// mode and manual order change only when given.
+  Future<void> replaceAll(
+    List<SavedHost> hosts, {
+    HostListSortMode? sortMode,
+    List<String>? manualOrder,
+  }) async {
+    _errorMessage = null;
+    try {
+      await _repository.saveHosts(hosts);
+      if (sortMode != null && sortMode != _sortMode) {
+        await _repository.saveSortMode(sortMode);
+        _sortMode = sortMode;
+      }
+      if (manualOrder != null) {
+        await _repository.saveManualOrder(manualOrder);
+        _manualOrder = List.of(manualOrder);
+      }
+      _setHosts(List.unmodifiable(hosts));
+    } on AppFailure catch (failure) {
+      _errorMessage = failure.toString();
+    } catch (error) {
+      _errorMessage = error.toString();
+    } finally {
+      notifyListeners();
+    }
+  }
+
   Future<void> remove(SavedHost host) async {
     await _save(
       _hosts.where((currentHost) => currentHost.id != host.id).toList(),

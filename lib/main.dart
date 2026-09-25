@@ -47,6 +47,11 @@ import 'package:conduit/features/share_target/data/sftp_share_uploader.dart';
 import 'package:conduit/features/share_target/presentation/share_target_controller.dart';
 import 'package:conduit/features/share_target/presentation/share_target_host.dart';
 import 'package:conduit/features/share_target/presentation/share_target_scope.dart';
+import 'package:conduit/features/sync/data/app_local_sync_store.dart';
+import 'package:conduit/features/sync/data/ssh_sync_hub.dart';
+import 'package:conduit/features/sync/data/sync_state_store.dart';
+import 'package:conduit/features/sync/presentation/sync_controller.dart';
+import 'package:conduit/features/sync/presentation/sync_scope.dart';
 import 'package:conduit/features/terminal/data/connectivity_plus_network.dart';
 import 'package:conduit/features/terminal/data/dart_ssh_terminal_repository.dart';
 import 'package:conduit/features/terminal/data/mosh_terminal_repository.dart';
@@ -148,11 +153,6 @@ void main() {
     agentAttention,
     channel: PlatformAgentStatusWidgetChannel.instance,
   ).start();
-  final backupService = AppBackupService(
-    hostsController: hostsController,
-    themeController: themeController,
-    hostKeyVerifier: hostKeyVerifier,
-  );
   const fileExport = FilePickerFileExport();
   final shareTarget = ShareTargetController(
     source: PlatformShareTargetSource(),
@@ -200,6 +200,53 @@ void main() {
   themeController.addListener(
     () => sessionRestore.enabled = themeController.restoreSessionsOnLaunch,
   );
+  // This device's data as sync records: file backups and device sync
+  // (Settings › Sync) read and write the app through it.
+  final localSyncStore = AppLocalSyncStore(
+    hosts: hostsController,
+    theme: themeController,
+    hostKeys: hostKeyVerifier,
+    connectPreferences: const SecureJsonMapStore(
+      secureStorage,
+      SecureConnectPreferencesRepository.storageKey,
+    ),
+    recentDirectoriesStore: const SecureJsonMapStore(
+      secureStorage,
+      SecureRecentDirectoriesStore.storageKey,
+    ),
+    recentDirectories: recentDirectories,
+    sessions: const SecureSessionSnapshotRepository(secureStorage),
+    ready: themeLoaded,
+  );
+  final backupService = AppBackupService(
+    hostsController: hostsController,
+    themeController: themeController,
+    hostKeyVerifier: hostKeyVerifier,
+    localStore: localSyncStore,
+  );
+  // Settings › Sync: this device's data, end-to-end encrypted, through
+  // one saved machine (the hub) over the same SSH/SFTP stack.
+  final syncController = SyncController(
+    state: const SecureSyncStateStore(secureStorage),
+    local: localSyncStore,
+    hubFactory: (host, deviceId) => SshSyncHub(
+      host: host,
+      runner: SshAgentCommandRunner(hostKeyVerifier, host),
+      sftp: sftpRepository,
+      deviceId: deviceId,
+    ),
+    hosts: hostsController,
+    hostKeys: hostKeyVerifier,
+    changeSources: [
+      hostsController,
+      themeController,
+      recentDirectories,
+      sessionRestore,
+    ],
+    platform: defaultTargetPlatform.name,
+    defaultDeviceName: defaultSyncDeviceName(),
+  );
+  unawaited(themeLoaded.then((_) => syncController.start()));
   unawaited(shareTarget.start());
 
   // "Open Claude sessions in" and the per-session choices, for every page.
@@ -209,30 +256,33 @@ void main() {
   loadSessionViews(sessionViews);
 
   runApp(
-    VoiceSettingsScope(
-      settings: themeController,
-      child: SessionViewScope(
-        controller: sessionViews,
-        child: CompanionSetupScope(
-          controller: companionSetup,
-          agentAttention: agentAttention,
-          child: ConduitApp(
-            themeController: themeController,
-            lockController: lockController,
-            hostsController: hostsController,
-            terminalRepository: terminalRepository,
-            workspaceController: workspaceController,
-            localShellController: localShellController,
-            hostKeyVerifier: hostKeyVerifier,
-            promptCoordinator: promptCoordinator,
-            sftpRepository: sftpRepository,
-            sftpBookmarksRepository: sftpBookmarksRepository,
+    SyncScope(
+      controller: syncController,
+      child: VoiceSettingsScope(
+        settings: themeController,
+        child: SessionViewScope(
+          controller: sessionViews,
+          child: CompanionSetupScope(
+            controller: companionSetup,
             agentAttention: agentAttention,
-            backupService: backupService,
-            fileExport: fileExport,
-            connectFlow: connectFlow,
-            shareTarget: shareTarget,
-            sessionRestore: sessionRestore,
+            child: ConduitApp(
+              themeController: themeController,
+              lockController: lockController,
+              hostsController: hostsController,
+              terminalRepository: terminalRepository,
+              workspaceController: workspaceController,
+              localShellController: localShellController,
+              hostKeyVerifier: hostKeyVerifier,
+              promptCoordinator: promptCoordinator,
+              sftpRepository: sftpRepository,
+              sftpBookmarksRepository: sftpBookmarksRepository,
+              agentAttention: agentAttention,
+              backupService: backupService,
+              fileExport: fileExport,
+              connectFlow: connectFlow,
+              shareTarget: shareTarget,
+              sessionRestore: sessionRestore,
+            ),
           ),
         ),
       ),
