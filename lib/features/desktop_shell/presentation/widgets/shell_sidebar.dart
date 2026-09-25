@@ -1,3 +1,4 @@
+import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/app_theme.dart';
@@ -493,6 +494,9 @@ class _ShellSidebarState extends State<ShellSidebar> {
       onAcceptWithDetails: (details) => _drop(row, details.data),
       builder: (context, candidates, _) => Draggable<SidebarDrag>(
         data: drag,
+        // With touch (tablets) a vertical drag scrolls the list: rows
+        // start moving on a sideways drag.
+        affinity: PlatformFeatures.isDesktop ? null : Axis.horizontal,
         dragAnchorStrategy: pointerDragAnchorStrategy,
         feedback: _RowFeedback(label: node.label),
         childWhenDragging: Opacity(opacity: 0.4, child: tile),

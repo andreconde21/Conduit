@@ -1,3 +1,4 @@
+import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/desktop_shell/domain/shell_layout.dart';
@@ -280,6 +281,9 @@ class _ShellTabState extends State<_ShellTab> {
       waitDuration: const Duration(milliseconds: 700),
       child: Draggable<ShellViewDrag>(
         data: ShellViewDrag(tab.viewId, tab.label),
+        // With touch (tablets) a sideways drag scrolls the strip: tabs
+        // are pulled down into the panes.
+        affinity: PlatformFeatures.isDesktop ? null : Axis.vertical,
         dragAnchorStrategy: pointerDragAnchorStrategy,
         feedback: _DragFeedback(label: tab.label, leading: tab.leading),
         childWhenDragging: Opacity(opacity: 0.45, child: chip),
