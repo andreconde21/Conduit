@@ -185,6 +185,26 @@ void main() {
         await chord(LogicalKeyboardKey.controlLeft, LogicalKeyboardKey.keyA);
         await chord(LogicalKeyboardKey.controlLeft, LogicalKeyboardKey.keyV);
         await chord(LogicalKeyboardKey.altLeft, LogicalKeyboardKey.keyB);
+        // Ctrl+K reaches the shell; Ctrl+Shift+K is the quick switcher.
+        await chord(LogicalKeyboardKey.controlLeft, LogicalKeyboardKey.keyK);
+        await tester.sendKeyDownEvent(
+          LogicalKeyboardKey.controlLeft,
+          platform: 'linux',
+        );
+        await chord(LogicalKeyboardKey.shiftLeft, LogicalKeyboardKey.keyK);
+        await tester.sendKeyUpEvent(
+          LogicalKeyboardKey.controlLeft,
+          platform: 'linux',
+        );
+        await tester.pumpAndSettle();
+        if (find.byType(TextField).evaluate().isNotEmpty) {
+          // Close the switcher again so the remaining keys hit the terminal.
+          await tester.sendKeyEvent(
+            LogicalKeyboardKey.escape,
+            platform: 'linux',
+          );
+          await tester.pumpAndSettle();
+        }
         await tester.sendKeyEvent(
           LogicalKeyboardKey.arrowUp,
           platform: 'linux',
@@ -193,7 +213,7 @@ void main() {
         await tester.sendKeyEvent(LogicalKeyboardKey.escape, platform: 'linux');
         await tester.pump();
 
-        expect(sent(session), '\x03\x01\x16\x1bb\x1b[A\x1b[15~\x1b');
+        expect(sent(session), '\x03\x01\x16\x1bb\x0b\x1b[A\x1b[15~\x1b');
       },
       variant: TargetPlatformVariant.only(TargetPlatform.linux),
     );

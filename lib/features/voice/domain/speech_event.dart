@@ -17,6 +17,11 @@ sealed class SpeechEvent {
           'ended' => const SpeechEnded(),
           _ => null,
         };
+      case 'level':
+        final value = raw['value'];
+        return value is num
+            ? SpeechLevel(value.toDouble().clamp(0.0, 1.0))
+            : null;
       case 'partial':
         final text = raw['text'];
         return text is String ? SpeechPartial(text) : null;
@@ -50,6 +55,14 @@ class SpeechEnded extends SpeechEvent {
   const SpeechEnded();
 }
 
+/// Input loudness, 0 (silence) to 1, a few times a second while
+/// listening; drives the mic's pulse.
+class SpeechLevel extends SpeechEvent {
+  const SpeechLevel(this.value);
+
+  final double value;
+}
+
 /// A provisional transcript that later partials or the result replace.
 class SpeechPartial extends SpeechEvent {
   const SpeechPartial(this.text);
@@ -72,6 +85,8 @@ class SpeechError extends SpeechEvent {
   final int code;
   final String message;
 
+  static const int client = 5;
+  static const int busy = 8;
   static const int noMatch = 7;
   static const int speechTimeout = 6;
   static const int insufficientPermissions = 9;

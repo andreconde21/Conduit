@@ -95,7 +95,8 @@ void main() {
         ]);
       },
       sftpRepository: NoNetworkSftpRepository(),
-      loadBundle: () async => const CompanionBundle(version: '0', files: {}),
+      loadBundle: () async =>
+          CompanionBundle(version: '0', archive: Uint8List(0)),
     );
     addTearDown(controller.dispose);
     await tester.pumpWidget(

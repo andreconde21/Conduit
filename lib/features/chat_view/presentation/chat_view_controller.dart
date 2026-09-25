@@ -49,6 +49,7 @@ class ChatViewController extends ChangeNotifier {
     Listenable? agentChanges,
     bool ownsRunner = false,
     Duration pollInterval = const Duration(milliseconds: 1500),
+    Duration? workingPollInterval,
     int tailBytes = ConductoreChatClient.defaultTailBytes,
   }) : _runner = runner,
        _client = ConductoreChatClient(runner),
@@ -56,6 +57,9 @@ class ChatViewController extends ChangeNotifier {
        _agentChanges = agentChanges,
        _ownsRunner = ownsRunner,
        _pollInterval = pollInterval,
+       _workingPollInterval =
+           workingPollInterval ??
+           Duration(microseconds: pollInterval.inMicroseconds * 2 ~/ 3),
        _tailBytes = tailBytes {
     _agentChanges?.addListener(_onAgentChanged);
   }
@@ -71,6 +75,11 @@ class ChatViewController extends ChangeNotifier {
   final Listenable? _agentChanges;
   final bool _ownsRunner;
   final Duration _pollInterval;
+
+  /// Faster cadence while the agent works, so the live activity label
+  /// keeps up (1 s by default).
+  final Duration _workingPollInterval;
+  Duration? _timerInterval;
   final int _tailBytes;
 
   /// Upper bound on follow-up reads in one poll while catching up with a
@@ -185,10 +194,29 @@ class ChatViewController extends ChangeNotifier {
     _visible = visible;
     _timer?.cancel();
     _timer = null;
+    _timerInterval = null;
     if (visible && _unsupported == null) {
-      _timer = Timer.periodic(_pollInterval, (_) => unawaited(refresh()));
+      _retime();
       unawaited(refresh());
     }
+  }
+
+  /// Polls every second while the agent works, at the idle pace otherwise.
+  void _retime() {
+    if (!_visible || _unsupported != null || _disposed) {
+      return;
+    }
+    final activity = this.activity;
+    final interval =
+        activity == ChatActivity.working || activity == ChatActivity.thinking
+        ? _workingPollInterval
+        : _pollInterval;
+    if (_timer != null && _timerInterval == interval) {
+      return;
+    }
+    _timer?.cancel();
+    _timerInterval = interval;
+    _timer = Timer.periodic(interval, (_) => unawaited(refresh()));
   }
 
   /// Reads whatever is new now. Concurrent calls share one read; a call
@@ -243,6 +271,7 @@ class ChatViewController extends ChangeNotifier {
         }
         _error = null;
         _loading = false;
+        _retime();
         notifyListeners();
         reads += 1;
         if (page.offset >= page.size ||
@@ -352,6 +381,8 @@ class ChatViewController extends ChangeNotifier {
       if (agent != null) {
         _agent = ChatAgentStatus(
           state: agent.pending.length > 1 ? agent.state : 'working',
+          lastEvent: agent.lastEvent,
+          lastToolName: agent.lastToolName,
           name: agent.name,
           lastMessage: agent.lastMessage,
           startedAt: agent.startedAt,

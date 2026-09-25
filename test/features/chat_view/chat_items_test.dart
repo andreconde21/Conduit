@@ -243,14 +243,14 @@ void main() {
     ]);
     expect(items.map((i) => i.runtimeType), [
       ChatUserMessage,
-      ChatUserMessage,
+      ChatShellCommand,
       ChatNotice,
       ChatNotice,
       ChatUserMessage,
     ]);
     expect((items[0] as ChatUserMessage).text, '/review 123');
     expect((items[0] as ChatUserMessage).isCommand, isTrue);
-    expect((items[1] as ChatUserMessage).text, '! ls');
+    expect((items[1] as ChatShellCommand).command, 'ls');
     expect((items[2] as ChatNotice).kind, ChatNoticeKind.interrupted);
     expect((items[3] as ChatNotice).kind, ChatNoticeKind.compacted);
     expect((items[4] as ChatUserMessage).imageCount, 1);

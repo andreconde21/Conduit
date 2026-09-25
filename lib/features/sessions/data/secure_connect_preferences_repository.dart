@@ -9,7 +9,10 @@ class SecureConnectPreferencesRepository
     implements ConnectPreferencesRepository {
   const SecureConnectPreferencesRepository(this._storage);
 
-  static const _key = 'conduit.connect_preferences.v1';
+  /// The storage entry (one JSON object keyed by host id), read and
+  /// written whole by device sync.
+  static const storageKey = 'conduit.connect_preferences.v1';
+  static const _key = storageKey;
 
   final FlutterSecureStorage _storage;
 

@@ -107,6 +107,23 @@ class TerminalGesturesSettings extends StatelessWidget {
                 update(preferences.copyWith(twoFingerScroll: value)),
           ),
           const Divider(height: 1),
+          SwitchListTile(
+            key: const ValueKey('drag-scrolls-remote'),
+            secondary: const Icon(Icons.mouse_rounded),
+            title: const Text('Drag scrolls the remote app (mouse wheel)'),
+            subtitle: Text(
+              'In full-screen programs (Claude Code, Herdr, tmux, vim, htop) '
+              'a one-finger drag up or down scrolls the program itself, like '
+              'a mouse wheel on a desktop. tmux without mouse support opens '
+              'copy mode; tap to leave it. Off: the drag only scrolls the '
+              "app's own history.",
+              style: captionStyle,
+            ),
+            value: preferences.dragScrollsRemote,
+            onChanged: (value) =>
+                update(preferences.copyWith(dragScrollsRemote: value)),
+          ),
+          const Divider(height: 1),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
             child: Align(
@@ -161,10 +178,9 @@ class TerminalGesturesSettings extends StatelessWidget {
           const Divider(height: 1),
           SwitchListTile(
             secondary: const Icon(Icons.grid_view_rounded),
-            title: const Text('Swipe down opens sessions'),
+            title: const Text('Top-row swipes switch sessions'),
             subtitle: Text(
-              'Swipe down from the top of the terminal to open the session '
-              'grid.',
+              'Swipe down from the top to open the quick switcher.',
               style: captionStyle,
             ),
             value: preferences.headerSwipeOpensSessions,

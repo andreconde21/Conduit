@@ -27,10 +27,12 @@ class CompanionInstallOutcome {
 
 /// Installs the bundled companion on a machine:
 ///
-/// 1. uploads the bundle over SFTP to
+/// 1. uploads the bundled archive (`companion.tar.gz`) over SFTP to
 ///    `~/.local/share/conductore-src/<version>/`;
-/// 2. runs `sh <that dir>/install.sh` (or `--uninstall`) over the exec
-///    channel, which copies it to `~/.local/share/conductore`, links
+/// 2. over the exec channel, unpacks it there with `tar -xzf`, checks the
+///    unpacked files against the manifest's sha256 sums (when the host has
+///    `sha256sum` or `shasum`) and runs `sh install.sh` (or `--uninstall`),
+///    which copies it to `~/.local/share/conductore`, links
 ///    `~/.local/bin/conductore-{hostd,hook}` and runs
 ///    `conductore-hostd install` to merge the hooks into
 ///    `~/.claude/settings.json`.
@@ -77,7 +79,8 @@ class CompanionInstaller {
 
     final bundle = await loadBundle();
     say(
-      'Uploading companion ${bundle.version} (${bundle.files.length} files)…',
+      'Uploading companion ${bundle.version} '
+      '(${bundle.checksums.length} files, ${_kilobytes(bundle.archive.length)})…',
     );
     final session = await sftpRepository.connect(host);
     String directory;
@@ -85,10 +88,7 @@ class CompanionInstaller {
       final home = await session.resolve('.');
       directory = '$home/${uploadDirectory(bundle.version)}';
       final mkdir = await runner.run(
-        CompanionCommands.makeDirectories([
-          directory,
-          for (final dir in bundle.directories) '$directory/$dir',
-        ]),
+        CompanionCommands.makeDirectories([directory]),
         timeout: const Duration(seconds: 20),
       );
       if (mkdir.exitCode != 0) {
@@ -100,22 +100,28 @@ class CompanionInstaller {
           ].where((s) => s.isNotEmpty).join('\n'),
         );
       }
-      for (final entry in bundle.files.entries) {
-        final bytes = entry.value;
-        await session.write(
-          '$directory/${entry.key}',
-          Stream<Uint8List>.value(bytes),
-          bytes.length,
-        );
-      }
+      await session.write(
+        '$directory/${bundle.archiveName}',
+        Stream<Uint8List>.value(bundle.archive),
+        bundle.archive.length,
+      );
       say('Uploaded to $directory');
     } finally {
       await session.close();
     }
 
-    say(uninstall ? 'Running install.sh --uninstall…' : 'Running install.sh…');
+    say(
+      uninstall
+          ? 'Unpacking and running install.sh --uninstall…'
+          : 'Unpacking and running install.sh…',
+    );
     final result = await runner.run(
-      CompanionCommands.runInstaller(directory, uninstall: uninstall),
+      CompanionCommands.unpackAndInstall(
+        directory,
+        archive: bundle.archiveName,
+        checksumLines: bundle.checksumLines,
+        uninstall: uninstall,
+      ),
       timeout: installTimeout,
     );
     for (final line in [
@@ -138,3 +144,5 @@ class CompanionInstaller {
     );
   }
 }
+
+String _kilobytes(int bytes) => '${(bytes / 1024).ceil()} KB';

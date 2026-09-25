@@ -28,6 +28,9 @@ abstract final class PlatformFeatures {
   /// On-device dictation (`conduit/speech`).
   static bool get dictation => _android;
 
+  /// On-device text-to-speech for Chat View replies (`conduit/tts`).
+  static bool get textToSpeech => _android;
+
   /// Receiving text and files from the system share sheet
   /// (`conduit/share_target`).
   static bool get shareTarget => _android;

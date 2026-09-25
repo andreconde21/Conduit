@@ -21,6 +21,18 @@ class PlatformPromptImageSource implements PromptImageSource {
 
   final ImagePicker _picker;
 
+  /// Whether the clipboard holds an image, without copying it (for
+  /// showing a "Paste image" action). False where the bridge is missing.
+  static Future<bool> clipboardHasImage() async {
+    try {
+      return await _clipboardChannel.invokeMethod<bool>('hasImage') ?? false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
   @override
   Future<SharedFile?> pick(PromptImageOrigin origin) async {
     switch (origin) {

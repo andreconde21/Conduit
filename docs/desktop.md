@@ -86,6 +86,9 @@ Windows `.ico`, the macOS AppIcon set and the Linux window icon).
   sequences, including modifiers.
 - **Copy and paste.** Ctrl+Shift+C and Ctrl+Shift+V (or Shift+Insert) on
   Linux and Windows. Cmd+C, Cmd+V and Cmd+A on macOS.
+- **Quick switcher.** Ctrl+Shift+K (Cmd+K on macOS) opens it from the home
+  screen and the terminal. The key never reaches the shell; plain Ctrl+K
+  does.
 - **Mouse.** Drag to select, and use the wheel to scroll back. The phone
   swipe gestures only react to touch, so a mouse drag never switches tmux
   windows.
@@ -110,7 +113,10 @@ Windows `.ico`, the macOS AppIcon set and the Linux window icon).
 | Attach image to a prompt | file picker | file picker | file picker | image_picker's desktop implementations pick files. No camera |
 | Hardware security keys (`sk-` SSH keys) | no | no | no | FIDO runs over NFC (flutter_nfc_kit) or Android USB. Use a regular OpenSSH key on desktop. Connecting with an `sk-` key says so |
 | Local shell | no | no | no | The local shell section is Android's proot Linux (arm64 binaries). flutter_pty works on all three desktops, so a native local terminal running the user's shell is the natural follow-up |
-| Dictation, read-aloud | no | no | no | Android `conduit/speech` channel |
+| Dictation, read-aloud (Talk) | no | no | no | Android `conduit/speech` and `conduit/tts` channels |
+| Live preview screenshot to Claude | no | no | yes | Needs the embedded page. Android uses PixelCopy |
+| Paste a clipboard image as a file | no | no | no | Android `conduit/clipboard_image` bridge. Paste falls back to text |
+| Sync setup | paste code | paste code | paste code | The QR scanner (mobile_scanner) is phone-only. Desktops paste the setup code |
 | Share target, home widget, Quick Settings tile, notification Allow/Deny, clipboard images, background keep-alive | no | no | no | Android platform channels (MainActivity). `PlatformFeatures` hides them |
 | Keep screen on, network change reconnect | yes | yes | yes | wakelock_plus, connectivity_plus (NetworkManager on Linux) |
 

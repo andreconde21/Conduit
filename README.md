@@ -102,8 +102,11 @@ Both are first-class: everything below works for Herdr and for tmux.
 - Host key trust you review and manage yourself.
 - Works over Tailscale like any other network: point a host at its tailnet
   name or IP.
-- Encrypted or secret-free backups of settings, machines and trusted keys, and
-  an optional device-auth app lock.
+- Device sync through one of your own machines, end-to-end encrypted, no
+  cloud: saved machines, snippets, settings and the session list; add a
+  device with a QR code and six words ([docs/sync.md](docs/sync.md)).
+- Encrypted backups of settings, machines and trusted keys (same format as
+  sync), and an optional device-auth app lock.
 
 ### Look
 
@@ -180,7 +183,8 @@ It is light: no npm dependencies, not a service, and it exits by itself after
 24 hours without a request.
 
 **Install from the app.** Open a machine's Agent hooks screen and tap install.
-The app uploads the companion over SFTP and runs its installer.
+The app uploads the companion over SFTP as one archive, unpacks it with
+`tar`, checks each file's sha256 and runs its installer.
 
 **Install by hand.** Needs Node.js 18 or newer on Linux or macOS.
 

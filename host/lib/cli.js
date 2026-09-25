@@ -18,6 +18,7 @@ const transcriptMod = lazy('./transcript')
 const paneMod = lazy('./pane')
 const statuslineMod = lazy('./statusline')
 const spoolMod = lazy('./spool')
+const portsMod = lazy('./ports')
 
 const USAGE = `usage: conductore-hostd <command>
 
@@ -33,6 +34,9 @@ const USAGE = `usage: conductore-hostd <command>
                                   type a prompt into the agent's pane (text
                                   from stdin when neither flag is given)
   interrupt <sessionId>           press Escape in the agent's pane
+  ports [--since <seq>]           TCP ports your own processes listen on
+                                  (dev servers), each with the seq it
+                                  first appeared at; --since: only newer
   statusline [--chain '<cmd>']    legacy Node statusLine command (install
                                   now registers bin/conductore-statusline)
   install | uninstall             register / remove the Claude Code hooks
@@ -265,6 +269,17 @@ async function interrupt (args) {
   return out({ ok: true, sessionId, via: r.via, paneId: r.paneId, key: 'Escape' })
 }
 
+async function portsCmd (args) {
+  const { flags } = parseFlags(args)
+  const since = optNumber(flags, 'since')
+  if (Number.isNaN(since)) return fail('--since must be a non-negative number')
+  try {
+    return out(await portsMod().ports({ since, file: paths.portsPath() }))
+  } catch (err) {
+    return fail(`cannot list ports: ${err.message}`)
+  }
+}
+
 function readAll (stream, timeoutMs) {
   return new Promise(resolve => {
     if (stream.isTTY) return resolve('')
@@ -478,6 +493,7 @@ async function main (argv) {
     case 'transcript': return transcriptCmd(args)
     case 'send': return send(args)
     case 'interrupt': return interrupt(args)
+    case 'ports': return portsCmd(args)
     case 'statusline': return statuslineCmd(args)
     case 'install': return install()
     case 'uninstall': return uninstall()

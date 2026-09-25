@@ -35,9 +35,10 @@ void main() {
 
     await tester.tap(find.text('Appearance'));
     await tester.pumpAndSettle();
+    // Near the end of a long sheet: big steps stay within the 50-drag cap.
     await tester.scrollUntilVisible(
       find.text('Show local shell'),
-      120,
+      300,
       scrollable: find.byType(Scrollable).last,
     );
     await tester.pumpAndSettle();
@@ -375,19 +376,61 @@ void main() {
     AppErrorLog.instance.recordError(StateError('boom'), null);
     addTearDown(AppErrorLog.instance.clear);
     await tester.pump();
-    // Let the entry settle into view before tapping: on slower machines the
-    // scroll from ensureVisible is still animating and the tap misses.
-    final entry = find.text('Recent errors (1)');
-    await tester.scrollUntilVisible(
-      entry,
-      80,
-      scrollable: find.byType(Scrollable).last,
-    );
+    await tester.ensureVisible(find.text('Recent errors (1)'));
     await tester.pumpAndSettle();
-    await tester.tap(entry);
+    // The sheet's list can reach past the screen's bottom edge: keep
+    // dragging until the button is on screen, not just in the list.
+    final screenBottom =
+        tester.view.physicalSize.height / tester.view.devicePixelRatio;
+    for (
+      var i = 0;
+      i < 10 &&
+          tester.getCenter(find.text('Recent errors (1)')).dy >
+              screenBottom - 24;
+      i += 1
+    ) {
+      await tester.drag(find.byType(ListView).first, const Offset(0, -200));
+      await tester.pumpAndSettle();
+    }
+    await tester.tap(find.text('Recent errors (1)'));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('recent-errors')), findsOneWidget);
     expect(find.text('Bad state: boom'), findsOneWidget);
     expect(find.byKey(const ValueKey('recent-errors-copy')), findsOneWidget);
+  });
+
+  testWidgets('appearance sheet toggles pasting images as files', (
+    tester,
+  ) async {
+    final controller = ThemeController(InMemoryThemePreferences());
+    await controller.load();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: Center(
+              child: FilledButton(
+                onPressed: () =>
+                    showThemeSheet(context: context, controller: controller),
+                child: const Text('Appearance'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Appearance'));
+    await tester.pumpAndSettle();
+    final tile = find.byKey(const ValueKey('paste-images-as-files'));
+    await tester.scrollUntilVisible(
+      tile,
+      300,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.pumpAndSettle();
+    expect(controller.pasteImagesAsFiles, isTrue);
+    await tester.tap(tile);
+    await tester.pumpAndSettle();
+    expect(controller.pasteImagesAsFiles, isFalse);
   });
 }

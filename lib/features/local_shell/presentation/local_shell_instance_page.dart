@@ -527,8 +527,10 @@ class _CreditFooter extends StatelessWidget {
         Align(
           alignment: Alignment.centerLeft,
           child: TextButton.icon(
-            onPressed: () =>
-                showLicensePage(context: context, applicationName: 'Conductore'),
+            onPressed: () => showLicensePage(
+              context: context,
+              applicationName: 'Conductore',
+            ),
             style: TextButton.styleFrom(
               padding: const EdgeInsets.symmetric(horizontal: 4),
             ),

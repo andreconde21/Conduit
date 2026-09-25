@@ -8,11 +8,15 @@ class HomeTopBar extends StatelessWidget {
     required this.onLock,
     required this.onSettings,
     this.machine,
+    this.onSwitcher,
     super.key,
   });
 
   final VoidCallback onLock;
   final VoidCallback onSettings;
+
+  /// Opens the quick switcher; null hides its button.
+  final VoidCallback? onSwitcher;
 
   /// The machine chip (absent before any machine is saved).
   final Widget? machine;
@@ -36,6 +40,15 @@ class HomeTopBar extends StatelessWidget {
             child: Center(child: machine ?? const ConduitGlyph(size: 24)),
           ),
           const SizedBox(width: 4),
+          if (onSwitcher != null)
+            IconButton(
+              key: const ValueKey('home-open-switcher'),
+              tooltip: 'Switch sessions',
+              iconSize: 24,
+              color: colorScheme.onSurface,
+              icon: const Icon(Icons.view_carousel_outlined),
+              onPressed: onSwitcher,
+            ),
           IconButton(
             tooltip: 'Settings',
             iconSize: 26,
@@ -50,9 +63,9 @@ class HomeTopBar extends StatelessWidget {
 }
 
 /// Entries of the home settings sheet.
-enum HomeSettingsChoice { appearance, trustedKeys, agentHooks, lock }
+enum HomeSettingsChoice { appearance, sync, trustedKeys, agentHooks, lock }
 
-/// The gear's sheet: appearance and backup, trusted keys, the selected
+/// The gear's sheet: appearance and backup, sync, trusted keys, the selected
 /// machine's agent hooks, and lock.
 Future<HomeSettingsChoice?> showHomeSettingsSheet(
   BuildContext context, {
@@ -73,6 +86,13 @@ Future<HomeSettingsChoice?> showHomeSettingsSheet(
               title: const Text('Appearance'),
               subtitle: const Text('Theme, terminal font, backup'),
               onTap: () => pick(HomeSettingsChoice.appearance),
+            ),
+            ListTile(
+              key: const ValueKey('home-settings-sync'),
+              leading: const Icon(Icons.sync_rounded),
+              title: const Text('Sync'),
+              subtitle: const Text('Machines and settings on all devices'),
+              onTap: () => pick(HomeSettingsChoice.sync),
             ),
             ListTile(
               leading: const Icon(Icons.shield_outlined),

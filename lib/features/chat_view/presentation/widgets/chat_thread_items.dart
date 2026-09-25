@@ -2,6 +2,7 @@ import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/chat_view/domain/chat_items.dart';
 import 'package:conduit/features/chat_view/domain/chat_tool_summary.dart';
+import 'package:conduit/features/chat_view/presentation/widgets/chat_injected_items.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_markdown.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -18,6 +19,24 @@ class ChatUserBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    if (item.isCommand && item.text.startsWith('/')) {
+      // A slash command: a compact chip, not a prompt bubble.
+      return Align(
+        alignment: Alignment.centerRight,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Chip(
+            key: const ValueKey('slash-command-chip'),
+            visualDensity: VisualDensity.compact,
+            avatar: const Icon(Icons.keyboard_command_key_rounded, size: 16),
+            label: Text(
+              item.text,
+              style: theme.textTheme.bodySmall?.copyWith(fontFamily: _mono),
+            ),
+          ),
+        ),
+      );
+    }
     return Align(
       alignment: Alignment.centerRight,
       child: ConstrainedBox(
@@ -42,13 +61,19 @@ class ChatUserBubble extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  item.text,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: scheme.onPrimaryContainer,
-                    fontFamily: item.isCommand ? _mono : null,
+                if (item.text.isNotEmpty)
+                  Text(
+                    item.text,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: scheme.onPrimaryContainer,
+                      fontFamily: item.isCommand ? _mono : null,
+                    ),
                   ),
-                ),
+                for (final block in item.pasted)
+                  ChatPastedBlock(
+                    text: block,
+                    color: scheme.onPrimaryContainer,
+                  ),
                 if (item.imageCount > 0) ...[
                   const SizedBox(height: 6),
                   _ImageChip(count: item.imageCount),

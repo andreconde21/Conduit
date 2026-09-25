@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
@@ -10,6 +11,7 @@ import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/data/remote_tool_command.dart';
 import 'package:conduit/features/agent_attention/data/ssh_agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
+import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_launcher.dart';
@@ -20,14 +22,26 @@ import 'package:conduit/features/diff_view/presentation/diff_view.dart';
 import 'package:conduit/features/diff_view/presentation/diff_view_controller.dart';
 import 'package:conduit/features/diff_view/presentation/diff_view_tab.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/hosts/presentation/home_board_controller.dart';
+import 'package:conduit/features/live_preview/data/preview_screenshot_sender.dart';
 import 'package:conduit/features/live_preview/data/secure_live_preview_port_store.dart';
 import 'package:conduit/features/live_preview/data/ssh_port_forwarder.dart';
+import 'package:conduit/features/live_preview/domain/dev_server_detection.dart';
 import 'package:conduit/features/live_preview/domain/live_preview_port_store.dart';
+import 'package:conduit/features/live_preview/domain/preview_screenshot.dart';
 import 'package:conduit/features/live_preview/presentation/live_preview_controller.dart';
 import 'package:conduit/features/live_preview/presentation/live_preview_port_dialog.dart';
 import 'package:conduit/features/live_preview/presentation/live_preview_tab.dart';
 import 'package:conduit/features/live_preview/presentation/live_preview_view.dart';
+import 'package:conduit/features/live_preview/presentation/preview_ready_chip.dart';
+import 'package:conduit/features/live_preview/presentation/preview_ready_controller.dart';
 import 'package:conduit/features/prompt_menus/presentation/prompt_menu_strip.dart';
+import 'package:conduit/features/session_navigation/presentation/quick_switcher_actions.dart';
+import 'package:conduit/features/session_navigation/presentation/quick_switcher_sheet.dart';
+import 'package:conduit/features/session_navigation/presentation/quick_switcher_shortcut.dart';
+import 'package:conduit/features/session_navigation/presentation/session_view_controller.dart';
+import 'package:conduit/features/session_navigation/presentation/session_view_launcher.dart';
+import 'package:conduit/features/session_navigation/presentation/session_view_widgets.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/presentation/herdr_session_focus.dart';
 import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
@@ -41,6 +55,7 @@ import 'package:conduit/features/share_target/presentation/share_target_controll
 import 'package:conduit/features/share_target/presentation/share_target_scope.dart';
 import 'package:conduit/features/terminal/data/platform_prompt_image_source.dart';
 import 'package:conduit/features/terminal/data/prompt_image_preparer.dart';
+import 'package:conduit/features/terminal/domain/clipboard_image_paste.dart';
 import 'package:conduit/features/terminal/domain/herdr_remote_control.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:conduit/features/terminal/domain/prompt_image.dart';
@@ -87,6 +102,9 @@ class TerminalPage extends StatefulWidget {
     this.connectFlow,
     this.speechRecognizer,
     this.promptImageSource,
+    this.previewWatcherFactory,
+    this.promptImagePreparer,
+    this.homeBoards,
     super.key,
   });
 
@@ -115,12 +133,33 @@ class TerminalPage extends StatefulWidget {
   /// platform picker and clipboard.
   final PromptImageSource? promptImageSource;
 
+  /// Builds the "Preview ready" watcher for a remote session. Null means
+  /// polling over an extra SSH connection (needs [hostKeyVerifier]).
+  final PreviewReadyController Function(TerminalSessionController session)?
+  previewWatcherFactory;
+
+  /// Names and copies images before upload (Chat mode's image button and
+  /// image paste). Null means the default under the app's temp directory.
+  final PromptImagePreparer? promptImagePreparer;
+
+  /// The home page's boards (tmux sessions and Herdr workspaces per
+  /// machine), for the quick switcher's other workspaces.
+  final HomeBoards? homeBoards;
+
   @override
   State<TerminalPage> createState() => _TerminalPageState();
 }
 
-class _TerminalPageState extends State<TerminalPage> {
+class _TerminalPageState extends State<TerminalPage>
+    with SingleTickerProviderStateMixin {
   final _focusNode = FocusNode();
+
+  /// The short slide after a swipe on the top row switched sessions.
+  late final AnimationController _slide = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 220),
+  );
+  int _slideDirection = 0;
   late final TerminalFileTabsController _fileTabs;
   TerminalSessionController? _focusedSession;
   bool _fullscreen = false;
@@ -147,6 +186,16 @@ class _TerminalPageState extends State<TerminalPage> {
   final Map<TerminalSessionController, StreamSubscription<String>>
   _clipboardSubscriptions = {};
 
+  /// "Preview ready" detection, one per remote session; only the active
+  /// session's watcher polls, and only while the app is in the foreground.
+  final Map<TerminalSessionController, PreviewReadyController>
+  _previewWatchers = {};
+  AppLifecycleListener? _lifecycle;
+  bool _appResumed = true;
+
+  /// "Uploading image…" while a pasted image goes to the host.
+  String? _pasteStatus;
+
   @override
   void initState() {
     super.initState();
@@ -170,6 +219,13 @@ class _TerminalPageState extends State<TerminalPage> {
     );
     widget.workspace.addListener(_handleWorkspaceChanged);
     _syncRemoteClipboardSubscriptions();
+    _lifecycle = AppLifecycleListener(
+      onStateChange: (state) {
+        _appResumed = state == AppLifecycleState.resumed;
+        _syncPreviewWatchers();
+      },
+    );
+    _syncPreviewWatchers();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _focusedSession = widget.workspace.activeSession;
       _focusNode.requestFocus();
@@ -238,6 +294,12 @@ class _TerminalPageState extends State<TerminalPage> {
     _clipboardSubscriptions.clear();
     _focusNode.dispose();
     _fileTabs.dispose();
+    _lifecycle?.dispose();
+    for (final watcher in _previewWatchers.values) {
+      watcher.dispose();
+    }
+    _previewWatchers.clear();
+    _slide.dispose();
     super.dispose();
   }
 
@@ -293,8 +355,101 @@ class _TerminalPageState extends State<TerminalPage> {
       );
   }
 
+  /// Whether "Preview ready" can watch [session]'s machine: a remote host
+  /// the page can open extra connections to, without a hardware key (each
+  /// poll would ask for a touch).
+  bool _canWatchPreview(TerminalSessionController session) =>
+      (widget.hostKeyVerifier != null ||
+          widget.previewWatcherFactory != null) &&
+      !session.host.isLocal &&
+      session.host.authMethod != SshAuthMethod.hardwareKey;
+
+  /// Creates watchers for new sessions, drops those of closed ones, and
+  /// lets only the active session's watcher poll.
+  void _syncPreviewWatchers() {
+    final sessions = widget.workspace.sessions.toSet();
+    _previewWatchers.removeWhere((session, watcher) {
+      if (sessions.contains(session)) return false;
+      watcher.dispose();
+      return true;
+    });
+    final verifier = widget.hostKeyVerifier;
+    final active = widget.workspace.activeSession;
+    for (final session in sessions) {
+      if (!_canWatchPreview(session)) continue;
+      final watcher = _previewWatchers[session] ??=
+          (widget.previewWatcherFactory?.call(session) ??
+                PreviewReadyController(
+                  runnerFactory: () => _previewRunnerFor(session, verifier),
+                  canPoll: () => session.isConnected,
+                ))
+            ..attachScreen(
+              _TerminalScreen(session.terminal),
+              () => _TerminalScreen.visibleRows(session.terminal),
+            );
+      watcher.setForeground(_appResumed && session == active);
+    }
+  }
+
+  /// A command runner for [session]'s port polls: the connect flow's (the
+  /// app's SSH exec channels), else the agent monitor's, else one from the
+  /// host key verifier.
+  AgentCommandRunner _previewRunnerFor(
+    TerminalSessionController session,
+    HostKeyVerifier? verifier,
+  ) {
+    final flow = widget.connectFlow;
+    if (flow != null) return flow.runnerFactory(session.host);
+    final attention = widget.agentAttention;
+    if (attention != null) {
+      final (runner, :owned) = attention.runnerFor(session.host);
+      return owned ? runner : _BorrowedRunner(runner);
+    }
+    return SshAgentCommandRunner(verifier!, session.host);
+  }
+
+  /// The Live preview tab of [host], when one is open.
+  LivePreviewTab? _previewTabFor(SavedHost host) => _fileTabs.tabs
+      .whereType<LivePreviewTab>()
+      .where((tab) => tab.host.id == host.id)
+      .firstOrNull;
+
+  /// Whether Live preview already shows [offer]'s port for [session].
+  bool _previewShows(TerminalSessionController session, DevServerOffer offer) {
+    final controller = _previewTabFor(session.host)?.controller;
+    return controller != null &&
+        controller.remotePort == offer.port &&
+        (controller.phase == LivePreviewPhase.ready ||
+            controller.phase == LivePreviewPhase.connecting);
+  }
+
+  /// The "Preview ready" chip for Chat View on [host]: opening it leaves
+  /// the chat for the Live preview tab.
+  Widget Function(BuildContext routeContext)? _chatPreviewChip(SavedHost host) {
+    final entry = _previewWatchers.entries
+        .where((entry) => entry.key.host.id == host.id)
+        .firstOrNull;
+    if (entry == null) return null;
+    final session = entry.key;
+    return (routeContext) => PreviewReadyChip(
+      controller: entry.value,
+      hidden: (offer) => _previewShows(session, offer),
+      onOpen: (offer) {
+        Navigator.of(routeContext).pop();
+        if (!mounted) return;
+        if (widget.workspace.sessions.contains(session)) {
+          widget.workspace.activate(session);
+        }
+        unawaited(
+          _openLivePreview(session, port: offer.port, path: offer.path),
+        );
+      },
+    );
+  }
+
   void _handleWorkspaceChanged() {
     _syncRemoteClipboardSubscriptions();
+    _syncPreviewWatchers();
     final active = widget.workspace.activeSession;
     if (active == null || active == _focusedSession) return;
     _focusedSession = active;
@@ -332,10 +487,15 @@ class _TerminalPageState extends State<TerminalPage> {
   /// a machine without the companion, or without a Claude session here,
   /// gets the composer with a note why; a broken companion explains what to
   /// fix; several candidates ask which one.
-  Future<void> _openChatForSession(
+  ///
+  /// With [draft] (a Live preview screenshot) Chat View opens with it in
+  /// the composer. Returns whether Chat View opened, so a caller with a
+  /// draft can put it in the composer otherwise.
+  Future<bool> _openChatForSession(
     AgentAttentionController attention,
-    TerminalSessionController session,
-  ) async {
+    TerminalSessionController session, {
+    String draft = '',
+  }) async {
     final host = session.host;
     final List<AgentInfo> agents;
     if (chatViewAvailable(attention, host)) {
@@ -350,14 +510,14 @@ class _TerminalPageState extends State<TerminalPage> {
           'No Conductore companion on ${host.name}, so there is no Chat '
           'View here. Opened the composer.',
         );
-        return;
+        return false;
       }
       final access = await checkChatViewAccessWithProgress(
         context,
         attention: attention,
         host: host,
       );
-      if (!mounted || access == null) return;
+      if (!mounted || access == null) return false;
       if (!access.ready) {
         if (access.companionMissing) {
           _openComposerBecause(
@@ -367,11 +527,11 @@ class _TerminalPageState extends State<TerminalPage> {
         } else {
           await showChatViewUnavailable(context, host: host, access: access);
         }
-        return;
+        return false;
       }
       agents = access.agents;
     }
-    if (!mounted || widget.workspace.activeSession != session) return;
+    if (!mounted || widget.workspace.activeSession != session) return false;
 
     var location = _chatLocationFor(session);
     var match = resolveChatAgent(host, agents, location: location);
@@ -379,7 +539,7 @@ class _TerminalPageState extends State<TerminalPage> {
       // Several Claude sessions in this workspace: the one on screen is
       // the pane Herdr has focused.
       final pane = await _focusedHerdrPane(session, location);
-      if (!mounted) return;
+      if (!mounted) return false;
       if (pane != null) {
         location = ChatSessionLocation(
           herdrWorkspaceId: location.herdrWorkspaceId,
@@ -391,7 +551,8 @@ class _TerminalPageState extends State<TerminalPage> {
     }
     switch (match) {
       case ChatAgentMatched(:final agent):
-        _openChat(attention, host, agent);
+        _openChat(attention, host, agent, draft: draft);
+        return true;
       case ChatAgentAmbiguous(:final candidates, :final elsewhere):
         final agent = await pickChatAgent(
           context,
@@ -404,7 +565,8 @@ class _TerminalPageState extends State<TerminalPage> {
               : 'Open chat for…',
         );
         if (agent != null && mounted) {
-          _openChat(attention, host, agent);
+          _openChat(attention, host, agent, draft: draft);
+          return true;
         }
       case ChatAgentNone():
         _openComposerBecause(
@@ -412,6 +574,7 @@ class _TerminalPageState extends State<TerminalPage> {
           'composer.',
         );
     }
+    return false;
   }
 
   static String _placeName(TerminalSessionController session) =>
@@ -466,8 +629,9 @@ class _TerminalPageState extends State<TerminalPage> {
   void _openChat(
     AgentAttentionController attention,
     SavedHost host,
-    AgentInfo agent,
-  ) {
+    AgentInfo agent, {
+    String draft = '',
+  }) {
     unawaited(
       openChatView(
         context: context,
@@ -476,6 +640,10 @@ class _TerminalPageState extends State<TerminalPage> {
         agent: agent,
         dictation: _dictation,
         onOpenTerminal: () => _showAgentTerminal(attention, host, agent),
+        accessoryBuilder: _chatPreviewChip(host),
+        initialDraft: draft,
+        imageAttacher: _promptImageAttacher(host),
+        pasteImages: widget.themeController.pasteImagesAsFiles,
       ),
     );
   }
@@ -677,7 +845,8 @@ class _TerminalPageState extends State<TerminalPage> {
       isConnected: () => session.isConnected,
       bracketedPasteSupported: () => session.bracketedPasteSupported,
       dictation: _dictation,
-      imageAttacher: _promptImageAttacher(session),
+      imageAttacher: _promptImageAttacher(session.host),
+      pasteImages: widget.themeController.pasteImagesAsFiles,
     );
     if (!mounted) {
       return;
@@ -690,8 +859,8 @@ class _TerminalPageState extends State<TerminalPage> {
 
   /// Images go to the same per-host inbox as files shared into the app,
   /// and the composer inserts the uploaded path for the agent to read.
-  PromptImageAttacher _promptImageAttacher(TerminalSessionController session) {
-    final preparer = PromptImagePreparer();
+  PromptImageAttacher _promptImageAttacher(SavedHost host) {
+    final preparer = widget.promptImagePreparer ?? PromptImagePreparer();
     return PromptImageAttacher(
       source: widget.promptImageSource ?? PlatformPromptImageSource(),
       crop: (image) => showImageCropPage(context, image),
@@ -699,10 +868,50 @@ class _TerminalPageState extends State<TerminalPage> {
       upload: (image) async {
         final paths = await SftpShareUploader(
           widget.sftpRepository,
-        ).upload(session.host, [image]);
+        ).upload(host, [image]);
         return paths.single;
       },
     );
+  }
+
+  /// Paste with an image on the clipboard: uploads it to the host's share
+  /// inbox and pastes its path (bracketed when the program asked for it, no
+  /// Enter), which Claude Code reads as an image. Resolves to false when
+  /// there is no image, or the setting is off, so the text is pasted.
+  Future<bool> _pasteImageInto(TerminalSessionController session) async {
+    if (!widget.themeController.pasteImagesAsFiles) return false;
+    final paster = ClipboardImagePaster.fromAttacher(
+      _promptImageAttacher(session.host),
+    );
+    try {
+      final path = await paster.paste(
+        onUploading: () {
+          if (mounted) setState(() => _pasteStatus = 'Uploading image…');
+        },
+      );
+      if (path == null) return false;
+      if (mounted) session.paste(path);
+      return true;
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              key: const ValueKey('paste-image-failed'),
+              content: Text(
+                'Could not paste the image: '
+                '${error is AppFailure ? error.userMessage : error}',
+              ),
+            ),
+          );
+      }
+      return true;
+    } finally {
+      if (mounted && _pasteStatus != null) {
+        setState(() => _pasteStatus = null);
+      }
+    }
   }
 
   /// "cd to…" from the Tmux+ menu or the Herdr navigator: the machine's
@@ -852,6 +1061,9 @@ class _TerminalPageState extends State<TerminalPage> {
       agent: agent,
       dictation: _dictation,
       onOpenTerminal: () => _showAgentTerminal(attention, host, agent),
+      accessoryBuilder: _chatPreviewChip(host),
+      imageAttacher: _promptImageAttacher(host),
+      pasteImages: widget.themeController.pasteImagesAsFiles,
     );
   }
 
@@ -876,6 +1088,120 @@ class _TerminalPageState extends State<TerminalPage> {
     if (session != null) widget.workspace.activate(session);
     unawaited(attention.focusAgent(host.id, agent));
     _showTerminal();
+  }
+
+  /// A session the user picked (its tab, the switcher): Chat View when its
+  /// pane runs a Claude session the companion knows and its effective view
+  /// is Chat View; the terminal otherwise.
+  void _openPreferredView(TerminalSessionController session) {
+    final attention = widget.agentAttention;
+    if (!mounted ||
+        attention == null ||
+        widget.workspace.activeSession != session) {
+      return;
+    }
+    openPreferredChatView(
+      context,
+      attention: attention,
+      host: session.host,
+      dictation: _dictation,
+      onOpenTerminal: (agent) =>
+          _showAgentTerminal(attention, session.host, agent),
+    );
+  }
+
+  /// Long-press on a session's tab: where it opens when it runs Claude.
+  Future<void> _pickSessionView(TerminalSessionController session) async {
+    final views = SessionViewScope.maybeOf(context);
+    if (views == null || session.host.isLocal) return;
+    await showSessionViewPicker(
+      context,
+      controller: views,
+      sessionHostId: session.host.id,
+      title: session.title,
+    );
+    if (mounted) _focusNode.requestFocus();
+  }
+
+  /// A horizontal swipe on the top row: the next (1) or previous (-1)
+  /// open session, sliding in from that side.
+  void _swipeSession(int direction) {
+    final sessions = widget.workspace.sessions;
+    final active = widget.workspace.activeSession;
+    if (active == null) return;
+    final index = sessions.indexOf(active) + direction;
+    if (index < 0 || index >= sessions.length) return;
+    widget.workspace.activate(sessions[index]);
+    _showTerminal();
+    if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) return;
+    _slideDirection = direction;
+    unawaited(_slide.forward(from: 0));
+  }
+
+  Widget _slideIn(Widget child) {
+    return ClipRect(
+      child: AnimatedBuilder(
+        animation: _slide,
+        child: child,
+        builder: (context, child) {
+          final sliding = _slide.status == AnimationStatus.forward;
+          final remaining = sliding
+              ? 1 - Curves.easeOutCubic.transform(_slide.value)
+              : 0.0;
+          return FractionalTranslation(
+            translation: Offset(_slideDirection * remaining * 0.3, 0),
+            child: child,
+          );
+        },
+      ),
+    );
+  }
+
+  bool _switcherOpen = false;
+
+  QuickSwitcherSource get _switcherSource => QuickSwitcherSource(
+    workspace: widget.workspace,
+    attention: widget.agentAttention,
+    connectFlow: widget.connectFlow,
+    homeBoards: widget.homeBoards,
+  );
+
+  /// The quick switcher (grid button, swipes on the top row, Ctrl+K).
+  Future<void> _openSwitcher({bool fromKeyboard = false}) async {
+    if (_switcherOpen) return;
+    _switcherOpen = true;
+    final source = _switcherSource;
+    final connectFlow = widget.connectFlow;
+    final QuickSwitcherChoice? choice;
+    try {
+      choice = await showQuickSwitcher(
+        context,
+        source: source,
+        fontFamily: widget.themeController.terminalFont.fontFamily,
+        fromKeyboard: fromKeyboard,
+        canCreate: connectFlow != null,
+        canShowGrid: true,
+      );
+    } finally {
+      _switcherOpen = false;
+    }
+    if (!mounted) return;
+    switch (choice) {
+      case QuickSwitcherOpen(:final item):
+        await openSwitcherItem(
+          context,
+          item,
+          source: source,
+          showTerminal: _showTerminal,
+          dictation: _dictation,
+        );
+      case QuickSwitcherNewSession():
+        if (connectFlow != null) await _openNewSession(connectFlow);
+      case QuickSwitcherShowGrid():
+        await _openSessionGrid();
+      case null:
+        _showTerminal();
+    }
   }
 
   Future<void> _openSessionGrid() async {
@@ -913,6 +1239,26 @@ class _TerminalPageState extends State<TerminalPage> {
       herdr.ensureKeymap(session);
     }
     return herdr.controlFor(session);
+  }
+
+  /// Enters copy mode for a one-finger drag on a tmux or Herdr session
+  /// whose screen offers no other way into history (tmux without `mouse
+  /// on`): the two-finger scrollback's keys, then the scroll-mode state.
+  /// Null for plain shells, where such a drag sends arrow keys.
+  VoidCallback? _dragScrollModeEntry(TerminalSessionController session) {
+    final target = _gestureTargetFor(session);
+    if (target == null) {
+      return null;
+    }
+    return () {
+      TerminalGestureCommands(
+        session,
+        target,
+        herdr: _herdrControlFor(session),
+      ).enterScrollback();
+      setState(() => _tmuxScrollMode = true);
+      _focusNode.requestFocus();
+    };
   }
 
   /// The multiplexer a session's gestures drive: the one it was opened on
@@ -1003,6 +1349,7 @@ class _TerminalPageState extends State<TerminalPage> {
         // the new path.
         unawaited(controller.start(port));
       }
+      if (port != null) _previewWatchers[session]?.markPreviewing(port);
       return;
     }
     final controller = LivePreviewController(
@@ -1035,6 +1382,97 @@ class _TerminalPageState extends State<TerminalPage> {
     controller.attachSession(session, () => session.isConnected);
     _fileTabs.add(LivePreviewTab(host: host, controller: controller));
     unawaited(controller.start(chosenPort));
+    _previewWatchers[session]?.markPreviewing(chosenPort);
+  }
+
+  /// Live preview's "Screenshot to Claude": uploads the image to the
+  /// host's share inbox (like a Chat mode image) and puts its path and a
+  /// note in front of Claude: Chat View's composer when this session runs
+  /// a Claude session the companion knows, else the Chat mode composer.
+  Future<void> _sendPreviewScreenshot(
+    LivePreviewTab tab,
+    PreviewScreenshot shot,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Text('Uploading screenshot…'),
+          duration: Duration(minutes: 1),
+        ),
+      );
+    final String draft;
+    try {
+      draft = await PreviewScreenshotSender(
+        upload: (file) async => (await SftpShareUploader(
+          widget.sftpRepository,
+        ).upload(tab.host, [file])).single,
+      ).send(shot);
+    } catch (error) {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              'Could not upload the screenshot: '
+              '${error is AppFailure ? error.userMessage : error}',
+            ),
+          ),
+        );
+      return;
+    }
+    messenger.hideCurrentSnackBar();
+    if (!mounted) return;
+    final session = widget.workspace.sessions
+        .where((session) => session.host.id == tab.host.id)
+        .firstOrNull;
+    if (session == null) {
+      _copyToClipboard(draft, 'Screenshot uploaded; its path is copied');
+      return;
+    }
+    await _deliverChatDraft(session, draft);
+  }
+
+  /// Opens [session]'s chat with [draft] in the composer: Chat View when
+  /// it can, else Chat mode's composer sheet.
+  Future<void> _deliverChatDraft(
+    TerminalSessionController session,
+    String draft,
+  ) async {
+    if (widget.workspace.activeSession != session) {
+      widget.workspace.activate(session);
+    }
+    _showTerminal();
+    final attention = widget.agentAttention;
+    if (attention != null && !session.host.isLocal) {
+      final opened = await _openChatForSession(
+        attention,
+        session,
+        draft: draft,
+      );
+      if (opened || !mounted) return;
+    }
+    _putDraftInComposer(session, draft);
+  }
+
+  /// Adds [draft] to [session]'s Chat mode draft and opens the composer
+  /// sheet, the way a file shared into the app arrives.
+  void _putDraftInComposer(TerminalSessionController session, String draft) {
+    final hostId = session.host.id;
+    setState(() {
+      _composeDrafts[hostId] = mergeShareDraft(
+        _composeDrafts[hostId] ?? '',
+        draft,
+      );
+      _composeMode = true;
+      _composeRevision += 1;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.workspace.activeSession == session) {
+        unawaited(_openPromptComposer(session));
+      }
+    });
   }
 
   Future<void> _changePreviewPort(LivePreviewTab tab) async {
@@ -1076,6 +1514,7 @@ class _TerminalPageState extends State<TerminalPage> {
         palette: palette,
         brightness: brightness,
         onChangePort: () => unawaited(_changePreviewPort(tab)),
+        onScreenshot: (shot) => _sendPreviewScreenshot(tab, shot),
       ),
       _ => SftpFileViewer(
         key: tab.viewerKey,
@@ -1100,362 +1539,479 @@ class _TerminalPageState extends State<TerminalPage> {
       listenable: widget.themeController,
       builder: (context, _) {
         final palette = widget.themeController.palette;
-        return Scaffold(
-          body: ListenableBuilder(
-            listenable: Listenable.merge([widget.workspace, _fileTabs]),
-            builder: (context, _) {
-              final activeSession = widget.workspace.activeSession;
-              final fileTabs = _fileTabs.tabs;
-              final activeFileTab = _fileTabs.active;
-              final brightness = Theme.of(context).brightness;
-              if (activeSession == null && fileTabs.isEmpty) {
-                return ConduitBackdrop(
-                  palette: palette,
-                  child: SafeArea(
-                    bottom: shouldApplyBottomSafeArea(context),
-                    child: EmptyTerminalState(
-                      onBack: () => Navigator.of(context).pop(),
+        return QuickSwitcherShortcut(
+          onInvoke: () => unawaited(_openSwitcher(fromKeyboard: true)),
+          child: Scaffold(
+            body: ListenableBuilder(
+              listenable: Listenable.merge([widget.workspace, _fileTabs]),
+              builder: (context, _) {
+                final activeSession = widget.workspace.activeSession;
+                final fileTabs = _fileTabs.tabs;
+                final activeFileTab = _fileTabs.active;
+                final brightness = Theme.of(context).brightness;
+                if (activeSession == null && fileTabs.isEmpty) {
+                  return ConduitBackdrop(
+                    palette: palette,
+                    child: SafeArea(
+                      bottom: shouldApplyBottomSafeArea(context),
+                      child: EmptyTerminalState(
+                        onBack: () => Navigator.of(context).pop(),
+                      ),
                     ),
-                  ),
-                );
-              }
+                  );
+                }
 
-              final landscape =
-                  MediaQuery.orientationOf(context) == Orientation.landscape;
-              final gestureNavigation = usesAndroidGestureNavigation(context);
-              return SafeArea(
-                top: !_fullscreen,
-                bottom: shouldApplyBottomSafeArea(context),
-                left: !_fullscreen && (!landscape || !gestureNavigation),
-                right: !_fullscreen && (!landscape || !gestureNavigation),
-                child: Column(
-                  children: [
-                    if (!_fullscreen)
-                      ListenableBuilder(
-                        listenable: widget.agentAttention ?? _inertListenable,
-                        builder: (context, _) {
-                          final attention = widget.agentAttention;
-                          final showAgents =
-                              attention != null &&
-                              (attention.monitoredHosts.isNotEmpty ||
-                                  (activeSession?.host.agentAttentionEnabled ??
-                                      false));
-                          final connectFlow = widget.connectFlow;
-                          return TerminalHeader(
-                            workspace: widget.workspace,
-                            activeSession: activeSession,
-                            palette: palette,
-                            brightness: brightness,
-                            onBack: () => Navigator.of(context).pop(),
-                            onTabsChanged: _showTerminal,
-                            fileTabs: fileTabs,
-                            activeFileTab: activeFileTab,
-                            onFileTabSelected: _fileTabs.activate,
-                            onFileTabClosed: _closeFileTab,
-                            onReconnect: activeSession == null
-                                ? null
-                                : () async {
-                                    await activeSession.disconnect();
-                                    await activeSession.connect();
-                                    _focusNode.requestFocus();
-                                  },
-                            onToggleFullscreen: _toggleFullscreen,
-                            onNewSession: connectFlow == null
-                                ? null
-                                : () => _openNewSession(connectFlow),
-                            onOpenChatView:
-                                attention == null ||
-                                    activeSession == null ||
-                                    activeSession.host.isLocal
-                                ? null
-                                : () => openChatViewForHost(
-                                    context: context,
-                                    attention: attention,
-                                    host: activeSession.host,
-                                    dictation: _dictation,
-                                    onOpenTerminal: (agent) =>
-                                        _showAgentTerminal(
-                                          attention,
-                                          activeSession.host,
-                                          agent,
-                                        ),
-                                  ),
-                            attentionCount: attention?.attentionCount ?? 0,
-                            onOpenAgentAttention: showAgents
-                                ? () => _openAgentAttention(attention)
-                                : null,
-                            onOpenSessionGrid: _openSessionGrid,
-                            swipeDownOpensSessionGrid: widget
-                                .themeController
-                                .terminalGestures
-                                .headerSwipeOpensSessions,
-                            onOpenSessionTool:
-                                activeSession != null &&
-                                    widget.hostKeyVerifier != null &&
-                                    !activeSession.host.isLocal
-                                ? (tool) =>
-                                      _openSessionTool(activeSession, tool)
-                                : null,
-                          );
-                        },
-                      ),
-                    Expanded(
-                      child: Container(
-                        color: palette.terminalBackgroundFor(brightness),
-                        child: activeFileTab == null && activeSession == null
-                            ? EmptyTerminalState(
-                                onBack: () => Navigator.of(context).pop(),
-                              )
-                            : IndexedStack(
-                                index: activeFileTab != null
-                                    ? widget.workspace.sessions.length +
-                                          fileTabs.indexOf(activeFileTab)
-                                    : widget.workspace.sessions.indexOf(
-                                        activeSession!,
+                final landscape =
+                    MediaQuery.orientationOf(context) == Orientation.landscape;
+                final gestureNavigation = usesAndroidGestureNavigation(context);
+                return SafeArea(
+                  top: !_fullscreen,
+                  bottom: shouldApplyBottomSafeArea(context),
+                  left: !_fullscreen && (!landscape || !gestureNavigation),
+                  right: !_fullscreen && (!landscape || !gestureNavigation),
+                  child: Column(
+                    children: [
+                      if (!_fullscreen)
+                        ListenableBuilder(
+                          listenable: widget.agentAttention ?? _inertListenable,
+                          builder: (context, _) {
+                            final attention = widget.agentAttention;
+                            final showAgents =
+                                attention != null &&
+                                (attention.monitoredHosts.isNotEmpty ||
+                                    (activeSession
+                                            ?.host
+                                            .agentAttentionEnabled ??
+                                        false));
+                            final connectFlow = widget.connectFlow;
+                            return TerminalHeader(
+                              workspace: widget.workspace,
+                              activeSession: activeSession,
+                              palette: palette,
+                              brightness: brightness,
+                              onBack: () => Navigator.of(context).pop(),
+                              onTabsChanged: _showTerminal,
+                              fileTabs: fileTabs,
+                              activeFileTab: activeFileTab,
+                              onFileTabSelected: _fileTabs.activate,
+                              onFileTabClosed: _closeFileTab,
+                              onReconnect: activeSession == null
+                                  ? null
+                                  : () async {
+                                      await activeSession.disconnect();
+                                      await activeSession.connect();
+                                      _focusNode.requestFocus();
+                                    },
+                              onToggleFullscreen: _toggleFullscreen,
+                              onNewSession: connectFlow == null
+                                  ? null
+                                  : () => _openNewSession(connectFlow),
+                              onOpenChatView:
+                                  attention == null ||
+                                      activeSession == null ||
+                                      activeSession.host.isLocal
+                                  ? null
+                                  : () => openChatViewForHost(
+                                      context: context,
+                                      attention: attention,
+                                      host: activeSession.host,
+                                      dictation: _dictation,
+                                      accessoryBuilder: _chatPreviewChip(
+                                        activeSession.host,
                                       ),
-                                children: [
-                                  for (final session
-                                      in widget.workspace.sessions)
-                                    TerminalGestureLayer(
-                                      key: ValueKey(session.host.id),
-                                      target: _gestureTargetFor(session),
-                                      herdrControl: _herdrControlFor(session),
-                                      onHerdrWorkspaceFocused: (workspaceId) =>
-                                          widget.connectFlow?.herdr
-                                              .noteWorkspace(
-                                                session,
-                                                workspaceId,
-                                              ),
-                                      preferences: widget
-                                          .themeController
-                                          .terminalGestures,
-                                      session: session,
-                                      fontSize: widget
-                                          .themeController
-                                          .terminalFontSize,
-                                      onFontSizeChanged: (fontSize) {
-                                        unawaited(
-                                          widget.themeController
-                                              .setTerminalFontSize(fontSize),
-                                        );
-                                      },
-                                      scrollMode:
-                                          session == activeSession &&
-                                          _tmuxScrollMode,
-                                      onEnterScrollMode: () {
-                                        setState(() => _tmuxScrollMode = true);
-                                        _focusNode.requestFocus();
-                                      },
-                                      onExitScrollMode: () {
-                                        setState(() => _tmuxScrollMode = false);
-                                        _focusNode.requestFocus();
-                                      },
-                                      onOpenSessionGrid: _openSessionGrid,
-                                      onOpenAgentPanel: _agentPanelOpener(),
-                                      child: TerminalSurface(
-                                        session: session,
-                                        autoConnect: widget.workspace
-                                            .mayAutoConnect(session),
-                                        palette: palette,
-                                        brightness: brightness,
-                                        fontFamily: widget
-                                            .themeController
-                                            .terminalFont
-                                            .fontFamily,
-                                        fontSize: widget
-                                            .themeController
-                                            .terminalFontSize,
-                                        predictiveEchoEnabled:
-                                            session.host.predictiveEchoEnabled,
-                                        terminalMouseInput: widget
-                                            .themeController
-                                            .terminalMouseInput,
-                                        focusNode:
-                                            session == activeSession &&
-                                                activeFileTab == null
-                                            ? _focusNode
-                                            : null,
-                                        tmuxScrollMode:
-                                            session == activeSession &&
-                                            _tmuxScrollMode,
-                                        onExitTmuxScrollMode: () {
-                                          setState(
-                                            () => _tmuxScrollMode = false,
-                                          );
-                                          _focusNode.requestFocus();
-                                        },
-                                        onPathTap: (path) =>
-                                            _handlePathTap(session, path),
-                                        onLinkTap: (url) =>
-                                            _handleLinkTap(session, url),
-                                        onLinkLongPress: (url, line) =>
-                                            _handleLinkLongPress(
-                                              session,
-                                              url,
-                                              line,
-                                            ),
+                                      imageAttacher: _promptImageAttacher(
+                                        activeSession.host,
                                       ),
+                                      pasteImages: widget
+                                          .themeController
+                                          .pasteImagesAsFiles,
+                                      onOpenTerminal: (agent) =>
+                                          _showAgentTerminal(
+                                            attention,
+                                            activeSession.host,
+                                            agent,
+                                          ),
                                     ),
-                                  for (final tab in fileTabs)
-                                    _buildFileTab(tab, palette, brightness),
-                                ],
-                              ),
-                      ),
-                    ),
-                    // Menu → buttons: tappable choices for prompts on screen.
-                    if (activeFileTab == null &&
-                        activeSession != null &&
-                        widget.themeController.menuButtonsEnabled)
-                      PromptMenuStrip(
-                        key: ValueKey('prompt-menu-${activeSession.host.id}'),
-                        session: activeSession,
-                        palette: palette,
-                        brightness: brightness,
-                        onSent: _focusNode.requestFocus,
-                      ),
-                    if (PlatformFeatures.isDesktop &&
-                        _touchKeysVisible &&
-                        activeFileTab == null &&
-                        activeSession != null &&
-                        !_composeMode)
-                      _DesktopKeysToggle(
-                        visible: true,
-                        palette: palette,
-                        brightness: brightness,
-                        onChanged: _setTouchKeysVisible,
-                      ),
-                    if (activeFileTab != null || activeSession == null)
-                      const SizedBox.shrink()
-                    else if (_composeMode)
-                      _ComposeInputBar(
-                        key: ValueKey(
-                          'compose-${activeSession.host.id}-$_composeRevision',
+                              attentionCount: attention?.attentionCount ?? 0,
+                              onOpenAgentAttention: showAgents
+                                  ? () => _openAgentAttention(attention)
+                                  : null,
+                              onOpenSessionGrid: _openSwitcher,
+                              onSwipeSession: _swipeSession,
+                              onSessionActivated: _openPreferredView,
+                              onSessionLongPress: (session) =>
+                                  unawaited(_pickSessionView(session)),
+                              swipeDownOpensSessionGrid: widget
+                                  .themeController
+                                  .terminalGestures
+                                  .headerSwipeOpensSessions,
+                              onOpenSessionTool:
+                                  activeSession != null &&
+                                      widget.hostKeyVerifier != null &&
+                                      !activeSession.host.isLocal
+                                  ? (tool) =>
+                                        _openSessionTool(activeSession, tool)
+                                  : null,
+                            );
+                          },
                         ),
-                        palette: palette,
-                        brightness: brightness,
-                        history: _composeHistory,
-                        initialText:
-                            _composeDrafts[activeSession.host.id] ?? '',
-                        dictation: _dictation,
-                        onChanged: (draft) {
-                          _composeDrafts[activeSession.host.id] = draft;
-                        },
-                        onExpand: () => _openPromptComposer(activeSession),
-                        onSend: (line) {
-                          if (!activeSession.isConnected) {
-                            // The line would be silently dropped; keep it as
-                            // the draft instead of clearing it.
-                            setState(() {
-                              _composeDrafts[activeSession.host.id] = line;
-                              _composeRevision += 1;
-                            });
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'Not connected. The line was kept as a '
-                                  'draft.',
+                      Expanded(
+                        child: Stack(
+                          children: [
+                            Positioned.fill(
+                              child: Container(
+                                color: palette.terminalBackgroundFor(
+                                  brightness,
+                                ),
+                                child:
+                                    activeFileTab == null &&
+                                        activeSession == null
+                                    ? EmptyTerminalState(
+                                        onBack: () =>
+                                            Navigator.of(context).pop(),
+                                      )
+                                    : _slideIn(
+                                        IndexedStack(
+                                          index: activeFileTab != null
+                                              ? widget
+                                                        .workspace
+                                                        .sessions
+                                                        .length +
+                                                    fileTabs.indexOf(
+                                                      activeFileTab,
+                                                    )
+                                              : widget.workspace.sessions
+                                                    .indexOf(activeSession!),
+                                          children: [
+                                            for (final session
+                                                in widget.workspace.sessions)
+                                              TerminalGestureLayer(
+                                                key: ValueKey(session.host.id),
+                                                target: _gestureTargetFor(
+                                                  session,
+                                                ),
+                                                herdrControl: _herdrControlFor(
+                                                  session,
+                                                ),
+                                                onHerdrWorkspaceFocused:
+                                                    (workspaceId) => widget
+                                                        .connectFlow
+                                                        ?.herdr
+                                                        .noteWorkspace(
+                                                          session,
+                                                          workspaceId,
+                                                        ),
+                                                preferences: widget
+                                                    .themeController
+                                                    .terminalGestures,
+                                                session: session,
+                                                fontSize: widget
+                                                    .themeController
+                                                    .terminalFontSize,
+                                                onFontSizeChanged: (fontSize) {
+                                                  unawaited(
+                                                    widget.themeController
+                                                        .setTerminalFontSize(
+                                                          fontSize,
+                                                        ),
+                                                  );
+                                                },
+                                                scrollMode:
+                                                    session == activeSession &&
+                                                    _tmuxScrollMode,
+                                                onEnterScrollMode: () {
+                                                  setState(
+                                                    () =>
+                                                        _tmuxScrollMode = true,
+                                                  );
+                                                  _focusNode.requestFocus();
+                                                },
+                                                onExitScrollMode: () {
+                                                  setState(
+                                                    () =>
+                                                        _tmuxScrollMode = false,
+                                                  );
+                                                  _focusNode.requestFocus();
+                                                },
+                                                onOpenSessionGrid:
+                                                    _openSwitcher,
+                                                onOpenAgentPanel:
+                                                    _agentPanelOpener(),
+                                                child: TerminalSurface(
+                                                  session: session,
+                                                  autoConnect: widget.workspace
+                                                      .mayAutoConnect(session),
+                                                  palette: palette,
+                                                  brightness: brightness,
+                                                  fontFamily: widget
+                                                      .themeController
+                                                      .terminalFont
+                                                      .fontFamily,
+                                                  fontSize: widget
+                                                      .themeController
+                                                      .terminalFontSize,
+                                                  predictiveEchoEnabled: session
+                                                      .host
+                                                      .predictiveEchoEnabled,
+                                                  terminalMouseInput: widget
+                                                      .themeController
+                                                      .terminalMouseInput,
+                                                  focusNode:
+                                                      session ==
+                                                              activeSession &&
+                                                          activeFileTab == null
+                                                      ? _focusNode
+                                                      : null,
+                                                  tmuxScrollMode:
+                                                      session ==
+                                                          activeSession &&
+                                                      _tmuxScrollMode,
+                                                  onExitTmuxScrollMode: () {
+                                                    setState(
+                                                      () => _tmuxScrollMode =
+                                                          false,
+                                                    );
+                                                    _focusNode.requestFocus();
+                                                  },
+                                                  onPathTap: (path) =>
+                                                      _handlePathTap(
+                                                        session,
+                                                        path,
+                                                      ),
+                                                  onLinkTap: (url) =>
+                                                      _handleLinkTap(
+                                                        session,
+                                                        url,
+                                                      ),
+                                                  dragScrollsRemote: widget
+                                                      .themeController
+                                                      .terminalGestures
+                                                      .dragScrollsRemote,
+                                                  onEnterScrollMode:
+                                                      _dragScrollModeEntry(
+                                                        session,
+                                                      ),
+                                                  onKeyEvent: (_, event) =>
+                                                      isQuickSwitcherShortcut(
+                                                        event,
+                                                      )
+                                                      ? KeyEventResult.handled
+                                                      : KeyEventResult.ignored,
+                                                  onLinkLongPress:
+                                                      (url, line) =>
+                                                          _handleLinkLongPress(
+                                                            session,
+                                                            url,
+                                                            line,
+                                                          ),
+                                                  onPasteImage: () =>
+                                                      _pasteImageInto(session),
+                                                ),
+                                              ),
+                                            for (final tab in fileTabs)
+                                              _buildFileTab(
+                                                tab,
+                                                palette,
+                                                brightness,
+                                              ),
+                                          ],
+                                        ),
+                                      ),
+                              ),
+                            ),
+                            if (_pasteStatus case final status?)
+                              Positioned(
+                                top: 8,
+                                left: 8,
+                                child: _PasteStatusChip(text: status),
+                              ),
+                            if (activeFileTab == null &&
+                                activeSession != null &&
+                                _previewWatchers[activeSession] != null)
+                              Positioned(
+                                top: 8,
+                                right: 8,
+                                child: PreviewReadyChip(
+                                  key: ValueKey(
+                                    'preview-ready-${activeSession.host.id}',
+                                  ),
+                                  controller: _previewWatchers[activeSession]!,
+                                  hidden: (offer) =>
+                                      _previewShows(activeSession, offer),
+                                  onOpen: (offer) => unawaited(
+                                    _openLivePreview(
+                                      activeSession,
+                                      port: offer.port,
+                                      path: offer.path,
+                                    ),
+                                  ),
                                 ),
                               ),
-                            );
-                            return;
-                          }
-                          // Send the line, then deliver Enter as a SEPARATE write a
-                          // short moment later. Some remote TUIs (e.g. Claude Code
-                          // and other Ink/readline apps) classify a single terminal
-                          // read that contains a long line ending in CR as a *paste*
-                          // and insert the trailing CR as a literal newline instead
-                          // of submitting — so a wrapping compose line silently fails
-                          // to send. Delivering Enter in its own read makes it an
-                          // isolated keypress that submits regardless of line length.
-                          activeSession.sendText(line);
-                          Future.delayed(const Duration(milliseconds: 120), () {
-                            activeSession.sendKey(TerminalKey.enter);
-                          });
-                          setState(() {
-                            // De-duplicate: drop any earlier identical entry so the
-                            // ring keeps distinct lines (re-sending a recalled line
-                            // can't churn duplicates that evict good older ones).
-                            _composeHistory.remove(line);
-                            _composeHistory.add(line);
-                            if (_composeHistory.length > _composeHistoryLimit) {
-                              _composeHistory.removeAt(0);
-                            }
-                            _composeDrafts[activeSession.host.id] = '';
-                          });
-                        },
-                        onClose: (draft) {
-                          setState(() {
-                            _composeMode = false;
-                            // Preserve the unsent draft for this session.
-                            _composeDrafts[activeSession.host.id] = draft;
-                          });
-                          _focusNode.requestFocus();
-                        },
-                      )
-                    else if (!_touchKeysVisible)
-                      _DesktopKeysToggle(
-                        visible: false,
-                        palette: palette,
-                        brightness: brightness,
-                        onChanged: _setTouchKeysVisible,
-                      )
-                    else
-                      TerminalKeyboardBar(
-                        controller: activeSession,
-                        focusNode: _focusNode,
-                        palette: palette,
-                        brightness: brightness,
-                        rows: widget.themeController.terminalKeyboardRows,
-                        globalSnippets: widget.themeController.terminalSnippets,
-                        fullscreen: _fullscreen,
-                        onToggleFullscreen: _toggleFullscreen,
-                        composeActive: _composeMode,
-                        onToggleCompose: () =>
-                            setState(() => _composeMode = !_composeMode),
-                        onChatButton: () => _handleChatButton(activeSession),
-                        tmuxPrefixKey: activeSession.host.tmuxPrefixKey,
-                        tmuxScrollMode: _tmuxScrollMode,
-                        terminalMouseInput:
-                            widget.themeController.terminalMouseInput,
-                        onTerminalMouseInputChanged: (enabled) {
-                          unawaited(
-                            widget.themeController.setTerminalMouseInput(
-                              enabled,
-                            ),
-                          );
-                          _focusNode.requestFocus();
-                        },
-                        onRemoteMouseTrackingActivated: _maybeShowTouchModeHint,
-                        onOpenRecentDirectories:
-                            widget.connectFlow?.recentDirectories == null
-                            ? null
-                            : () => unawaited(
-                                _openRecentDirectories(activeSession),
-                              ),
-                        onEnterTmuxScrollMode: () {
-                          setState(() => _tmuxScrollMode = true);
-                          _focusNode.requestFocus();
-                        },
-                        onExitTmuxScrollMode: () {
-                          setState(() => _tmuxScrollMode = false);
-                          _focusNode.requestFocus();
-                        },
-                      ).withToolbarStyle(
-                        widget.themeController.terminalToolbarStyle,
-                        onReconnect: () async {
-                          await activeSession.disconnect();
-                          await activeSession.connect();
-                        },
-                        pillItems: widget.themeController.terminalPillItems,
-                        onPillItemsChanged: (items) => unawaited(
-                          widget.themeController.setTerminalPillItems(items),
+                          ],
                         ),
-                        runnerFactory: widget.connectFlow?.runnerFactory,
                       ),
-                  ],
-                ),
-              );
-            },
+                      // Menu → buttons: tappable choices for prompts on screen.
+                      if (activeFileTab == null &&
+                          activeSession != null &&
+                          widget.themeController.menuButtonsEnabled)
+                        PromptMenuStrip(
+                          key: ValueKey('prompt-menu-${activeSession.host.id}'),
+                          session: activeSession,
+                          palette: palette,
+                          brightness: brightness,
+                          onSent: _focusNode.requestFocus,
+                        ),
+                      if (PlatformFeatures.isDesktop &&
+                          _touchKeysVisible &&
+                          activeFileTab == null &&
+                          activeSession != null &&
+                          !_composeMode)
+                        _DesktopKeysToggle(
+                          visible: true,
+                          palette: palette,
+                          brightness: brightness,
+                          onChanged: _setTouchKeysVisible,
+                        ),
+                      if (activeFileTab != null || activeSession == null)
+                        const SizedBox.shrink()
+                      else if (_composeMode)
+                        _ComposeInputBar(
+                          key: ValueKey(
+                            'compose-${activeSession.host.id}-$_composeRevision',
+                          ),
+                          palette: palette,
+                          brightness: brightness,
+                          history: _composeHistory,
+                          initialText:
+                              _composeDrafts[activeSession.host.id] ?? '',
+                          dictation: _dictation,
+                          onChanged: (draft) {
+                            _composeDrafts[activeSession.host.id] = draft;
+                          },
+                          onExpand: () => _openPromptComposer(activeSession),
+                          onSend: (line) {
+                            if (!activeSession.isConnected) {
+                              // The line would be silently dropped; keep it as
+                              // the draft instead of clearing it.
+                              setState(() {
+                                _composeDrafts[activeSession.host.id] = line;
+                                _composeRevision += 1;
+                              });
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Not connected. The line was kept as a '
+                                    'draft.',
+                                  ),
+                                ),
+                              );
+                              return;
+                            }
+                            // Send the line, then deliver Enter as a SEPARATE write a
+                            // short moment later. Some remote TUIs (e.g. Claude Code
+                            // and other Ink/readline apps) classify a single terminal
+                            // read that contains a long line ending in CR as a *paste*
+                            // and insert the trailing CR as a literal newline instead
+                            // of submitting — so a wrapping compose line silently fails
+                            // to send. Delivering Enter in its own read makes it an
+                            // isolated keypress that submits regardless of line length.
+                            activeSession.sendText(line);
+                            Future.delayed(
+                              const Duration(milliseconds: 120),
+                              () {
+                                activeSession.sendKey(TerminalKey.enter);
+                              },
+                            );
+                            setState(() {
+                              // De-duplicate: drop any earlier identical entry so the
+                              // ring keeps distinct lines (re-sending a recalled line
+                              // can't churn duplicates that evict good older ones).
+                              _composeHistory.remove(line);
+                              _composeHistory.add(line);
+                              if (_composeHistory.length >
+                                  _composeHistoryLimit) {
+                                _composeHistory.removeAt(0);
+                              }
+                              _composeDrafts[activeSession.host.id] = '';
+                            });
+                          },
+                          onClose: (draft) {
+                            setState(() {
+                              _composeMode = false;
+                              // Preserve the unsent draft for this session.
+                              _composeDrafts[activeSession.host.id] = draft;
+                            });
+                            _focusNode.requestFocus();
+                          },
+                        )
+                      else if (!_touchKeysVisible)
+                        _DesktopKeysToggle(
+                          visible: false,
+                          palette: palette,
+                          brightness: brightness,
+                          onChanged: _setTouchKeysVisible,
+                        )
+                      else
+                        TerminalKeyboardBar(
+                          controller: activeSession,
+                          focusNode: _focusNode,
+                          palette: palette,
+                          brightness: brightness,
+                          rows: widget.themeController.terminalKeyboardRows,
+                          globalSnippets:
+                              widget.themeController.terminalSnippets,
+                          fullscreen: _fullscreen,
+                          onToggleFullscreen: _toggleFullscreen,
+                          composeActive: _composeMode,
+                          onToggleCompose: () =>
+                              setState(() => _composeMode = !_composeMode),
+                          onChatButton: () => _handleChatButton(activeSession),
+                          tmuxPrefixKey: activeSession.host.tmuxPrefixKey,
+                          tmuxScrollMode: _tmuxScrollMode,
+                          terminalMouseInput:
+                              widget.themeController.terminalMouseInput,
+                          onTerminalMouseInputChanged: (enabled) {
+                            unawaited(
+                              widget.themeController.setTerminalMouseInput(
+                                enabled,
+                              ),
+                            );
+                            _focusNode.requestFocus();
+                          },
+                          onRemoteMouseTrackingActivated:
+                              _maybeShowTouchModeHint,
+                          onPasteImage: () => _pasteImageInto(activeSession),
+                          onOpenRecentDirectories:
+                              widget.connectFlow?.recentDirectories == null
+                              ? null
+                              : () => unawaited(
+                                  _openRecentDirectories(activeSession),
+                                ),
+                          onEnterTmuxScrollMode: () {
+                            setState(() => _tmuxScrollMode = true);
+                            _focusNode.requestFocus();
+                          },
+                          onExitTmuxScrollMode: () {
+                            setState(() => _tmuxScrollMode = false);
+                            _focusNode.requestFocus();
+                          },
+                        ).withToolbarStyle(
+                          widget.themeController.terminalToolbarStyle,
+                          onReconnect: () async {
+                            await activeSession.disconnect();
+                            await activeSession.connect();
+                          },
+                          pillItems: widget.themeController.terminalPillItems,
+                          onPillItemsChanged: (items) => unawaited(
+                            widget.themeController.setTerminalPillItems(items),
+                          ),
+                          runnerFactory: widget.connectFlow?.runnerFactory,
+                        ),
+                    ],
+                  ),
+                );
+              },
+            ),
           ),
         );
       },
@@ -1695,6 +2251,89 @@ class _ComposeInputBarState extends State<_ComposeInputBar> {
               icon: const Icon(Icons.close_rounded),
               tooltip: 'Close chat mode',
               onPressed: () => widget.onClose(_controller.text),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A terminal's screen as a [Listenable], for watchers that re-read it
+/// after output.
+class _TerminalScreen implements Listenable {
+  const _TerminalScreen(this.terminal);
+
+  final Terminal terminal;
+
+  @override
+  void addListener(VoidCallback listener) => terminal.addListener(listener);
+
+  @override
+  void removeListener(VoidCallback listener) =>
+      terminal.removeListener(listener);
+
+  /// The visible rows of the active buffer, top to bottom.
+  static List<String> visibleRows(Terminal terminal) {
+    final buffer = terminal.buffer;
+    final lines = buffer.lines;
+    final start = buffer.scrollBack.clamp(0, lines.length);
+    return [
+      for (var row = start; row < lines.length; row++) lines[row].getText(),
+    ];
+  }
+}
+
+/// A runner someone else owns (the agent monitor's connection): closing it
+/// is left to the owner.
+class _BorrowedRunner implements AgentCommandRunner {
+  const _BorrowedRunner(this._runner);
+
+  final AgentCommandRunner _runner;
+
+  @override
+  Future<AgentCommandResult> run(String command, {required Duration timeout}) =>
+      _runner.run(command, timeout: timeout);
+
+  @override
+  Future<void> close() async {}
+}
+
+/// A small progress pill over the terminal ("Uploading image…").
+class _PasteStatusChip extends StatelessWidget {
+  const _PasteStatusChip({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      key: const ValueKey('paste-status-chip'),
+      color: scheme.secondaryContainer,
+      elevation: 3,
+      shape: const StadiumBorder(),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: scheme.onSecondaryContainer,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              text,
+              style: TextStyle(
+                color: scheme.onSecondaryContainer,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ],
         ),

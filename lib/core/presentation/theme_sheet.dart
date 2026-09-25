@@ -12,6 +12,7 @@ import 'package:conduit/features/backup/presentation/backup_sheet.dart';
 import 'package:conduit/features/home_widget/data/platform_agent_status_widget_channel.dart';
 import 'package:conduit/features/home_widget/presentation/quick_settings_tile_controls.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/session_navigation/presentation/session_view_widgets.dart';
 import 'package:conduit/features/snippets/presentation/snippet_editor.dart';
 import 'package:conduit/features/terminal/presentation/gestures/terminal_gestures_settings.dart';
 import 'package:conduit/features/voice/presentation/speech_settings_controls.dart';
@@ -473,6 +474,30 @@ class _TerminalAppearanceControls extends StatelessWidget {
           ),
           clipBehavior: Clip.antiAlias,
           child: SwitchListTile(
+            key: const ValueKey('paste-images-as-files'),
+            secondary: const Icon(Icons.image_outlined),
+            title: const Text('Paste images as uploaded files'),
+            subtitle: Text(
+              'Pasting an image uploads it to the machine\'s share inbox '
+              'and pastes its path, which Claude Code reads as an image. '
+              'Off: paste text only.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+            value: controller.pasteImagesAsFiles,
+            onChanged: controller.setPasteImagesAsFiles,
+          ),
+        ),
+        const SizedBox(height: 14),
+        Material(
+          color: colorScheme.surface,
+          shape: RoundedRectangleBorder(
+            side: BorderSide(color: colorScheme.outlineVariant),
+            borderRadius: AppTheme.borderRadius,
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: SwitchListTile(
             key: const ValueKey('restore-sessions-switch'),
             secondary: const Icon(Icons.restore_page_rounded),
             title: const Text('Restore sessions on launch'),
@@ -488,6 +513,7 @@ class _TerminalAppearanceControls extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 14),
+        const SessionViewSettingsTile(),
         Container(
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
           decoration: BoxDecoration(

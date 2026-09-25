@@ -65,6 +65,7 @@ class TerminalGesturePreferences {
     this.herdrPinch = HerdrPinchAction.fontSize,
     this.herdrTwoFingerVertical = HerdrVerticalSwipe.workspaces,
     this.herdrTwoFingerPanes = true,
+    this.dragScrollsRemote = true,
   });
 
   static const defaults = TerminalGesturePreferences();
@@ -104,13 +105,21 @@ class TerminalGesturePreferences {
   /// In Herdr: two-finger left/right focuses the neighbouring pane.
   final bool herdrTwoFingerPanes;
 
+  /// One-finger vertical drag scrolls the remote program when it draws on
+  /// the alternate screen or asked for mouse reports (Herdr, tmux with
+  /// `mouse on`, vim, htop, Claude Code's fullscreen view): mouse wheel
+  /// notches, arrow keys, or the multiplexer's copy mode. Off, the drag
+  /// is left to the terminal view as before.
+  final bool dragScrollsRemote;
+
   bool get anyEnabled =>
       swipeSwitchesWindow ||
       pinchZoom ||
       twoFingerScroll ||
       headerSwipeOpensSessions ||
       edgeSwipeOpensAgents ||
-      herdrTwoFingerPanes;
+      herdrTwoFingerPanes ||
+      dragScrollsRemote;
 
   TerminalGesturePreferences copyWith({
     bool? swipeSwitchesWindow,
@@ -122,6 +131,7 @@ class TerminalGesturePreferences {
     HerdrPinchAction? herdrPinch,
     HerdrVerticalSwipe? herdrTwoFingerVertical,
     bool? herdrTwoFingerPanes,
+    bool? dragScrollsRemote,
   }) {
     return TerminalGesturePreferences(
       swipeSwitchesWindow: swipeSwitchesWindow ?? this.swipeSwitchesWindow,
@@ -135,6 +145,7 @@ class TerminalGesturePreferences {
       herdrTwoFingerVertical:
           herdrTwoFingerVertical ?? this.herdrTwoFingerVertical,
       herdrTwoFingerPanes: herdrTwoFingerPanes ?? this.herdrTwoFingerPanes,
+      dragScrollsRemote: dragScrollsRemote ?? this.dragScrollsRemote,
     );
   }
 
@@ -150,6 +161,7 @@ class TerminalGesturePreferences {
       'herdrPinch': herdrPinch.name,
       'herdrTwoFingerVertical': herdrTwoFingerVertical.name,
       'herdrTwoFingerPanes': herdrTwoFingerPanes,
+      'dragScrollsRemote': dragScrollsRemote,
     };
   }
 
@@ -192,6 +204,7 @@ class TerminalGesturePreferences {
         'herdrTwoFingerPanes',
         defaults.herdrTwoFingerPanes,
       ),
+      dragScrollsRemote: flag('dragScrollsRemote', defaults.dragScrollsRemote),
     );
   }
 
@@ -232,7 +245,8 @@ class TerminalGesturePreferences {
         other.edgeSwipeOpensAgents == edgeSwipeOpensAgents &&
         other.herdrPinch == herdrPinch &&
         other.herdrTwoFingerVertical == herdrTwoFingerVertical &&
-        other.herdrTwoFingerPanes == herdrTwoFingerPanes;
+        other.herdrTwoFingerPanes == herdrTwoFingerPanes &&
+        other.dragScrollsRemote == dragScrollsRemote;
   }
 
   @override
@@ -246,5 +260,6 @@ class TerminalGesturePreferences {
     herdrPinch,
     herdrTwoFingerVertical,
     herdrTwoFingerPanes,
+    dragScrollsRemote,
   );
 }

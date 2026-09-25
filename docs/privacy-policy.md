@@ -25,8 +25,16 @@ On your device only:
 
 Outsmartis never receives any of this. Uninstalling the app deletes it.
 If you export a backup, the app writes the file to a location you choose,
-encrypted with a password if you set one. What happens to that file after
+encrypted with the password you set. What happens to that file after
 that is up to you.
+
+If you turn on device sync, the app stores one file encrypted on your
+device with your sync passphrase (Argon2id, XChaCha20-Poly1305) in
+`~/.conductore/sync` on a machine of yours that you pick, over SSH, plus a
+small unencrypted list of your device names and sync times. Passwords and
+SSH keys are included only if you turn that on. Adding a device adds an
+SSH key marked `conductore-device` to that machine's
+`~/.ssh/authorized_keys`, after you confirm.
 
 ## Network connections
 

@@ -6,6 +6,7 @@ import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/terminal_pill_items.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
 import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
+import 'package:conduit/features/voice/domain/voice_preferences.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -28,7 +29,9 @@ class ThemePreferences {
     this.menuButtonsEnabled = true,
     this.terminalGestures = TerminalGesturePreferences.defaults,
     this.speechLanguage = '',
+    this.voice = VoicePreferences.defaults,
     this.remoteClipboardEnabled = true,
+    this.pasteImagesAsFiles = true,
     this.restoreSessionsOnLaunch = true,
     this.omarchySyncHostId,
     this.omarchySyncedTheme,
@@ -71,9 +74,17 @@ class ThemePreferences {
   /// BCP-47 tag dictation listens in; empty means the device locale.
   final String speechLanguage;
 
+  /// Read-aloud and continuous-dictation settings.
+  final VoicePreferences voice;
+
   /// Whether text the remote copies with OSC 52 lands on the phone
   /// clipboard. On by default, like most desktop terminals.
   final bool remoteClipboardEnabled;
+
+  /// Whether pasting an image uploads it to the host's share inbox and
+  /// pastes its path (what Claude Code reads as an image). Off: paste text
+  /// only, as before. On by default.
+  final bool pasteImagesAsFiles;
 
   /// Whether the open sessions come back after the app restarts (their
   /// list is kept in secure storage). On by default.
@@ -120,8 +131,10 @@ class ThemePreferencesRepository {
   static const _menuButtonsEnabledKey = 'conduit.menu_buttons_enabled.v1';
   static const _terminalGesturesKey = 'conduit.terminal_gestures.v1';
   static const _speechLanguageKey = 'conduit.speech_language.v1';
+  static const _voiceKey = 'conductore.voice.v1';
   static const _remoteClipboardEnabledKey =
       'conduit.remote_clipboard_enabled.v1';
+  static const _pasteImagesAsFilesKey = 'conductore.paste_images_as_files.v1';
   static const _restoreSessionsOnLaunchKey =
       'conductore.restore_sessions_on_launch.v1';
 
@@ -179,11 +192,15 @@ class ThemePreferencesRepository {
     );
     final rawTerminalGestures = await _storage.read(key: _terminalGesturesKey);
     final rawSpeechLanguage = await _storage.read(key: _speechLanguageKey);
+    final rawVoice = await _storage.read(key: _voiceKey);
     final rawRemoteClipboardEnabled = await _storage.read(
       key: _remoteClipboardEnabledKey,
     );
     final rawRestoreSessionsOnLaunch = await _storage.read(
       key: _restoreSessionsOnLaunchKey,
+    );
+    final rawPasteImagesAsFiles = await _storage.read(
+      key: _pasteImagesAsFilesKey,
     );
     final terminalFontSize = double.tryParse(rawTerminalFontSize ?? '');
     final terminalKeyboardRows = _appendUnseenBuiltIns(
@@ -224,12 +241,15 @@ class ThemePreferencesRepository {
           rawMenuButtonsEnabled == null || rawMenuButtonsEnabled == 'true',
       terminalGestures: TerminalGesturePreferences.decode(rawTerminalGestures),
       speechLanguage: rawSpeechLanguage?.trim() ?? '',
+      voice: VoicePreferences.decode(rawVoice),
       remoteClipboardEnabled:
           rawRemoteClipboardEnabled == null ||
           rawRemoteClipboardEnabled == 'true',
       restoreSessionsOnLaunch:
           rawRestoreSessionsOnLaunch == null ||
           rawRestoreSessionsOnLaunch == 'true',
+      pasteImagesAsFiles:
+          rawPasteImagesAsFiles == null || rawPasteImagesAsFiles == 'true',
       omarchySyncHostId: (rawOmarchySyncHost?.trim().isEmpty ?? true)
           ? null
           : rawOmarchySyncHost!.trim(),
@@ -341,6 +361,7 @@ class ThemePreferencesRepository {
       key: _speechLanguageKey,
       value: preferences.speechLanguage,
     );
+    await _storage.write(key: _voiceKey, value: preferences.voice.encode());
     await _storage.write(
       key: _remoteClipboardEnabledKey,
       value: preferences.remoteClipboardEnabled.toString(),
@@ -348,6 +369,10 @@ class ThemePreferencesRepository {
     await _storage.write(
       key: _restoreSessionsOnLaunchKey,
       value: preferences.restoreSessionsOnLaunch.toString(),
+    );
+    await _storage.write(
+      key: _pasteImagesAsFilesKey,
+      value: preferences.pasteImagesAsFiles.toString(),
     );
     await _storage.write(
       key: _omarchySyncHostKey,

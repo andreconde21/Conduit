@@ -23,6 +23,7 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterFragmentActivity() {
     private lateinit var fidoUsbCtapTransport: FidoUsbCtapTransport
     private var speechRecognition: SpeechRecognitionBridge? = null
+    private var textToSpeech: TextToSpeechBridge? = null
     private var shareTarget: ShareTargetBridge? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -40,6 +41,16 @@ class MainActivity : FlutterFragmentActivity() {
             flutterEngine.dartExecutor.binaryMessenger,
             SpeechRecognitionBridge.EVENT_CHANNEL,
         ).setStreamHandler(speech)
+        val tts = TextToSpeechBridge(this) // Chat View "Read replies aloud"
+        textToSpeech = tts
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            TextToSpeechBridge.METHOD_CHANNEL,
+        ).setMethodCallHandler { call, result -> tts.handle(call, result) }
+        EventChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            TextToSpeechBridge.EVENT_CHANNEL,
+        ).setStreamHandler(tts)
         val share = ShareTargetBridge(this)
         shareTarget = share
         val shareChannel = MethodChannel(
@@ -55,6 +66,11 @@ class MainActivity : FlutterFragmentActivity() {
             flutterEngine.dartExecutor.binaryMessenger,
             ClipboardImageBridge.CHANNEL,
         ).setMethodCallHandler { call, result -> clipboardImage.handle(call, result) }
+        val screenCapture = ScreenCaptureBridge(this) // Live preview screenshot
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            ScreenCaptureBridge.CHANNEL,
+        ).setMethodCallHandler { call, result -> screenCapture.handle(call, result) }
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             BACKGROUND_KEEPALIVE_CHANNEL,
@@ -123,9 +139,16 @@ class MainActivity : FlutterFragmentActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
     }
 
+    override fun onStop() {
+        speechRecognition?.onStop()
+        super.onStop()
+    }
+
     override fun onDestroy() {
         speechRecognition?.dispose()
         speechRecognition = null
+        textToSpeech?.dispose()
+        textToSpeech = null
         shareTarget?.dispose()
         shareTarget = null
         super.onDestroy()

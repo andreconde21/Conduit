@@ -6,6 +6,7 @@ import 'package:conduit/core/theme/terminal_pill_items.dart';
 import 'package:conduit/core/theme/theme_preferences_repository.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
 import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
+import 'package:conduit/features/voice/domain/voice_preferences.dart';
 import 'package:flutter/material.dart';
 
 class ThemeController extends ChangeNotifier {
@@ -37,10 +38,12 @@ class ThemeController extends ChangeNotifier {
   List<TerminalPillItem> _terminalPillItems = defaultTerminalPillItems;
   bool _menuButtonsEnabled = true;
   bool _remoteClipboardEnabled = true;
+  bool _pasteImagesAsFiles = true;
   bool _restoreSessionsOnLaunch = true;
   TerminalGesturePreferences _terminalGestures =
       TerminalGesturePreferences.defaults;
   String _speechLanguage = '';
+  VoicePreferences _voice = VoicePreferences.defaults;
 
   /// The stored light/dark choice. Omarchy themes are dark or light
   /// themselves, so the app follows [effectiveThemeMode]; this stays for
@@ -92,12 +95,18 @@ class ThemeController extends ChangeNotifier {
   /// Whether OSC 52 copies from the remote reach the phone clipboard.
   bool get remoteClipboardEnabled => _remoteClipboardEnabled;
 
+  /// Whether a pasted image is uploaded to the host and pasted as a path.
+  bool get pasteImagesAsFiles => _pasteImagesAsFiles;
+
   /// Whether the open sessions come back after the app restarts.
   bool get restoreSessionsOnLaunch => _restoreSessionsOnLaunch;
   TerminalGesturePreferences get terminalGestures => _terminalGestures;
 
   /// BCP-47 tag dictation listens in; empty means the device locale.
   String get speechLanguage => _speechLanguage;
+
+  /// Read-aloud and continuous-dictation settings.
+  VoicePreferences get voice => _voice;
 
   Future<void> load() async {
     final preferences = await _repository.load();
@@ -117,9 +126,11 @@ class ThemeController extends ChangeNotifier {
     _terminalPillItems = List.of(preferences.terminalPillItems);
     _menuButtonsEnabled = preferences.menuButtonsEnabled;
     _remoteClipboardEnabled = preferences.remoteClipboardEnabled;
+    _pasteImagesAsFiles = preferences.pasteImagesAsFiles;
     _restoreSessionsOnLaunch = preferences.restoreSessionsOnLaunch;
     _terminalGestures = preferences.terminalGestures;
     _speechLanguage = preferences.speechLanguage;
+    _voice = preferences.voice;
     _omarchySyncHostId = preferences.omarchySyncHostId;
     _omarchySyncedTheme = preferences.omarchySyncedTheme;
     notifyListeners();
@@ -347,6 +358,15 @@ class ThemeController extends ChangeNotifier {
     await _save();
   }
 
+  Future<void> setPasteImagesAsFiles(bool enabled) async {
+    if (_pasteImagesAsFiles == enabled) {
+      return;
+    }
+    _pasteImagesAsFiles = enabled;
+    notifyListeners();
+    await _save();
+  }
+
   Future<void> setRestoreSessionsOnLaunch(bool enabled) async {
     if (_restoreSessionsOnLaunch == enabled) {
       return;
@@ -375,6 +395,15 @@ class ThemeController extends ChangeNotifier {
     await _save();
   }
 
+  Future<void> setVoice(VoicePreferences voice) async {
+    if (_voice == voice) {
+      return;
+    }
+    _voice = voice;
+    notifyListeners();
+    await _save();
+  }
+
   Future<void> _save() {
     return _repository.save(
       ThemePreferences(
@@ -395,7 +424,9 @@ class ThemeController extends ChangeNotifier {
         menuButtonsEnabled: _menuButtonsEnabled,
         terminalGestures: _terminalGestures,
         speechLanguage: _speechLanguage,
+        voice: _voice,
         remoteClipboardEnabled: _remoteClipboardEnabled,
+        pasteImagesAsFiles: _pasteImagesAsFiles,
         restoreSessionsOnLaunch: _restoreSessionsOnLaunch,
         omarchySyncHostId: _omarchySyncHostId,
         omarchySyncedTheme: _omarchySyncedTheme,

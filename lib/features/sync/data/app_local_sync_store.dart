@@ -1,0 +1,519 @@
+import 'dart:convert';
+
+import 'package:conduit/core/theme/theme_controller.dart';
+import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/hosts/domain/saved_hosts_repository.dart';
+import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
+import 'package:conduit/features/sessions/domain/session_snapshot.dart';
+import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
+import 'package:conduit/features/sync/data/app_settings_codec.dart';
+import 'package:conduit/features/sync/domain/local_sync_store.dart';
+import 'package:conduit/features/sync/domain/sync_category.dart';
+import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
+import 'package:conduit/features/terminal/presentation/recent_directories_controller.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
+/// A JSON object kept whole under one storage key (connect preferences,
+/// recent directories), read and written as a map.
+abstract interface class JsonMapStore {
+  Future<Map<String, Object?>> readAll();
+  Future<void> writeAll(Map<String, Object?> values);
+}
+
+class SecureJsonMapStore implements JsonMapStore {
+  const SecureJsonMapStore(this._storage, this._key);
+
+  final FlutterSecureStorage _storage;
+  final String _key;
+
+  @override
+  Future<Map<String, Object?>> readAll() async {
+    final raw = await _storage.read(key: _key);
+    if (raw == null || raw.isEmpty) return {};
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) return Map<String, Object?>.from(decoded);
+    } catch (_) {
+      // Unreadable preferences are rebuilt from the synced copy.
+    }
+    return {};
+  }
+
+  @override
+  Future<void> writeAll(Map<String, Object?> values) =>
+      _storage.write(key: _key, value: jsonEncode(values));
+}
+
+/// Maps the app's controllers and stores to sync records and back.
+///
+/// Record layout (see [SyncKeys]):
+/// * `host:<id>`: a saved machine without secrets, hardware keys, its
+///   last-connected time or, for the hub, its login. Hidden snippet text
+///   is blanked.
+/// * `secret:host:<id>`: password, private key, passphrase and hidden
+///   snippet text of one machine (credentials category).
+/// * `knownHost:<host>:<port>`: a trusted host key.
+/// * `hosts:sortMode`, `hosts:manualOrder`: the machine list order.
+/// * `snippet:<id>` and `secret:snippet:<id>`: global snippets.
+/// * `setting:<name>`: one [AppSettingsCodec] entry.
+/// * `connect:<hostId>`, `recentDirs:<hostId>`: connect-picker memory.
+/// * `sessions`: the session-restore list.
+class AppLocalSyncStore implements LocalSyncStore {
+  AppLocalSyncStore({
+    required this.hosts,
+    required this.theme,
+    required this.hostKeys,
+    required this.connectPreferences,
+    required this.recentDirectoriesStore,
+    required this.sessions,
+    this.recentDirectories,
+    this.ready,
+  });
+
+  final HostsController hosts;
+  final ThemeController theme;
+  final HostKeyVerifier hostKeys;
+  final JsonMapStore connectPreferences;
+
+  /// Read side of recent directories (all hosts at once).
+  final JsonMapStore recentDirectoriesStore;
+
+  /// Write side of recent directories, so the in-memory cache follows.
+  final RecentDirectoriesController? recentDirectories;
+  final SessionSnapshotRepository sessions;
+
+  /// Completes once the app's settings are loaded.
+  final Future<void>? ready;
+
+  static const _hostSecretFields = ['password', 'privateKey', 'passphrase'];
+  static const _hubLoginFields = ['authMethod', 'externalAuthOfferKey'];
+
+  Future<void> _whenLoaded() async {
+    await ready;
+    await hosts.firstLoad;
+    if (hosts.errorMessage != null && hosts.hosts.isEmpty) {
+      throw LocalSyncUnavailable(
+        'Saved machines could not be read: ${hosts.errorMessage}',
+      );
+    }
+  }
+
+  @override
+  Future<Map<String, Object?>> snapshot(LocalSyncOptions options) async {
+    await _whenLoaded();
+    final on = options.categories;
+    final out = <String, Object?>{};
+
+    for (final host in hosts.hosts) {
+      if (host.isLocal) continue;
+      if (on.contains(SyncCategory.machines)) {
+        out[SyncKeys.host(host.id)] = _hostRecord(host, options);
+      }
+      if (on.contains(SyncCategory.credentials) &&
+          host.id != options.hubHostId) {
+        out[SyncKeys.hostSecret(host.id)] = _hostSecretRecord(host, options);
+      }
+    }
+    if (on.contains(SyncCategory.machines)) {
+      out[SyncKeys.hostSortMode] = hosts.sortMode.name;
+      out[SyncKeys.hostManualOrder] = hosts.manualOrder;
+      for (final record in await hostKeys.loadTrustedKeys()) {
+        if (record.host.isEmpty || record.fingerprint.isEmpty) continue;
+        out[SyncKeys.knownHost(record.host, record.port)] = {
+          'host': record.host,
+          'port': record.port,
+          'type': record.type,
+          'fingerprint': record.fingerprint,
+        };
+      }
+    }
+
+    final snippets = theme.terminalSnippets;
+    for (var i = 0; i < snippets.length; i++) {
+      final snippet = snippets[i];
+      if (on.contains(SyncCategory.snippets)) {
+        out[SyncKeys.snippet(snippet.id)] = {
+          'position': i,
+          ..._snippetWithoutSecret(snippet).toJson(),
+        };
+      }
+      if (on.contains(SyncCategory.credentials) &&
+          snippet.hidden &&
+          snippet.text.isNotEmpty) {
+        out[SyncKeys.snippetSecret(snippet.id)] = {'text': snippet.text};
+      }
+    }
+
+    if (on.contains(SyncCategory.appearance)) {
+      AppSettingsCodec.encode(theme).forEach((name, value) {
+        out[SyncKeys.setting(name)] = value;
+      });
+    }
+
+    if (on.contains(SyncCategory.connections)) {
+      (await connectPreferences.readAll()).forEach((hostId, value) {
+        if (value != null) out[SyncKeys.connect(hostId)] = value;
+      });
+      (await recentDirectoriesStore.readAll()).forEach((hostId, value) {
+        if (value is List && value.isNotEmpty) {
+          out[SyncKeys.recentDirs(hostId)] = value;
+        }
+      });
+    }
+
+    if (on.contains(SyncCategory.sessions)) {
+      final snapshot = await sessions.load();
+      if (!snapshot.isEmpty) out[SyncKeys.sessionsKey] = snapshot.toJson();
+    }
+    return out;
+  }
+
+  Map<String, Object?> _hostRecord(SavedHost host, LocalSyncOptions options) {
+    final json = host
+        .copyWith(
+          snippets: [for (final s in host.snippets) _snippetWithoutSecret(s)],
+        )
+        .toJson();
+    for (final field in [
+      ..._hostSecretFields,
+      'hardwareKeys',
+      'lastConnectedAt',
+      'isLocal',
+      if (host.id == options.hubHostId) ..._hubLoginFields,
+    ]) {
+      json.remove(field);
+    }
+    return json;
+  }
+
+  Map<String, Object?> _hostSecretRecord(
+    SavedHost host,
+    LocalSyncOptions options,
+  ) {
+    final hardware = host.authMethod == SshAuthMethod.hardwareKey;
+    return {
+      'password': host.password,
+      // For hardware-key hosts these fields hold the first stub.
+      if (!hardware || options.includeHardwareKeys) ...{
+        'privateKey': host.privateKey,
+        'passphrase': host.passphrase,
+      },
+      if (options.includeHardwareKeys && hardware)
+        'hardwareKeys': [
+          for (final key in host.effectiveHardwareKeys) key.toJson(),
+        ],
+      'snippetTexts': {
+        for (final snippet in host.snippets)
+          if (snippet.hidden && snippet.text.isNotEmpty)
+            snippet.id: snippet.text,
+      },
+    };
+  }
+
+  static TerminalSnippet _snippetWithoutSecret(TerminalSnippet snippet) =>
+      snippet.hidden ? snippet.copyWith(text: '') : snippet;
+
+  @override
+  Future<void> apply(
+    Map<String, Object?> values,
+    Set<String> changedKeys,
+    LocalSyncOptions options, {
+    bool replace = true,
+  }) async {
+    await _whenLoaded();
+    final on = options.categories;
+    bool changed(bool Function(String key) test) => changedKeys.any(test);
+
+    if ((on.contains(SyncCategory.machines) ||
+            on.contains(SyncCategory.credentials)) &&
+        changed(
+          (key) =>
+              key.startsWith('${SyncKeys.hostPrefix}:') ||
+              key.startsWith('${SyncKeys.hostListPrefix}:') ||
+              key.startsWith('${SyncKeys.secretPrefix}:host:'),
+        )) {
+      await _applyHosts(values, options, replace: replace);
+    }
+    if (on.contains(SyncCategory.machines) &&
+        changed((key) => key.startsWith('${SyncKeys.knownHostPrefix}:'))) {
+      await _applyKnownHosts(values, changedKeys, replace: replace);
+    }
+    if ((on.contains(SyncCategory.snippets) ||
+            on.contains(SyncCategory.credentials)) &&
+        changed(
+          (key) =>
+              key.startsWith('${SyncKeys.snippetPrefix}:') ||
+              key.startsWith('${SyncKeys.secretPrefix}:snippet:'),
+        )) {
+      await _applySnippets(values, options, replace: replace);
+    }
+    if (on.contains(SyncCategory.appearance)) {
+      final settings = <String, Object?>{
+        for (final name in AppSettingsCodec.keys)
+          if (changedKeys.contains(SyncKeys.setting(name)) &&
+              values.containsKey(SyncKeys.setting(name)))
+            name: values[SyncKeys.setting(name)],
+      };
+      if (settings.isNotEmpty) await AppSettingsCodec.apply(theme, settings);
+    }
+    if (on.contains(SyncCategory.connections)) {
+      await _applyConnections(values, changedKeys);
+    }
+    if (on.contains(SyncCategory.sessions) &&
+        changedKeys.contains(SyncKeys.sessionsKey)) {
+      final raw = values[SyncKeys.sessionsKey];
+      if (raw == null) {
+        if (replace) await sessions.clear();
+      } else {
+        await sessions.save(SessionSnapshot.fromJson(raw));
+      }
+    }
+  }
+
+  Future<void> _applyHosts(
+    Map<String, Object?> values,
+    LocalSyncOptions options, {
+    required bool replace,
+  }) async {
+    final on = options.categories;
+    final machines = on.contains(SyncCategory.machines);
+    final credentials = on.contains(SyncCategory.credentials);
+    final current = hosts.hosts;
+    final result = <SavedHost>[];
+    final placed = <String>{};
+
+    SavedHost build(SavedHost? existing, String id) {
+      final json = <String, Object?>{...?existing?.toJson()};
+      final record = machines ? values[SyncKeys.host(id)] : null;
+      if (record is Map) {
+        final incoming = Map<String, Object?>.from(record);
+        if (id == options.hubHostId) {
+          for (final field in _hubLoginFields) {
+            incoming.remove(field);
+          }
+        }
+        json.addAll(incoming);
+        // Hidden snippet text never travels in the machine record.
+        json['snippets'] = _withLocalHiddenText(
+          json['snippets'],
+          existing?.snippets ?? const [],
+        );
+      }
+      final secret = credentials && id != options.hubHostId
+          ? values[SyncKeys.hostSecret(id)]
+          : null;
+      if (secret is Map) {
+        for (final field in _hostSecretFields) {
+          final value = secret[field];
+          if (value is String) json[field] = value;
+        }
+        final hardwareKeys = secret['hardwareKeys'];
+        if (hardwareKeys is List) json['hardwareKeys'] = hardwareKeys;
+        final texts = secret['snippetTexts'];
+        if (texts is Map) {
+          json['snippets'] = [
+            for (final raw in (json['snippets'] as List?) ?? const [])
+              if (raw is Map)
+                {
+                  ...Map<String, Object?>.from(raw),
+                  if (raw['hidden'] == true && texts[raw['id']] is String)
+                    'text': texts[raw['id']],
+                },
+          ];
+        }
+      }
+      json['id'] = id;
+      json['isLocal'] = false;
+      json['lastConnectedAt'] = existing?.lastConnectedAt?.toIso8601String();
+      return SavedHost.fromJson(json);
+    }
+
+    for (final host in current) {
+      if (host.isLocal) {
+        result.add(host);
+        continue;
+      }
+      final hasRecord = values.containsKey(SyncKeys.host(host.id));
+      if (machines && replace && !hasRecord) {
+        continue; // Deleted on another device.
+      }
+      result.add(build(host, host.id));
+      placed.add(host.id);
+    }
+    if (machines) {
+      for (final key in values.keys) {
+        if (!key.startsWith('${SyncKeys.hostPrefix}:')) continue;
+        final id = SyncKeys.idOf(key, SyncKeys.hostPrefix);
+        if (id.isEmpty || placed.contains(id)) continue;
+        final host = build(null, id);
+        if (host.name.trim().isEmpty || host.host.trim().isEmpty) continue;
+        result.add(host);
+        placed.add(id);
+      }
+    }
+
+    HostListSortMode? sortMode;
+    List<String>? manualOrder;
+    if (machines) {
+      final rawMode = values[SyncKeys.hostSortMode];
+      sortMode = HostListSortMode.values
+          .where((mode) => mode.name == rawMode)
+          .firstOrNull;
+      final rawOrder = values[SyncKeys.hostManualOrder];
+      if (rawOrder is List) {
+        manualOrder = rawOrder.whereType<String>().toList();
+        if (!replace) {
+          manualOrder = [
+            ...manualOrder,
+            ...hosts.manualOrder.where((id) => !manualOrder!.contains(id)),
+          ];
+        }
+      }
+    }
+    await hosts.replaceAll(
+      result,
+      sortMode: sortMode,
+      manualOrder: manualOrder,
+    );
+  }
+
+  static List<Object?> _withLocalHiddenText(
+    Object? rawSnippets,
+    List<TerminalSnippet> local,
+  ) {
+    final localText = {
+      for (final snippet in local)
+        if (snippet.hidden) snippet.id: snippet.text,
+    };
+    return [
+      for (final raw in (rawSnippets as List?) ?? const [])
+        if (raw is Map)
+          {
+            ...Map<String, Object?>.from(raw),
+            if (raw['hidden'] == true &&
+                (raw['text'] as String? ?? '').isEmpty &&
+                localText[raw['id']] != null)
+              'text': localText[raw['id']],
+          },
+    ];
+  }
+
+  Future<void> _applyKnownHosts(
+    Map<String, Object?> values,
+    Set<String> changedKeys, {
+    required bool replace,
+  }) async {
+    final byKey = {
+      for (final record in await hostKeys.loadTrustedKeys())
+        SyncKeys.knownHost(record.host, record.port): record,
+    };
+    for (final key in changedKeys) {
+      if (!key.startsWith('${SyncKeys.knownHostPrefix}:')) continue;
+      final raw = values[key];
+      if (raw is Map) {
+        final record = HostKeyRecord.fromJson({
+          ...Map<String, Object?>.from(raw),
+          'trustedAt': (byKey[key]?.trustedAt ?? DateTime.now())
+              .toIso8601String(),
+        });
+        if (record.host.isNotEmpty && record.fingerprint.isNotEmpty) {
+          byKey[key] = record;
+        }
+      } else if (replace) {
+        byKey.remove(key);
+      }
+    }
+    await hostKeys.saveTrustedKeys(byKey.values.toList());
+  }
+
+  Future<void> _applySnippets(
+    Map<String, Object?> values,
+    LocalSyncOptions options, {
+    required bool replace,
+  }) async {
+    final credentials = options.categories.contains(SyncCategory.credentials);
+    final local = {for (final s in theme.terminalSnippets) s.id: s};
+    String hiddenText(String id) {
+      final secret = credentials ? values[SyncKeys.snippetSecret(id)] : null;
+      if (secret is Map && secret['text'] is String) {
+        return secret['text'] as String;
+      }
+      return local[id]?.text ?? '';
+    }
+
+    if (!options.categories.contains(SyncCategory.snippets)) {
+      // Credentials only: fill in hidden text of the snippets already here.
+      await theme.setTerminalSnippets([
+        for (final snippet in theme.terminalSnippets)
+          snippet.hidden
+              ? snippet.copyWith(text: hiddenText(snippet.id))
+              : snippet,
+      ]);
+      return;
+    }
+    final incoming = <(num, String, TerminalSnippet)>[];
+    for (final entry in values.entries) {
+      if (!entry.key.startsWith('${SyncKeys.snippetPrefix}:')) continue;
+      final raw = entry.value;
+      if (raw is! Map) continue;
+      var snippet = TerminalSnippet.fromJson(raw);
+      if (snippet == null) continue;
+      if (snippet.hidden) {
+        snippet = snippet.copyWith(text: hiddenText(snippet.id));
+      }
+      final position = raw['position'];
+      incoming.add((position is num ? position : 1 << 20, snippet.id, snippet));
+    }
+    incoming.sort((a, b) {
+      final byPosition = a.$1.compareTo(b.$1);
+      return byPosition != 0 ? byPosition : a.$2.compareTo(b.$2);
+    });
+    final list = [for (final item in incoming) item.$3];
+    if (!replace) {
+      final ids = list.map((s) => s.id).toSet();
+      list.addAll(theme.terminalSnippets.where((s) => !ids.contains(s.id)));
+    }
+    await theme.setTerminalSnippets(list);
+  }
+
+  Future<void> _applyConnections(
+    Map<String, Object?> values,
+    Set<String> changedKeys,
+  ) async {
+    final connectKeys = changedKeys
+        .where((key) => key.startsWith('${SyncKeys.connectPrefix}:'))
+        .toList();
+    if (connectKeys.isNotEmpty) {
+      final all = await connectPreferences.readAll();
+      for (final key in connectKeys) {
+        final hostId = SyncKeys.idOf(key, SyncKeys.connectPrefix);
+        final value = values[key];
+        if (value == null) {
+          all.remove(hostId);
+        } else {
+          all[hostId] = value;
+        }
+      }
+      await connectPreferences.writeAll(all);
+    }
+    final dirKeys = changedKeys
+        .where((key) => key.startsWith('${SyncKeys.recentDirsPrefix}:'))
+        .toList();
+    if (dirKeys.isEmpty) return;
+    final all = await recentDirectoriesStore.readAll();
+    for (final key in dirKeys) {
+      final hostId = SyncKeys.idOf(key, SyncKeys.recentDirsPrefix);
+      final raw = values[key];
+      final list = raw is List ? raw.whereType<String>().toList() : <String>[];
+      final controller = recentDirectories;
+      if (controller != null) {
+        await controller.replace(hostId, list);
+      } else if (list.isEmpty) {
+        all.remove(hostId);
+      } else {
+        all[hostId] = list;
+      }
+    }
+    if (recentDirectories == null) await recentDirectoriesStore.writeAll(all);
+  }
+}

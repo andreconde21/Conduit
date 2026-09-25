@@ -1,11 +1,15 @@
+import 'dart:async';
+
 import 'package:conduit/core/theme/app_theme.dart';
+import 'package:conduit/features/chat_view/domain/markdown_table.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 /// Renders the Markdown subset agent replies actually use: paragraphs,
 /// headings, bullet and numbered lists, block quotes, fenced code blocks,
-/// tables (shown monospace, as typed), rules, and inline code, bold,
+/// GitHub-style tables (a real table, scrollable when wide, full screen
+/// on tap), rules, and inline code, bold,
 /// italics and links. Everything else is shown as plain text; no HTML is
 /// interpreted. Links open only for http(s) and mailto.
 class ChatMarkdown extends StatefulWidget {
@@ -57,6 +61,11 @@ class MarkdownRule extends MarkdownBlock {
   const MarkdownRule();
 }
 
+class MarkdownTableBlock extends MarkdownBlock {
+  const MarkdownTableBlock(this.table);
+  final MarkdownTable table;
+}
+
 /// Splits [text] into blocks. Public for tests.
 List<MarkdownBlock> parseMarkdownBlocks(String text) {
   final lines = text.replaceAll('\r\n', '\n').split('\n');
@@ -99,7 +108,14 @@ List<MarkdownBlock> parseMarkdownBlocks(String text) {
       flush();
       continue;
     }
+    if (MarkdownTables.tryParse(lines, i) case (final table, final span)?) {
+      flush();
+      blocks.add(MarkdownTableBlock(table));
+      i += span - 1;
+      continue;
+    }
     if (line.trimLeft().startsWith('|')) {
+      // Pipes without a delimiter row: not a table; show as typed.
       flush();
       final table = <String>[];
       while (i < lines.length && lines[i].trimLeft().startsWith('|')) {
@@ -177,84 +193,8 @@ class _ChatMarkdownState extends State<ChatMarkdown> {
     _recognizers.clear();
   }
 
-  static final _inline = RegExp(
-    r'`([^`\n]+)`' // 1 inline code
-    r'|\*\*([^*\n]+?)\*\*' // 2 bold
-    r'|__([^_\n]+?)__' // 3 bold
-    r'|(?<![\w*])\*([^*\n]+?)\*(?!\w)' // 4 italic
-    r'|(?<!\w)_([^_\n]+?)_(?!\w)' // 5 italic
-    r'|\[([^\]\n]+)\]\(([^)\s]+)\)' // 6, 7 link
-    r'|(https?://[^\s<>()]+[^\s<>().,;:!?])', // 8 bare URL
-  );
-
-  List<InlineSpan> _spans(String text, TextStyle base) {
-    final theme = Theme.of(context);
-    final spans = <InlineSpan>[];
-    var index = 0;
-    for (final match in _inline.allMatches(text)) {
-      if (match.start > index) {
-        spans.add(TextSpan(text: text.substring(index, match.start)));
-      }
-      index = match.end;
-      if (match.group(1) case final code?) {
-        spans.add(
-          TextSpan(
-            text: code,
-            style: TextStyle(
-              fontFamily: 'monospace',
-              fontSize: (base.fontSize ?? 14) * 0.92,
-              backgroundColor: theme.colorScheme.surfaceContainerHighest,
-            ),
-          ),
-        );
-      } else if (match.group(2) ?? match.group(3) case final bold?) {
-        spans.add(
-          TextSpan(
-            style: const TextStyle(fontWeight: FontWeight.w700),
-            children: _spans(bold, base),
-          ),
-        );
-      } else if (match.group(4) ?? match.group(5) case final italic?) {
-        spans.add(
-          TextSpan(
-            text: italic,
-            style: const TextStyle(fontStyle: FontStyle.italic),
-          ),
-        );
-      } else {
-        final label = match.group(6) ?? match.group(8)!;
-        final url = match.group(7) ?? match.group(8)!;
-        spans.add(_link(label, url, theme));
-      }
-    }
-    if (index < text.length) {
-      spans.add(TextSpan(text: text.substring(index)));
-    }
-    return spans;
-  }
-
-  InlineSpan _link(String label, String url, ThemeData theme) {
-    final uri = Uri.tryParse(url);
-    final safe =
-        uri != null &&
-        (uri.scheme == 'https' ||
-            uri.scheme == 'http' ||
-            uri.scheme == 'mailto');
-    if (!safe) {
-      return TextSpan(text: label == url ? url : '$label ($url)');
-    }
-    final recognizer = TapGestureRecognizer()
-      ..onTap = () => launchUrl(uri, mode: LaunchMode.externalApplication);
-    _recognizers.add(recognizer);
-    return TextSpan(
-      text: label,
-      recognizer: recognizer,
-      style: TextStyle(
-        color: theme.colorScheme.primary,
-        decoration: TextDecoration.underline,
-      ),
-    );
-  }
+  List<InlineSpan> _spans(String text, TextStyle base) =>
+      markdownSpans(text, base, Theme.of(context), _recognizers);
 
   @override
   Widget build(BuildContext context) {
@@ -334,6 +274,11 @@ class _ChatMarkdownState extends State<ChatMarkdown> {
           ),
         ),
         MarkdownRule() => Divider(color: theme.colorScheme.outlineVariant),
+        MarkdownTableBlock(:final table) => MarkdownTableView(
+          table: table,
+          style: base,
+          spans: _spans,
+        ),
       });
     }
     return Column(
@@ -342,4 +287,308 @@ class _ChatMarkdownState extends State<ChatMarkdown> {
       children: children,
     );
   }
+}
+
+/// Builds the inline spans of one cell.
+typedef MarkdownSpans = List<InlineSpan> Function(String text, TextStyle base);
+
+/// A Markdown table: 1px muted borders, bold header row, per-column
+/// alignment, wrapping cells. Columns get their natural width within
+/// [minColumn]..[maxColumn]; when they do not fit the screen the table
+/// scrolls sideways instead of squashing. A tap opens it full screen.
+class MarkdownTableView extends StatelessWidget {
+  const MarkdownTableView({
+    required this.table,
+    required this.style,
+    required this.spans,
+    this.maxColumn = 240,
+    this.fullScreen = false,
+    super.key,
+  });
+
+  final MarkdownTable table;
+  final TextStyle style;
+  final MarkdownSpans spans;
+  final double maxColumn;
+  final bool fullScreen;
+
+  static const minColumn = 72.0;
+  static const _cellPadding = EdgeInsets.symmetric(horizontal: 8, vertical: 6);
+
+  /// Natural column widths, clamped. Public for tests.
+  List<double> columnWidths(TextScaler scaler) {
+    final widths = List<double>.filled(table.columns, minColumn);
+    void measure(int column, String text, {bool bold = false}) {
+      final painter = TextPainter(
+        text: TextSpan(
+          text: text,
+          style: bold ? style.copyWith(fontWeight: FontWeight.w700) : style,
+        ),
+        textDirection: TextDirection.ltr,
+        textScaler: scaler,
+      )..layout();
+      final width = painter.width + _cellPadding.horizontal + 2;
+      painter.dispose();
+      if (width > widths[column]) widths[column] = width;
+    }
+
+    for (var c = 0; c < table.columns; c++) {
+      measure(c, table.headers[c], bold: true);
+      for (final row in table.rows) {
+        measure(c, row[c]);
+      }
+      widths[c] = widths[c].clamp(minColumn, maxColumn);
+    }
+    return widths;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final widths = columnWidths(MediaQuery.textScalerOf(context));
+    final natural = widths.fold<double>(0, (sum, w) => sum + w);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final available = constraints.maxWidth;
+        final fits = natural <= available;
+        final Map<int, TableColumnWidth> columnWidths = {
+          for (var c = 0; c < widths.length; c++)
+            c: fits ? FlexColumnWidth(widths[c]) : FixedColumnWidth(widths[c]),
+        };
+        Widget cell(
+          String text,
+          MarkdownTableAlign align, {
+          bool header = false,
+        }) {
+          final textAlign = switch (align) {
+            MarkdownTableAlign.start => TextAlign.start,
+            MarkdownTableAlign.center => TextAlign.center,
+            MarkdownTableAlign.end => TextAlign.end,
+          };
+          final cellStyle = header
+              ? style.copyWith(fontWeight: FontWeight.w700)
+              : style;
+          return Padding(
+            padding: _cellPadding,
+            child: Text.rich(
+              TextSpan(children: spans(text, cellStyle)),
+              style: cellStyle,
+              textAlign: textAlign,
+            ),
+          );
+        }
+
+        final tableWidget = Table(
+          key: const ValueKey('markdown-table'),
+          columnWidths: columnWidths,
+          border: TableBorder.all(color: scheme.outlineVariant),
+          children: [
+            TableRow(
+              decoration: BoxDecoration(color: scheme.surfaceContainerHigh),
+              children: [
+                for (var c = 0; c < table.columns; c++)
+                  cell(table.headers[c], table.aligns[c], header: true),
+              ],
+            ),
+            for (final row in table.rows)
+              TableRow(
+                children: [
+                  for (var c = 0; c < table.columns; c++)
+                    cell(row[c], table.aligns[c]),
+                ],
+              ),
+          ],
+        );
+        final sized = fits
+            ? tableWidget
+            : SingleChildScrollView(
+                key: const ValueKey('markdown-table-scroll'),
+                scrollDirection: Axis.horizontal,
+                child: SizedBox(width: natural, child: tableWidget),
+              );
+        if (fullScreen) return sized;
+        return GestureDetector(
+          onTap: () => openFullScreen(context),
+          child: Stack(
+            children: [
+              sized,
+              Positioned(
+                top: 2,
+                right: 2,
+                child: IconButton(
+                  key: const ValueKey('markdown-table-expand'),
+                  tooltip: 'Open table',
+                  visualDensity: VisualDensity.compact,
+                  iconSize: 16,
+                  onPressed: () => openFullScreen(context),
+                  icon: Icon(
+                    Icons.open_in_full_rounded,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void openFullScreen(BuildContext context) {
+    unawaited(
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          fullscreenDialog: true,
+          builder: (context) => _FullScreenTable(table: table, style: style),
+        ),
+      ),
+    );
+  }
+}
+
+/// The table on its own page, scrollable both ways, with its own link
+/// recognizers (the chat bubble's are rebuilt on every poll).
+class _FullScreenTable extends StatefulWidget {
+  const _FullScreenTable({required this.table, required this.style});
+
+  final MarkdownTable table;
+  final TextStyle style;
+
+  @override
+  State<_FullScreenTable> createState() => _FullScreenTableState();
+}
+
+class _FullScreenTableState extends State<_FullScreenTable> {
+  final List<TapGestureRecognizer> _recognizers = [];
+
+  void _dispose() {
+    for (final recognizer in _recognizers) {
+      recognizer.dispose();
+    }
+    _recognizers.clear();
+  }
+
+  @override
+  void dispose() {
+    _dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _dispose();
+    final table = widget.table;
+    final theme = Theme.of(context);
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          'Table · ${table.rows.length} '
+          'row${table.rows.length == 1 ? '' : 's'}',
+        ),
+      ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          key: const ValueKey('markdown-table-full'),
+          padding: const EdgeInsets.all(12),
+          child: MarkdownTableView(
+            table: table,
+            style: widget.style,
+            spans: (text, base) =>
+                markdownSpans(text, base, theme, _recognizers),
+            maxColumn: 420,
+            fullScreen: true,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Inline Markdown (code, bold, italics, links) as spans. Link taps use
+/// recognizers added to [recognizers]; the caller disposes them.
+final _inline = RegExp(
+  r'`([^`\n]+)`' // 1 inline code
+  r'|\*\*([^*\n]+?)\*\*' // 2 bold
+  r'|__([^_\n]+?)__' // 3 bold
+  r'|(?<![\w*])\*([^*\n]+?)\*(?!\w)' // 4 italic
+  r'|(?<!\w)_([^_\n]+?)_(?!\w)' // 5 italic
+  r'|\[([^\]\n]+)\]\(([^)\s]+)\)' // 6, 7 link
+  r'|(https?://[^\s<>()]+[^\s<>().,;:!?])', // 8 bare URL
+);
+
+List<InlineSpan> markdownSpans(
+  String text,
+  TextStyle base,
+  ThemeData theme,
+  List<TapGestureRecognizer> recognizers,
+) {
+  final spans = <InlineSpan>[];
+  var index = 0;
+  for (final match in _inline.allMatches(text)) {
+    if (match.start > index) {
+      spans.add(TextSpan(text: text.substring(index, match.start)));
+    }
+    index = match.end;
+    if (match.group(1) case final code?) {
+      spans.add(
+        TextSpan(
+          text: code,
+          style: TextStyle(
+            fontFamily: 'monospace',
+            fontSize: (base.fontSize ?? 14) * 0.92,
+            backgroundColor: theme.colorScheme.surfaceContainerHighest,
+          ),
+        ),
+      );
+    } else if (match.group(2) ?? match.group(3) case final bold?) {
+      spans.add(
+        TextSpan(
+          style: const TextStyle(fontWeight: FontWeight.w700),
+          children: markdownSpans(bold, base, theme, recognizers),
+        ),
+      );
+    } else if (match.group(4) ?? match.group(5) case final italic?) {
+      spans.add(
+        TextSpan(
+          text: italic,
+          style: const TextStyle(fontStyle: FontStyle.italic),
+        ),
+      );
+    } else {
+      final label = match.group(6) ?? match.group(8)!;
+      final url = match.group(7) ?? match.group(8)!;
+      spans.add(_link(label, url, theme, recognizers));
+    }
+  }
+  if (index < text.length) {
+    spans.add(TextSpan(text: text.substring(index)));
+  }
+  return spans;
+}
+
+InlineSpan _link(
+  String label,
+  String url,
+  ThemeData theme,
+  List<TapGestureRecognizer> recognizers,
+) {
+  final uri = Uri.tryParse(url);
+  final safe =
+      uri != null &&
+      (uri.scheme == 'https' || uri.scheme == 'http' || uri.scheme == 'mailto');
+  if (!safe) {
+    return TextSpan(text: label == url ? url : '$label ($url)');
+  }
+  final recognizer = TapGestureRecognizer()
+    ..onTap = () => launchUrl(uri, mode: LaunchMode.externalApplication);
+  recognizers.add(recognizer);
+  return TextSpan(
+    text: label,
+    recognizer: recognizer,
+    style: TextStyle(
+      color: theme.colorScheme.primary,
+      decoration: TextDecoration.underline,
+    ),
+  );
 }

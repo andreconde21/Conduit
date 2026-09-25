@@ -198,6 +198,18 @@ The `ios beta` lane signs in one of two ways:
   -allowProvisioningUpdates` with the API key registers what is missing
   and signs with Apple's cloud-managed certificate. It needs an Admin key.
 
+### No scripts in the app bundle
+
+App Store Connect rejects an IPA that contains any script, meaning a file
+that starts with `#!`, with "Invalid Signature. Code object is not signed at
+all". It does so even when the file is not executable, because it checks the
+content. The host companion is full of such scripts, so it ships as one
+archive, `assets/companion/companion.tar.gz`, next to `manifest.json`.
+`tools/bundle-companion.sh` builds both from `host/`, and its `--check` mode
+in CI fails on any loose script or executable under `assets/companion/`. A
+widget test also fails when any bundled asset starts with `#!`. Ship any new
+script asset the same way, inside an archive.
+
 ## Privacy policy URL
 
 Both stores need a public privacy policy. `docs/privacy-policy.md` is
