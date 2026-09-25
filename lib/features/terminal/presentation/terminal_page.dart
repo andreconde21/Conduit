@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_palette.dart';
@@ -8,6 +9,7 @@ import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/data/remote_tool_command.dart';
 import 'package:conduit/features/agent_attention/data/ssh_agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
+import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_launcher.dart';
@@ -19,13 +21,18 @@ import 'package:conduit/features/diff_view/presentation/diff_view_controller.dar
 import 'package:conduit/features/diff_view/presentation/diff_view_tab.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/home_board_controller.dart';
+import 'package:conduit/features/live_preview/data/preview_screenshot_sender.dart';
 import 'package:conduit/features/live_preview/data/secure_live_preview_port_store.dart';
 import 'package:conduit/features/live_preview/data/ssh_port_forwarder.dart';
+import 'package:conduit/features/live_preview/domain/dev_server_detection.dart';
 import 'package:conduit/features/live_preview/domain/live_preview_port_store.dart';
+import 'package:conduit/features/live_preview/domain/preview_screenshot.dart';
 import 'package:conduit/features/live_preview/presentation/live_preview_controller.dart';
 import 'package:conduit/features/live_preview/presentation/live_preview_port_dialog.dart';
 import 'package:conduit/features/live_preview/presentation/live_preview_tab.dart';
 import 'package:conduit/features/live_preview/presentation/live_preview_view.dart';
+import 'package:conduit/features/live_preview/presentation/preview_ready_chip.dart';
+import 'package:conduit/features/live_preview/presentation/preview_ready_controller.dart';
 import 'package:conduit/features/prompt_menus/presentation/prompt_menu_strip.dart';
 import 'package:conduit/features/session_navigation/presentation/quick_switcher_actions.dart';
 import 'package:conduit/features/session_navigation/presentation/quick_switcher_sheet.dart';
@@ -93,6 +100,7 @@ class TerminalPage extends StatefulWidget {
     this.connectFlow,
     this.speechRecognizer,
     this.promptImageSource,
+    this.previewWatcherFactory,
     this.homeBoards,
     super.key,
   });
@@ -121,6 +129,11 @@ class TerminalPage extends StatefulWidget {
   /// Where Chat mode's image button takes images from. Null means the
   /// platform picker and clipboard.
   final PromptImageSource? promptImageSource;
+
+  /// Builds the "Preview ready" watcher for a remote session. Null means
+  /// polling over an extra SSH connection (needs [hostKeyVerifier]).
+  final PreviewReadyController Function(TerminalSessionController session)?
+  previewWatcherFactory;
 
   /// The home page's boards (tmux sessions and Herdr workspaces per
   /// machine), for the quick switcher's other workspaces.
@@ -162,6 +175,13 @@ class _TerminalPageState extends State<TerminalPage>
   final Map<TerminalSessionController, StreamSubscription<String>>
   _clipboardSubscriptions = {};
 
+  /// "Preview ready" detection, one per remote session; only the active
+  /// session's watcher polls, and only while the app is in the foreground.
+  final Map<TerminalSessionController, PreviewReadyController>
+  _previewWatchers = {};
+  AppLifecycleListener? _lifecycle;
+  bool _appResumed = true;
+
   @override
   void initState() {
     super.initState();
@@ -185,6 +205,13 @@ class _TerminalPageState extends State<TerminalPage>
     );
     widget.workspace.addListener(_handleWorkspaceChanged);
     _syncRemoteClipboardSubscriptions();
+    _lifecycle = AppLifecycleListener(
+      onStateChange: (state) {
+        _appResumed = state == AppLifecycleState.resumed;
+        _syncPreviewWatchers();
+      },
+    );
+    _syncPreviewWatchers();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _focusedSession = widget.workspace.activeSession;
       _focusNode.requestFocus();
@@ -253,6 +280,11 @@ class _TerminalPageState extends State<TerminalPage>
     _clipboardSubscriptions.clear();
     _focusNode.dispose();
     _fileTabs.dispose();
+    _lifecycle?.dispose();
+    for (final watcher in _previewWatchers.values) {
+      watcher.dispose();
+    }
+    _previewWatchers.clear();
     _slide.dispose();
     super.dispose();
   }
@@ -309,8 +341,101 @@ class _TerminalPageState extends State<TerminalPage>
       );
   }
 
+  /// Whether "Preview ready" can watch [session]'s machine: a remote host
+  /// the page can open extra connections to, without a hardware key (each
+  /// poll would ask for a touch).
+  bool _canWatchPreview(TerminalSessionController session) =>
+      (widget.hostKeyVerifier != null ||
+          widget.previewWatcherFactory != null) &&
+      !session.host.isLocal &&
+      session.host.authMethod != SshAuthMethod.hardwareKey;
+
+  /// Creates watchers for new sessions, drops those of closed ones, and
+  /// lets only the active session's watcher poll.
+  void _syncPreviewWatchers() {
+    final sessions = widget.workspace.sessions.toSet();
+    _previewWatchers.removeWhere((session, watcher) {
+      if (sessions.contains(session)) return false;
+      watcher.dispose();
+      return true;
+    });
+    final verifier = widget.hostKeyVerifier;
+    final active = widget.workspace.activeSession;
+    for (final session in sessions) {
+      if (!_canWatchPreview(session)) continue;
+      final watcher = _previewWatchers[session] ??=
+          (widget.previewWatcherFactory?.call(session) ??
+                PreviewReadyController(
+                  runnerFactory: () => _previewRunnerFor(session, verifier),
+                  canPoll: () => session.isConnected,
+                ))
+            ..attachScreen(
+              _TerminalScreen(session.terminal),
+              () => _TerminalScreen.visibleRows(session.terminal),
+            );
+      watcher.setForeground(_appResumed && session == active);
+    }
+  }
+
+  /// A command runner for [session]'s port polls: the connect flow's (the
+  /// app's SSH exec channels), else the agent monitor's, else one from the
+  /// host key verifier.
+  AgentCommandRunner _previewRunnerFor(
+    TerminalSessionController session,
+    HostKeyVerifier? verifier,
+  ) {
+    final flow = widget.connectFlow;
+    if (flow != null) return flow.runnerFactory(session.host);
+    final attention = widget.agentAttention;
+    if (attention != null) {
+      final (runner, :owned) = attention.runnerFor(session.host);
+      return owned ? runner : _BorrowedRunner(runner);
+    }
+    return SshAgentCommandRunner(verifier!, session.host);
+  }
+
+  /// The Live preview tab of [host], when one is open.
+  LivePreviewTab? _previewTabFor(SavedHost host) => _fileTabs.tabs
+      .whereType<LivePreviewTab>()
+      .where((tab) => tab.host.id == host.id)
+      .firstOrNull;
+
+  /// Whether Live preview already shows [offer]'s port for [session].
+  bool _previewShows(TerminalSessionController session, DevServerOffer offer) {
+    final controller = _previewTabFor(session.host)?.controller;
+    return controller != null &&
+        controller.remotePort == offer.port &&
+        (controller.phase == LivePreviewPhase.ready ||
+            controller.phase == LivePreviewPhase.connecting);
+  }
+
+  /// The "Preview ready" chip for Chat View on [host]: opening it leaves
+  /// the chat for the Live preview tab.
+  Widget Function(BuildContext routeContext)? _chatPreviewChip(SavedHost host) {
+    final entry = _previewWatchers.entries
+        .where((entry) => entry.key.host.id == host.id)
+        .firstOrNull;
+    if (entry == null) return null;
+    final session = entry.key;
+    return (routeContext) => PreviewReadyChip(
+      controller: entry.value,
+      hidden: (offer) => _previewShows(session, offer),
+      onOpen: (offer) {
+        Navigator.of(routeContext).pop();
+        if (!mounted) return;
+        if (widget.workspace.sessions.contains(session)) {
+          widget.workspace.activate(session);
+        }
+        unawaited(
+          _openLivePreview(session, port: offer.port, path: offer.path),
+        );
+      },
+    );
+  }
+
   void _handleWorkspaceChanged() {
     _syncRemoteClipboardSubscriptions();
+    _syncPreviewWatchers();
     final active = widget.workspace.activeSession;
     if (active == null || active == _focusedSession) return;
     _focusedSession = active;
@@ -348,10 +473,15 @@ class _TerminalPageState extends State<TerminalPage>
   /// a machine without the companion, or without a Claude session here,
   /// gets the composer with a note why; a broken companion explains what to
   /// fix; several candidates ask which one.
-  Future<void> _openChatForSession(
+  ///
+  /// With [draft] (a Live preview screenshot) Chat View opens with it in
+  /// the composer. Returns whether Chat View opened, so a caller with a
+  /// draft can put it in the composer otherwise.
+  Future<bool> _openChatForSession(
     AgentAttentionController attention,
-    TerminalSessionController session,
-  ) async {
+    TerminalSessionController session, {
+    String draft = '',
+  }) async {
     final host = session.host;
     final List<AgentInfo> agents;
     if (chatViewAvailable(attention, host)) {
@@ -366,14 +496,14 @@ class _TerminalPageState extends State<TerminalPage>
           'No Conductore companion on ${host.name}, so there is no Chat '
           'View here. Opened the composer.',
         );
-        return;
+        return false;
       }
       final access = await checkChatViewAccessWithProgress(
         context,
         attention: attention,
         host: host,
       );
-      if (!mounted || access == null) return;
+      if (!mounted || access == null) return false;
       if (!access.ready) {
         if (access.companionMissing) {
           _openComposerBecause(
@@ -383,11 +513,11 @@ class _TerminalPageState extends State<TerminalPage>
         } else {
           await showChatViewUnavailable(context, host: host, access: access);
         }
-        return;
+        return false;
       }
       agents = access.agents;
     }
-    if (!mounted || widget.workspace.activeSession != session) return;
+    if (!mounted || widget.workspace.activeSession != session) return false;
 
     var location = _chatLocationFor(session);
     var match = resolveChatAgent(host, agents, location: location);
@@ -395,7 +525,7 @@ class _TerminalPageState extends State<TerminalPage>
       // Several Claude sessions in this workspace: the one on screen is
       // the pane Herdr has focused.
       final pane = await _focusedHerdrPane(session, location);
-      if (!mounted) return;
+      if (!mounted) return false;
       if (pane != null) {
         location = ChatSessionLocation(
           herdrWorkspaceId: location.herdrWorkspaceId,
@@ -407,7 +537,8 @@ class _TerminalPageState extends State<TerminalPage>
     }
     switch (match) {
       case ChatAgentMatched(:final agent):
-        _openChat(attention, host, agent);
+        _openChat(attention, host, agent, draft: draft);
+        return true;
       case ChatAgentAmbiguous(:final candidates, :final elsewhere):
         final agent = await pickChatAgent(
           context,
@@ -420,7 +551,8 @@ class _TerminalPageState extends State<TerminalPage>
               : 'Open chat for…',
         );
         if (agent != null && mounted) {
-          _openChat(attention, host, agent);
+          _openChat(attention, host, agent, draft: draft);
+          return true;
         }
       case ChatAgentNone():
         _openComposerBecause(
@@ -428,6 +560,7 @@ class _TerminalPageState extends State<TerminalPage>
           'composer.',
         );
     }
+    return false;
   }
 
   static String _placeName(TerminalSessionController session) =>
@@ -482,8 +615,9 @@ class _TerminalPageState extends State<TerminalPage>
   void _openChat(
     AgentAttentionController attention,
     SavedHost host,
-    AgentInfo agent,
-  ) {
+    AgentInfo agent, {
+    String draft = '',
+  }) {
     unawaited(
       openChatView(
         context: context,
@@ -492,6 +626,8 @@ class _TerminalPageState extends State<TerminalPage>
         agent: agent,
         dictation: _dictation,
         onOpenTerminal: () => _showAgentTerminal(attention, host, agent),
+        accessoryBuilder: _chatPreviewChip(host),
+        initialDraft: draft,
       ),
     );
   }
@@ -868,6 +1004,7 @@ class _TerminalPageState extends State<TerminalPage>
       agent: agent,
       dictation: _dictation,
       onOpenTerminal: () => _showAgentTerminal(attention, host, agent),
+      accessoryBuilder: _chatPreviewChip(host),
     );
   }
 
@@ -1153,6 +1290,7 @@ class _TerminalPageState extends State<TerminalPage>
         // the new path.
         unawaited(controller.start(port));
       }
+      if (port != null) _previewWatchers[session]?.markPreviewing(port);
       return;
     }
     final controller = LivePreviewController(
@@ -1185,6 +1323,97 @@ class _TerminalPageState extends State<TerminalPage>
     controller.attachSession(session, () => session.isConnected);
     _fileTabs.add(LivePreviewTab(host: host, controller: controller));
     unawaited(controller.start(chosenPort));
+    _previewWatchers[session]?.markPreviewing(chosenPort);
+  }
+
+  /// Live preview's "Screenshot to Claude": uploads the image to the
+  /// host's share inbox (like a Chat mode image) and puts its path and a
+  /// note in front of Claude: Chat View's composer when this session runs
+  /// a Claude session the companion knows, else the Chat mode composer.
+  Future<void> _sendPreviewScreenshot(
+    LivePreviewTab tab,
+    PreviewScreenshot shot,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Text('Uploading screenshot…'),
+          duration: Duration(minutes: 1),
+        ),
+      );
+    final String draft;
+    try {
+      draft = await PreviewScreenshotSender(
+        upload: (file) async => (await SftpShareUploader(
+          widget.sftpRepository,
+        ).upload(tab.host, [file])).single,
+      ).send(shot);
+    } catch (error) {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              'Could not upload the screenshot: '
+              '${error is AppFailure ? error.userMessage : error}',
+            ),
+          ),
+        );
+      return;
+    }
+    messenger.hideCurrentSnackBar();
+    if (!mounted) return;
+    final session = widget.workspace.sessions
+        .where((session) => session.host.id == tab.host.id)
+        .firstOrNull;
+    if (session == null) {
+      _copyToClipboard(draft, 'Screenshot uploaded; its path is copied');
+      return;
+    }
+    await _deliverChatDraft(session, draft);
+  }
+
+  /// Opens [session]'s chat with [draft] in the composer: Chat View when
+  /// it can, else Chat mode's composer sheet.
+  Future<void> _deliverChatDraft(
+    TerminalSessionController session,
+    String draft,
+  ) async {
+    if (widget.workspace.activeSession != session) {
+      widget.workspace.activate(session);
+    }
+    _showTerminal();
+    final attention = widget.agentAttention;
+    if (attention != null && !session.host.isLocal) {
+      final opened = await _openChatForSession(
+        attention,
+        session,
+        draft: draft,
+      );
+      if (opened || !mounted) return;
+    }
+    _putDraftInComposer(session, draft);
+  }
+
+  /// Adds [draft] to [session]'s Chat mode draft and opens the composer
+  /// sheet, the way a file shared into the app arrives.
+  void _putDraftInComposer(TerminalSessionController session, String draft) {
+    final hostId = session.host.id;
+    setState(() {
+      _composeDrafts[hostId] = mergeShareDraft(
+        _composeDrafts[hostId] ?? '',
+        draft,
+      );
+      _composeMode = true;
+      _composeRevision += 1;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.workspace.activeSession == session) {
+        unawaited(_openPromptComposer(session));
+      }
+    });
   }
 
   Future<void> _changePreviewPort(LivePreviewTab tab) async {
@@ -1226,6 +1455,7 @@ class _TerminalPageState extends State<TerminalPage>
         palette: palette,
         brightness: brightness,
         onChangePort: () => unawaited(_changePreviewPort(tab)),
+        onScreenshot: (shot) => _sendPreviewScreenshot(tab, shot),
       ),
       _ => SftpFileViewer(
         key: tab.viewerKey,
@@ -1322,6 +1552,9 @@ class _TerminalPageState extends State<TerminalPage>
                                       attention: attention,
                                       host: activeSession.host,
                                       dictation: _dictation,
+                                      accessoryBuilder: _chatPreviewChip(
+                                        activeSession.host,
+                                      ),
                                       onOpenTerminal: (agent) =>
                                           _showAgentTerminal(
                                             attention,
@@ -1353,129 +1586,190 @@ class _TerminalPageState extends State<TerminalPage>
                           },
                         ),
                       Expanded(
-                        child: Container(
-                          color: palette.terminalBackgroundFor(brightness),
-                          child: activeFileTab == null && activeSession == null
-                              ? EmptyTerminalState(
-                                  onBack: () => Navigator.of(context).pop(),
-                                )
-                              : _slideIn(
-                                  IndexedStack(
-                                    index: activeFileTab != null
-                                        ? widget.workspace.sessions.length +
-                                              fileTabs.indexOf(activeFileTab)
-                                        : widget.workspace.sessions.indexOf(
-                                            activeSession!,
-                                          ),
-                                    children: [
-                                      for (final session
-                                          in widget.workspace.sessions)
-                                        TerminalGestureLayer(
-                                          key: ValueKey(session.host.id),
-                                          target: _gestureTargetFor(session),
-                                          herdrControl: _herdrControlFor(
-                                            session,
-                                          ),
-                                          onHerdrWorkspaceFocused:
-                                              (workspaceId) => widget
-                                                  .connectFlow
-                                                  ?.herdr
-                                                  .noteWorkspace(
-                                                    session,
-                                                    workspaceId,
-                                                  ),
-                                          preferences: widget
-                                              .themeController
-                                              .terminalGestures,
-                                          session: session,
-                                          fontSize: widget
-                                              .themeController
-                                              .terminalFontSize,
-                                          onFontSizeChanged: (fontSize) {
-                                            unawaited(
-                                              widget.themeController
-                                                  .setTerminalFontSize(
-                                                    fontSize,
-                                                  ),
-                                            );
-                                          },
-                                          scrollMode:
-                                              session == activeSession &&
-                                              _tmuxScrollMode,
-                                          onEnterScrollMode: () {
-                                            setState(
-                                              () => _tmuxScrollMode = true,
-                                            );
-                                            _focusNode.requestFocus();
-                                          },
-                                          onExitScrollMode: () {
-                                            setState(
-                                              () => _tmuxScrollMode = false,
-                                            );
-                                            _focusNode.requestFocus();
-                                          },
-                                          onOpenSessionGrid: _openSwitcher,
-                                          onOpenAgentPanel: _agentPanelOpener(),
-                                          child: TerminalSurface(
-                                            session: session,
-                                            autoConnect: widget.workspace
-                                                .mayAutoConnect(session),
-                                            palette: palette,
-                                            brightness: brightness,
-                                            fontFamily: widget
-                                                .themeController
-                                                .terminalFont
-                                                .fontFamily,
-                                            fontSize: widget
-                                                .themeController
-                                                .terminalFontSize,
-                                            predictiveEchoEnabled: session
-                                                .host
-                                                .predictiveEchoEnabled,
-                                            terminalMouseInput: widget
-                                                .themeController
-                                                .terminalMouseInput,
-                                            focusNode:
-                                                session == activeSession &&
-                                                    activeFileTab == null
-                                                ? _focusNode
-                                                : null,
-                                            tmuxScrollMode:
-                                                session == activeSession &&
-                                                _tmuxScrollMode,
-                                            onExitTmuxScrollMode: () {
-                                              setState(
-                                                () => _tmuxScrollMode = false,
-                                              );
-                                              _focusNode.requestFocus();
-                                            },
-                                            onPathTap: (path) =>
-                                                _handlePathTap(session, path),
-                                            onLinkTap: (url) =>
-                                                _handleLinkTap(session, url),
-                                            dragScrollsRemote: widget
-                                                .themeController
-                                                .terminalGestures
-                                                .dragScrollsRemote,
-                                            onEnterScrollMode:
-                                                _dragScrollModeEntry(session),
-                                            onKeyEvent: (_, event) =>
-                                                isQuickSwitcherShortcut(event)
-                                                ? KeyEventResult.handled
-                                                : KeyEventResult.ignored,
-                                            onLinkLongPress: (url, line) =>
-                                                _handleLinkLongPress(
+                        child: Stack(
+                          children: [
+                            Positioned.fill(
+                              child: Container(
+                                color: palette.terminalBackgroundFor(
+                                  brightness,
+                                ),
+                                child:
+                                    activeFileTab == null &&
+                                        activeSession == null
+                                    ? EmptyTerminalState(
+                                        onBack: () =>
+                                            Navigator.of(context).pop(),
+                                      )
+                                    : _slideIn(
+                                        IndexedStack(
+                                          index: activeFileTab != null
+                                              ? widget
+                                                        .workspace
+                                                        .sessions
+                                                        .length +
+                                                    fileTabs.indexOf(
+                                                      activeFileTab,
+                                                    )
+                                              : widget.workspace.sessions
+                                                    .indexOf(activeSession!),
+                                          children: [
+                                            for (final session
+                                                in widget.workspace.sessions)
+                                              TerminalGestureLayer(
+                                                key: ValueKey(session.host.id),
+                                                target: _gestureTargetFor(
                                                   session,
-                                                  url,
-                                                  line,
                                                 ),
-                                          ),
+                                                herdrControl: _herdrControlFor(
+                                                  session,
+                                                ),
+                                                onHerdrWorkspaceFocused:
+                                                    (workspaceId) => widget
+                                                        .connectFlow
+                                                        ?.herdr
+                                                        .noteWorkspace(
+                                                          session,
+                                                          workspaceId,
+                                                        ),
+                                                preferences: widget
+                                                    .themeController
+                                                    .terminalGestures,
+                                                session: session,
+                                                fontSize: widget
+                                                    .themeController
+                                                    .terminalFontSize,
+                                                onFontSizeChanged: (fontSize) {
+                                                  unawaited(
+                                                    widget.themeController
+                                                        .setTerminalFontSize(
+                                                          fontSize,
+                                                        ),
+                                                  );
+                                                },
+                                                scrollMode:
+                                                    session == activeSession &&
+                                                    _tmuxScrollMode,
+                                                onEnterScrollMode: () {
+                                                  setState(
+                                                    () =>
+                                                        _tmuxScrollMode = true,
+                                                  );
+                                                  _focusNode.requestFocus();
+                                                },
+                                                onExitScrollMode: () {
+                                                  setState(
+                                                    () =>
+                                                        _tmuxScrollMode = false,
+                                                  );
+                                                  _focusNode.requestFocus();
+                                                },
+                                                onOpenSessionGrid:
+                                                    _openSwitcher,
+                                                onOpenAgentPanel:
+                                                    _agentPanelOpener(),
+                                                child: TerminalSurface(
+                                                  session: session,
+                                                  autoConnect: widget.workspace
+                                                      .mayAutoConnect(session),
+                                                  palette: palette,
+                                                  brightness: brightness,
+                                                  fontFamily: widget
+                                                      .themeController
+                                                      .terminalFont
+                                                      .fontFamily,
+                                                  fontSize: widget
+                                                      .themeController
+                                                      .terminalFontSize,
+                                                  predictiveEchoEnabled: session
+                                                      .host
+                                                      .predictiveEchoEnabled,
+                                                  terminalMouseInput: widget
+                                                      .themeController
+                                                      .terminalMouseInput,
+                                                  focusNode:
+                                                      session ==
+                                                              activeSession &&
+                                                          activeFileTab == null
+                                                      ? _focusNode
+                                                      : null,
+                                                  tmuxScrollMode:
+                                                      session ==
+                                                          activeSession &&
+                                                      _tmuxScrollMode,
+                                                  onExitTmuxScrollMode: () {
+                                                    setState(
+                                                      () => _tmuxScrollMode =
+                                                          false,
+                                                    );
+                                                    _focusNode.requestFocus();
+                                                  },
+                                                  onPathTap: (path) =>
+                                                      _handlePathTap(
+                                                        session,
+                                                        path,
+                                                      ),
+                                                  onLinkTap: (url) =>
+                                                      _handleLinkTap(
+                                                        session,
+                                                        url,
+                                                      ),
+                                                  dragScrollsRemote: widget
+                                                      .themeController
+                                                      .terminalGestures
+                                                      .dragScrollsRemote,
+                                                  onEnterScrollMode:
+                                                      _dragScrollModeEntry(
+                                                        session,
+                                                      ),
+                                                  onKeyEvent: (_, event) =>
+                                                      isQuickSwitcherShortcut(
+                                                        event,
+                                                      )
+                                                      ? KeyEventResult.handled
+                                                      : KeyEventResult.ignored,
+                                                  onLinkLongPress:
+                                                      (url, line) =>
+                                                          _handleLinkLongPress(
+                                                            session,
+                                                            url,
+                                                            line,
+                                                          ),
+                                                ),
+                                              ),
+                                            for (final tab in fileTabs)
+                                              _buildFileTab(
+                                                tab,
+                                                palette,
+                                                brightness,
+                                              ),
+                                          ],
                                         ),
-                                      for (final tab in fileTabs)
-                                        _buildFileTab(tab, palette, brightness),
-                                    ],
+                                      ),
+                              ),
+                            ),
+                            if (activeFileTab == null &&
+                                activeSession != null &&
+                                _previewWatchers[activeSession] != null)
+                              Positioned(
+                                top: 8,
+                                right: 8,
+                                child: PreviewReadyChip(
+                                  key: ValueKey(
+                                    'preview-ready-${activeSession.host.id}',
+                                  ),
+                                  controller: _previewWatchers[activeSession]!,
+                                  hidden: (offer) =>
+                                      _previewShows(activeSession, offer),
+                                  onOpen: (offer) => unawaited(
+                                    _openLivePreview(
+                                      activeSession,
+                                      port: offer.port,
+                                      path: offer.path,
+                                    ),
                                   ),
                                 ),
+                              ),
+                          ],
                         ),
                       ),
                       // Menu → buttons: tappable choices for prompts on screen.
@@ -1826,4 +2120,44 @@ class _ComposeInputBarState extends State<_ComposeInputBar> {
       ),
     );
   }
+}
+
+/// A terminal's screen as a [Listenable], for watchers that re-read it
+/// after output.
+class _TerminalScreen implements Listenable {
+  const _TerminalScreen(this.terminal);
+
+  final Terminal terminal;
+
+  @override
+  void addListener(VoidCallback listener) => terminal.addListener(listener);
+
+  @override
+  void removeListener(VoidCallback listener) =>
+      terminal.removeListener(listener);
+
+  /// The visible rows of the active buffer, top to bottom.
+  static List<String> visibleRows(Terminal terminal) {
+    final buffer = terminal.buffer;
+    final lines = buffer.lines;
+    final start = buffer.scrollBack.clamp(0, lines.length);
+    return [
+      for (var row = start; row < lines.length; row++) lines[row].getText(),
+    ];
+  }
+}
+
+/// A runner someone else owns (the agent monitor's connection): closing it
+/// is left to the owner.
+class _BorrowedRunner implements AgentCommandRunner {
+  const _BorrowedRunner(this._runner);
+
+  final AgentCommandRunner _runner;
+
+  @override
+  Future<AgentCommandResult> run(String command, {required Duration timeout}) =>
+      _runner.run(command, timeout: timeout);
+
+  @override
+  Future<void> close() async {}
 }

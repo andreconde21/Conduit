@@ -39,13 +39,11 @@ Map<int, List<WordDiffSpan>> wordDiffHunk(DiffHunk hunk) {
       continue;
     }
     final deletions = <int>[];
-    while (index < lines.length &&
-        lines[index].kind == DiffLineKind.deletion) {
+    while (index < lines.length && lines[index].kind == DiffLineKind.deletion) {
       deletions.add(index++);
     }
     final additions = <int>[];
-    while (index < lines.length &&
-        lines[index].kind == DiffLineKind.addition) {
+    while (index < lines.length && lines[index].kind == DiffLineKind.addition) {
       additions.add(index++);
     }
     final pairs = deletions.length < additions.length

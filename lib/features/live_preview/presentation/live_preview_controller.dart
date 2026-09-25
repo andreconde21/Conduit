@@ -5,6 +5,7 @@ import 'package:conduit/features/agent_attention/domain/agent_command_runner.dar
 import 'package:conduit/features/live_preview/domain/listening_ports.dart';
 import 'package:conduit/features/live_preview/domain/live_preview_port_store.dart';
 import 'package:conduit/features/live_preview/domain/port_forward.dart';
+import 'package:conduit/features/live_preview/domain/preview_viewport.dart';
 import 'package:flutter/foundation.dart';
 
 enum LivePreviewPhase { idle, connecting, ready, failed, closed }
@@ -35,6 +36,7 @@ class LivePreviewController extends ChangeNotifier {
   StreamSubscription<String>? _errorSubscription;
   int? _remotePort;
   String _path = '/';
+  PreviewViewport _viewport = PreviewViewport.phone;
   String? _error;
   String? _connectionError;
   bool _disposed = false;
@@ -46,6 +48,20 @@ class LivePreviewController extends ChangeNotifier {
   int? get remotePort => _remotePort;
   int? get localPort => _forward?.localPort;
   bool get isReady => _phase == LivePreviewPhase.ready && _forward != null;
+
+  /// The emulated device width, remembered per port.
+  PreviewViewport get viewport => _viewport;
+
+  /// Switches the emulated device and remembers it for the current port.
+  void setViewport(PreviewViewport value) {
+    if (value == _viewport) return;
+    _viewport = value;
+    notifyListeners();
+    final port = _remotePort;
+    if (port != null) {
+      unawaited(_portStore.writeViewport(hostId, port, value));
+    }
+  }
 
   /// Path (and query) shown in the address bar; always starts with `/`.
   String get path => _path;
@@ -105,6 +121,12 @@ class LivePreviewController extends ChangeNotifier {
     notifyListeners();
     unawaited(_portStore.write(hostId, remotePort));
     try {
+      final viewport =
+          await _portStore.readViewport(hostId, remotePort) ??
+          PreviewViewport.phone;
+      if (!_disposed && generation == _generation) {
+        _viewport = viewport;
+      }
       final forward = await _forwarder.open(remotePort);
       if (_disposed || generation != _generation) {
         await forward.close();

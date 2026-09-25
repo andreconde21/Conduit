@@ -75,11 +75,11 @@ flutter:
   assets:
     - third_party/licenses/
     - third_party/notices/
-    # Host companion, uploaded by the Agent hooks screen. Refresh with
-    # tools/bundle-companion.sh whenever host/ changes.
+    # Host companion (companion.tar.gz + manifest.json), uploaded by the
+    # Agent hooks screen. One archive, never loose scripts: App Store
+    # Connect rejects any #! file in an iOS app as unsigned code. Refresh
+    # with tools/bundle-companion.sh whenever host/ changes.
     - assets/companion/
-    - assets/companion/bin/
-    - assets/companion/lib/
     # Licence texts of the bundled fonts, shown in the app's licence page.
     - assets/fonts/LICENSE-JetBrainsMonoNerdFont.txt
     - assets/fonts/README-JetBrainsMonoNerdFont.md

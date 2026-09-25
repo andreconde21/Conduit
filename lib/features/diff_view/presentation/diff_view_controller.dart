@@ -46,9 +46,7 @@ class DiffViewController extends ChangeNotifier {
     if (snapshot == null) {
       return false;
     }
-    return _showStaged
-        ? snapshot.stagedTruncated
-        : snapshot.unstagedTruncated;
+    return _showStaged ? snapshot.stagedTruncated : snapshot.unstagedTruncated;
   }
 
   bool isCollapsed(DiffFile file) => _collapsed.contains(_fileKey(file));
