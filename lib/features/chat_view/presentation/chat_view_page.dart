@@ -101,6 +101,7 @@ class _ChatViewPageState extends State<ChatViewPage>
     WidgetsBinding.instance.addObserver(this);
     _scroll.addListener(_onScroll);
     _chat.setVisible(true);
+    _chat.addListener(_stickToBottom);
     final tts =
         widget.textToSpeech ??
         (PlatformFeatures.textToSpeech ? PlatformTextToSpeech() : null);
@@ -201,6 +202,7 @@ class _ChatViewPageState extends State<ChatViewPage>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _chat.removeListener(_feedReadAloud);
+    _chat.removeListener(_stickToBottom);
     widget.dictation?.removeListener(_syncDictation);
     _readAloud?.dispose();
     _clock?.cancel();
@@ -212,16 +214,53 @@ class _ChatViewPageState extends State<ChatViewPage>
     super.dispose();
   }
 
+  /// Within this distance of the newest message the thread follows new
+  /// messages; further up it holds still.
+  static const _stickDistance = 48.0;
+
+  /// Set while the user reads further up: the thread shows nothing newer
+  /// than [_ThreadFreeze.lastItemId], so arriving messages, approvals and
+  /// the working row cannot move what is on screen. They are counted on
+  /// the "New messages" pill and appear once the user is back at the
+  /// bottom.
+  _ThreadFreeze? _freeze;
+
+  /// The last working state shown, kept for a frozen working row.
+  ChatWorking? _lastWorking;
+
   void _onScroll() {
     // The list is reversed: offset 0 is the newest message.
-    final away = _scroll.offset > 240;
+    final offset = _scroll.offset;
+    final away = offset > 240;
     if (away != _showJump) {
       setState(() => _showJump = away);
+    }
+    if (offset > _stickDistance && _freeze == null) {
+      setState(() {
+        _freeze = _ThreadFreeze(
+          lastItemId: _chat.items.lastOrNull?.id,
+          approvals: {for (final request in _chat.pending) request.id},
+          working: _working != null,
+        );
+      });
+    } else if (offset <= _stickDistance && _freeze != null) {
+      setState(() => _freeze = null);
+      _stickToBottom();
     }
     final position = _scroll.position;
     if (position.maxScrollExtent - position.pixels < 400) {
       unawaited(_chat.loadOlder());
     }
+  }
+
+  /// Follows new messages while at the bottom.
+  void _stickToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _freeze != null || !_scroll.hasClients) return;
+      if (_scroll.offset > 0 && _scroll.offset <= _stickDistance) {
+        _scroll.jumpTo(0);
+      }
+    });
   }
 
   void _jumpToLatest() {
@@ -435,17 +474,51 @@ class _ChatViewPageState extends State<ChatViewPage>
       return const Center(child: CircularProgressIndicator());
     }
     final items = _chat.items;
-    final pending = _chat.pending;
+    final allPending = _chat.pending;
     final waiting = _chat.agent?.state == 'waiting_input';
+    final working = _working;
+    if (working != null) _lastWorking = working;
+    // While frozen, show only what was there when the user scrolled up.
+    final freeze = _freeze;
+    var shownCount = items.length;
+    var pending = allPending;
+    var held = 0;
+    if (freeze != null) {
+      final last = freeze.lastItemId == null
+          ? -1
+          : items.lastIndexWhere((item) => item.id == freeze.lastItemId);
+      if (last != -1 || freeze.lastItemId == null) {
+        shownCount = last + 1;
+      }
+      for (var i = shownCount; i < items.length; i++) {
+        if (items[i] is! ChatThinking) held += 1;
+      }
+      pending = [
+        for (final request in allPending)
+          if (freeze.approvals.contains(request.id)) request,
+      ];
+      held += allPending.length - pending.length;
+    }
+    final showWorkingRow = freeze == null
+        ? working != null
+        : freeze.working && (working ?? _lastWorking) != null;
+    final shownWorking = working ?? _lastWorking;
     // Newest first: the list is reversed so it opens at the latest message
     // and stays there as messages arrive.
-    final working = _working;
     final rows = <Widget>[
-      if (working != null)
-        ChatWorkingIndicator(
-          key: const ValueKey('chat-working-indicator'),
-          working: working,
-          since: working.since ?? _workingShownAt ?? DateTime.now(),
+      if (showWorkingRow && shownWorking != null)
+        // Frozen and finished: keep the row's space so nothing moves.
+        Visibility(
+          key: const ValueKey('chat-working-slot'),
+          visible: working != null,
+          maintainSize: true,
+          maintainAnimation: true,
+          maintainState: true,
+          child: ChatWorkingIndicator(
+            key: const ValueKey('chat-working-indicator'),
+            working: shownWorking,
+            since: shownWorking.since ?? _workingShownAt ?? DateTime.now(),
+          ),
         ),
       for (final request in pending.reversed)
         ChatApprovalCard(
@@ -454,7 +527,7 @@ class _ChatViewPageState extends State<ChatViewPage>
           busy: _chat.isDeciding(request.id),
           onDecide: (verdict) => _decide(request, verdict),
         ),
-      for (var i = items.length - 1; i >= 0; i--)
+      for (var i = shownCount - 1; i >= 0; i--)
         _row(items[i], isLast: i == items.length - 1, waiting: waiting),
       if (_chat.hasOlder)
         Padding(
@@ -493,7 +566,21 @@ class _ChatViewPageState extends State<ChatViewPage>
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
           children: rows,
         ),
-        if (_showJump)
+        if (held > 0)
+          Positioned(
+            bottom: 12,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: FilledButton.tonalIcon(
+                key: const ValueKey('chat-new-messages'),
+                onPressed: _jumpToLatest,
+                icon: const Icon(Icons.arrow_downward_rounded, size: 18),
+                label: Text('New messages ($held)'),
+              ),
+            ),
+          )
+        else if (_showJump)
           Positioned(
             right: 12,
             bottom: 12,
@@ -592,4 +679,17 @@ class _ReadAloudToggle extends StatelessWidget {
       },
     );
   }
+}
+
+/// What the thread showed when the user scrolled away from the bottom.
+class _ThreadFreeze {
+  const _ThreadFreeze({
+    required this.lastItemId,
+    required this.approvals,
+    required this.working,
+  });
+
+  final String? lastItemId;
+  final Set<String> approvals;
+  final bool working;
 }
