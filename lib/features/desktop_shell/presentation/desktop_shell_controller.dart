@@ -17,6 +17,9 @@ enum ShellRightPanel {
 
   /// The web live preview of the focused session.
   preview,
+
+  /// The usage breakdown (limits, tokens, cost), from the usage summary.
+  usage,
 }
 
 /// State of the desktop shell: the sidebar (width, collapsed, the user's

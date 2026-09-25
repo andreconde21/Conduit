@@ -64,8 +64,12 @@ class ShellDashboard extends StatelessWidget {
     this.isDeciding,
     this.usage,
     this.actions = const [],
+    this.notice,
     super.key,
   });
+
+  /// A one-row notice above the columns (the privacy notice).
+  final Widget? notice;
 
   final List<DashboardNeedsYou> needsYou;
 
@@ -123,6 +127,11 @@ class ShellDashboard extends StatelessWidget {
             key: const ValueKey('shell-dashboard'),
             slivers: [
               SliverToBoxAdapter(child: _TitleRow(dashboard: this)),
+              if (notice case final notice?)
+                SliverPadding(
+                  padding: const EdgeInsets.only(top: 10),
+                  sliver: SliverToBoxAdapter(child: notice),
+                ),
               if (wide)
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),

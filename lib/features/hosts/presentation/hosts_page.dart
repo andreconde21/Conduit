@@ -122,8 +122,8 @@ class HostsPage extends StatefulWidget {
   /// (desktops, and tablets 900 dp wide or more, at the first build).
   final bool? shellMode;
 
-  /// The usage summary for the desktop shell's dashboard and sidebar;
-  /// null uses the app's usage controller ([UsageScope]) when there is one.
+  /// Replaces the desktop shell's usage summary; null shows the app's
+  /// usage controller ([UsageScope]) when there is one.
   final UsageSummaryBuilder? usageSummary;
 
   final HostsController hostsController;
@@ -578,7 +578,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
             boards: _boards,
             connectFlow: widget.connectFlow,
             sessionRestore: widget.sessionRestore,
-            usageSummary: widget.usageSummary ?? _usageSummary(context),
+            usageSummary: widget.usageSummary,
             previewRefreshInterval: widget.previewRefreshInterval,
             terminalBuilder: (embedding) => TerminalPage(
               workspace: widget.workspaceController,
@@ -611,18 +611,6 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
           ),
         ),
       ),
-    );
-  }
-
-  /// Usage at a glance in the shell (companion `usage`): the card on the
-  /// dashboard, the compact line in the sidebar footer. The phone keeps
-  /// its home bar.
-  UsageSummaryBuilder? _usageSummary(BuildContext context) {
-    final usage = UsageScope.maybeOf(context);
-    if (usage == null) return null;
-    return (context, {required compact}) => UsageSummaryView(
-      controller: usage,
-      layout: compact ? UsageSummaryLayout.compact : UsageSummaryLayout.bar,
     );
   }
 

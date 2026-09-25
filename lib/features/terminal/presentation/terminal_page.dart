@@ -256,7 +256,11 @@ class _TerminalPageState extends State<TerminalPage>
       duration: const Duration(milliseconds: 220),
     );
     _fileTabs = TerminalFileTabsController(widget.sftpRepository);
-    Telemetry.instance.screen(TelemetryScreen.terminal);
+    // In the desktop shell the page is mounted from the start; the shell
+    // counts the terminal when it comes on screen.
+    if (widget.shell == null) {
+      Telemetry.instance.screen(TelemetryScreen.terminal);
+    }
     final recognizer =
         widget.speechRecognizer ??
         (defaultTargetPlatform == TargetPlatform.android

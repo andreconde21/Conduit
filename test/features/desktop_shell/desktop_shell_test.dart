@@ -1,6 +1,10 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
+import 'package:conduit/core/telemetry/telemetry.dart';
+import 'package:conduit/core/telemetry/telemetry_config.dart';
+import 'package:conduit/core/telemetry/telemetry_preferences.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_launcher.dart';
@@ -596,11 +600,16 @@ void main() {
     await tester.pump();
     expect(toTerminal, 1);
 
-    // Closing the tab closes its pane.
+    // Closing the tab closes its pane, and pops nothing: the shell is
+    // the home route, not a terminal route under Chat View.
+    final navigator = tester.state<NavigatorState>(find.byType(Navigator));
     await tester.tap(find.byKey(ValueKey('shell-tab-close-$chat')));
     await settleShell(tester);
     expect(_tab(chat), findsNothing);
     expect(h.shell.layout.value.panes.single.view, _view(session.host.id));
+    expect(navigator.canPop(), isFalse);
+    expect(find.byType(DesktopHome), findsOneWidget);
+    expect(h.workspace.sessions, [session]);
     await tearDownShell(tester);
   }, variant: _linux);
 
@@ -762,10 +771,70 @@ void main() {
         matching: find.byType(UsageSummaryView),
       ),
     );
-    expect(inSlot('dashboard-usage-slot').layout, UsageSummaryLayout.bar);
+    expect(inSlot('dashboard-usage-slot').layout, UsageSummaryLayout.compact);
     expect(inSlot('sidebar-usage-slot').layout, UsageSummaryLayout.compact);
     // Not the phone's home bar.
     expect(find.byType(UsageHomeBar), findsNothing);
+    // A tap opens the breakdown in the right panel.
+    inSlot('dashboard-usage-slot').onTap!();
+    await tester.pump();
+    expect(find.byKey(const ValueKey('shell-usage-panel')), findsOneWidget);
+    expect(find.byType(UsageBreakdown), findsOneWidget);
+    await tearDownShell(tester);
+  }, variant: _linux);
+
+  testWidgets('the dashboard shows the privacy notice until dismissed', (
+    tester,
+  ) async {
+    final telemetry = Telemetry(
+      config: TelemetryConfig.disabled,
+      store: MemoryTelemetryPreferencesStore(),
+    );
+    await telemetry.start();
+    final previous = Telemetry.instance;
+    Telemetry.instance = telemetry;
+    addTearDown(() {
+      Telemetry.instance = previous;
+      telemetry.dispose();
+    });
+    await pumpShell(tester);
+    final notice = find.descendant(
+      of: find.byKey(const ValueKey('shell-dashboard')),
+      matching: find.byKey(const ValueKey('privacy-notice')),
+    );
+    expect(notice, findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('privacy-notice-ok')));
+    await tester.pump();
+    expect(notice, findsNothing);
+    await tearDownShell(tester);
+  }, variant: _linux);
+
+  testWidgets("an unreachable machine reads Can't reach, like the phone", (
+    tester,
+  ) async {
+    await pumpShell(
+      tester,
+      before: (h) => h.runners['build-box']!.error = const SocketException(
+        'Connection timed out',
+        osError: OSError('No route to host', 113),
+      ),
+    );
+    final row = _row(SidebarKeys.machine('build-box'));
+    expect(
+      find.descendant(of: row, matching: find.text("Can't reach build-box")),
+      findsOneWidget,
+    );
+    // The dashboard's notice is the phone's, with its Retry.
+    final notice = find.byKey(const ValueKey('dashboard-notice-build-box'));
+    await tester.ensureVisible(notice);
+    expect(
+      find.descendant(of: notice, matching: find.text("Can't reach build-box")),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: notice, matching: find.text('Retry')),
+      findsOneWidget,
+    );
     await tearDownShell(tester);
   }, variant: _linux);
 }

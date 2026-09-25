@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:conduit/core/platform_features.dart';
+import 'package:conduit/core/telemetry/telemetry.dart';
+import 'package:conduit/core/telemetry/telemetry_events.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
@@ -25,10 +27,12 @@ import 'package:conduit/features/sessions/presentation/session_connect_flow.dart
 import 'package:conduit/features/sessions/presentation/session_grid_page.dart'
     show summarizeAgentState;
 import 'package:conduit/features/sessions/presentation/session_restore_controller.dart';
+import 'package:conduit/features/settings/presentation/privacy_notice.dart';
 import 'package:conduit/features/terminal/presentation/desktop_shortcuts.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:conduit/features/terminal/presentation/widgets/desktop_shortcuts_sheet.dart';
+import 'package:conduit/features/usage/presentation/usage_widgets.dart';
 import 'package:flutter/material.dart';
 
 /// Whether a window of [size] gets the desktop shell: desktops always,
@@ -248,7 +252,23 @@ class DesktopHomeState extends State<DesktopHome> {
     if (mounted) setState(() {});
   }
 
+  /// The screen last counted: the dashboard (home) or the terminal.
+  TelemetryScreen _screen = TelemetryScreen.home;
+
+  /// Counts a screen view when the main area switches between the
+  /// dashboard and the terminal (the embedded terminal page is mounted all
+  /// along, so its own start does not count).
+  void _trackScreen() {
+    final screen = terminalVisible
+        ? TelemetryScreen.terminal
+        : TelemetryScreen.home;
+    if (screen == _screen) return;
+    _screen = screen;
+    Telemetry.instance.screen(screen);
+  }
+
   void _handleControllerChanged() {
+    _trackScreen();
     _syncViewed();
     _syncPreviewTimer();
     _rebuildTree();
@@ -261,12 +281,14 @@ class DesktopHomeState extends State<DesktopHome> {
 
   void _handleViewsChanged() {
     if (!mounted) return;
+    _trackScreen();
     _syncViewed();
     _syncPreviewTimer();
     setState(() {});
   }
 
   void _handleWorkspaceChanged() {
+    _trackScreen();
     _watchSessions();
     _syncViewed();
     _syncPreviewTimer();
@@ -432,9 +454,10 @@ class DesktopHomeState extends State<DesktopHome> {
             ? 'Security key: open to list'
             : 'Not connected yet',
       HomeBoardPhase.loading => 'Listing…',
+      // The phone notice's words ("Can't reach …").
       HomeBoardPhase.failed
           when state.workspaces.isEmpty && state.tmuxSessions.isEmpty =>
-        'Could not list',
+        state.problem?.title ?? 'Could not list',
       _ => '',
     };
   }
@@ -978,7 +1001,7 @@ class DesktopHomeState extends State<DesktopHome> {
 
   Widget _sidebarFooter({bool compact = false}) {
     final palette = AppPalette.of(context);
-    final usage = widget.usageSummary;
+    final usage = _usageView(context);
     final buttons = [
       IconButton(
         key: const ValueKey('sidebar-add-machine'),
@@ -1014,9 +1037,7 @@ class DesktopHomeState extends State<DesktopHome> {
           if (usage != null && !compact)
             KeyedSubtree(
               key: const ValueKey('sidebar-usage-slot'),
-              child: Builder(
-                builder: (context) => usage(context, compact: true),
-              ),
+              child: usage,
             ),
           if (compact)
             ...buttons
@@ -1324,18 +1345,31 @@ class DesktopHomeState extends State<DesktopHome> {
         },
         isDeciding: attention.isDeciding,
         onNewSession: () => unawaited(widget.actions.newSession()),
-        usage: widget.usageSummary == null
-            ? null
-            : Builder(
-                builder: (context) =>
-                    widget.usageSummary!(context, compact: false),
-              ),
+        usage: _usageView(context, dashboard: true),
         actions: [_agentsToggle(), _previewToggle()],
+        // Crash reports and usage counts, once, like the phone's home.
+        notice: const PrivacyNotice(),
       ),
     );
   }
 
   static final Listenable _never = ChangeNotifier();
+
+  /// Usage at a glance (companion `usage`): the app's usage controller in
+  /// its compact layout; a tap opens the breakdown in the right panel.
+  /// Null without usage (the dashboard then keeps its note).
+  Widget? _usageView(BuildContext context, {bool dashboard = false}) {
+    final custom = widget.usageSummary;
+    if (custom != null) return custom(context, compact: !dashboard);
+    final usage = UsageScope.maybeOf(context);
+    if (usage == null) return null;
+    return UsageSummaryView(
+      key: ValueKey(dashboard ? 'dashboard-usage' : 'sidebar-usage'),
+      controller: usage,
+      layout: UsageSummaryLayout.compact,
+      onTap: () => _controller.rightPanel = ShellRightPanel.usage,
+    );
+  }
 
   // The right panel.
 
@@ -1344,6 +1378,7 @@ class DesktopHomeState extends State<DesktopHome> {
     final title = switch (panel) {
       ShellRightPanel.agents => 'Agents',
       ShellRightPanel.preview => 'Live preview',
+      ShellRightPanel.usage => 'Usage',
       ShellRightPanel.none => '',
     };
     return Material(
@@ -1396,6 +1431,14 @@ class DesktopHomeState extends State<DesktopHome> {
                     unawaited(widget.actions.openChat(host, agent)),
               ),
               ShellRightPanel.preview => _previewPanel(context),
+              ShellRightPanel.usage => switch (UsageScope.maybeOf(context)) {
+                final usage? => ListView(
+                  key: const ValueKey('shell-usage-panel'),
+                  padding: const EdgeInsets.fromLTRB(14, 10, 14, 20),
+                  children: [UsageBreakdown(controller: usage)],
+                ),
+                null => const SizedBox.shrink(),
+              },
               ShellRightPanel.none => const SizedBox.shrink(),
             },
           ),
