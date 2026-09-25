@@ -25,10 +25,14 @@ import 'package:conduit/features/sessions/presentation/session_grid_page.dart';
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/discard_changes_dialog.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/sftp_file_viewer.dart';
+import 'package:conduit/features/share_target/data/sftp_share_uploader.dart';
 import 'package:conduit/features/share_target/domain/share_inbox.dart';
 import 'package:conduit/features/share_target/presentation/share_target_controller.dart';
 import 'package:conduit/features/share_target/presentation/share_target_scope.dart';
+import 'package:conduit/features/terminal/data/platform_prompt_image_source.dart';
+import 'package:conduit/features/terminal/data/prompt_image_preparer.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
+import 'package:conduit/features/terminal/domain/prompt_image.dart';
 import 'package:conduit/features/terminal/domain/security_key_interaction.dart';
 import 'package:conduit/features/terminal/domain/terminal_link_detector.dart';
 import 'package:conduit/features/terminal/presentation/gestures/terminal_gesture_layer.dart';
@@ -40,6 +44,7 @@ import 'package:conduit/features/terminal/presentation/terminal_session_controll
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:conduit/features/terminal/presentation/widgets/empty_terminal_state.dart';
 import 'package:conduit/features/terminal/presentation/widgets/floating_toolbar.dart';
+import 'package:conduit/features/terminal/presentation/widgets/image_crop_page.dart';
 import 'package:conduit/features/terminal/presentation/widgets/prompt_composer_sheet.dart';
 import 'package:conduit/features/terminal/presentation/widgets/session_tools_menu.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_header.dart';
@@ -69,6 +74,7 @@ class TerminalPage extends StatefulWidget {
     ),
     this.connectFlow,
     this.speechRecognizer,
+    this.promptImageSource,
     super.key,
   });
 
@@ -92,6 +98,10 @@ class TerminalPage extends StatefulWidget {
   /// Voice input for Chat mode. Null means the platform default (Android's
   /// on-device recognizer; no mic elsewhere).
   final SpeechRecognizer? speechRecognizer;
+
+  /// Where Chat mode's image button takes images from. Null means the
+  /// platform picker and clipboard.
+  final PromptImageSource? promptImageSource;
 
   @override
   State<TerminalPage> createState() => _TerminalPageState();
@@ -458,6 +468,7 @@ class _TerminalPageState extends State<TerminalPage> {
       isConnected: () => session.isConnected,
       bracketedPasteSupported: () => session.bracketedPasteSupported,
       dictation: _dictation,
+      imageAttacher: _promptImageAttacher(session),
     );
     if (!mounted) {
       return;
@@ -466,6 +477,23 @@ class _TerminalPageState extends State<TerminalPage> {
     // inline bar so it shows the latest text.
     setState(() => _composeRevision += 1);
     _focusNode.requestFocus();
+  }
+
+  /// Images go to the same per-host inbox as files shared into the app,
+  /// and the composer inserts the uploaded path for the agent to read.
+  PromptImageAttacher _promptImageAttacher(TerminalSessionController session) {
+    final preparer = PromptImagePreparer();
+    return PromptImageAttacher(
+      source: widget.promptImageSource ?? PlatformPromptImageSource(),
+      crop: (image) => showImageCropPage(context, image),
+      prepare: preparer.prepare,
+      upload: (image) async {
+        final paths = await SftpShareUploader(
+          widget.sftpRepository,
+        ).upload(session.host, [image]);
+        return paths.single;
+      },
+    );
   }
 
   Future<void> _openAgentAttention(AgentAttentionController attention) async {

@@ -75,7 +75,10 @@ Dart implementation of the protocol, and the terminal is
 - Chat mode: the Chat key opens a line composer, expandable into a full
   multiline editor for prompting Claude Code and other agents, with drafts per
   session, voice dictation via the system keyboard, and safe bracketed-paste
-  delivery into TUIs, with insert-only or insert-and-send.
+  delivery into TUIs, with insert-only or insert-and-send. The image button
+  attaches a photo from the gallery, the camera, or the clipboard, with an
+  optional crop: it is uploaded over SFTP to the host's share inbox and its
+  path is inserted into the prompt, which Claude Code reads as an image.
 - Optional Agent Attention dashboard: opt a machine in to poll
   [Herdr](https://herdr.dev)'s JSON CLI while connected and see which coding
   agents are working, need input, or finished, with edge-triggered local
