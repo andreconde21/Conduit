@@ -35,7 +35,10 @@ class SshSyncHub implements SyncHub {
   static const maxBundleBytes = 32 * 1024 * 1024;
 
   Future<AgentCommandResult> _run(String command, {bool check = true}) async {
-    final result = await runner.run(command, timeout: _timeout);
+    final result = await runner.run(
+      SyncHubCommands.wrap(command),
+      timeout: _timeout,
+    );
     if (check && result.exitCode != null && result.exitCode != 0) {
       throw AppFailure(
         'The sync hub ${host.name} refused a command.',

@@ -93,9 +93,11 @@ void main() {
     });
     tearDown(() => home.delete(recursive: true));
 
+    // As sshd runs an exec request: the login shell gets the wrapped
+    // command line.
     Future<ProcessResult> sh(String command) => Process.run(
-      'sh',
-      ['-c', command],
+      'bash',
+      ['-c', SyncHubCommands.wrap(command)],
       environment: {'HOME': home.path, 'PATH': Platform.environment['PATH']!},
     );
 
@@ -217,6 +219,24 @@ void main() {
       expect((await sh(SyncHubCommands.readMeta(_vault))).stdout, '');
     });
   }, skip: Platform.isWindows);
+
+  test('no script needs escapes that fish reads differently', () {
+    const key =
+        'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGq2vR3cWn0yQ8m5d0c1W6yJ0H2s6d4k2fQe7y9rZx1a';
+    for (final script in [
+      SyncHubCommands.prepare(),
+      SyncHubCommands.readMeta(_vault),
+      SyncHubCommands.listVaults(),
+      SyncHubCommands.commit(_vault, _device, 3),
+      SyncHubCommands.deleteVault(_vault),
+      SyncHubCommands.addAuthorizedKey(key, "It's mine"),
+      SyncHubCommands.removeAuthorizedKey(key),
+      SyncHubCommands.listAuthorizedKeys(),
+    ]) {
+      expect(script, isNot(contains(r'\\')));
+      expect(script, isNot(contains(r"\'")));
+    }
+  });
 
   test('meta JSON starts with the version the commit script reads', () {
     final meta = SyncHubMeta(

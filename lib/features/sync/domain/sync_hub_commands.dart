@@ -28,6 +28,11 @@ abstract final class SyncHubCommands {
   /// POSIX single-quoting.
   static String quote(String value) => "'${value.replaceAll("'", r"'\''")}'";
 
+  /// Runs [script] under `sh` whatever the login shell is (fish, for one,
+  /// does not speak POSIX), like the companion's commands. The scripts
+  /// contain no `\\` or `\'`, so the quoting reads the same in fish.
+  static String wrap(String script) => 'sh -c ${quote(script)}';
+
   static String bundlePath(String vaultId) =>
       '$directory/${_checkedId(vaultId)}.bundle';
 
