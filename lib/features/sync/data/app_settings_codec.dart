@@ -3,6 +3,7 @@ import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/terminal_pill_items.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
+import 'package:conduit/features/voice/domain/voice_preferences.dart';
 import 'package:flutter/material.dart';
 
 /// App preferences as JSON, one entry per setting, shared by backups and
@@ -32,6 +33,7 @@ abstract final class AppSettingsCodec {
     'restoreSessionsOnLaunch',
     'terminalGestures',
     'speechLanguage',
+    'voice',
   ];
 
   static Map<String, Object?> encode(ThemeController theme) {
@@ -61,6 +63,9 @@ abstract final class AppSettingsCodec {
       'restoreSessionsOnLaunch': theme.restoreSessionsOnLaunch,
       'terminalGestures': theme.terminalGestures.toJson(),
       'speechLanguage': theme.speechLanguage,
+      // Read-aloud and dictation settings; the per-session toggles stay on
+      // each device.
+      'voice': theme.voice.toJson(includeSessions: false),
     };
   }
 
@@ -148,6 +153,12 @@ abstract final class AppSettingsCodec {
     }
     final speechLanguage = json['speechLanguage'];
     if (speechLanguage is String) await theme.setSpeechLanguage(speechLanguage);
+    final voice = json['voice'];
+    if (voice is Map) {
+      await theme.setVoice(
+        VoicePreferences.fromJson(voice, fallback: theme.voice),
+      );
+    }
   }
 
   static T? _enumByName<T extends Enum>(List<T> values, Object? name) =>

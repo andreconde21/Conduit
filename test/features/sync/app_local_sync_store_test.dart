@@ -148,6 +148,9 @@ void main() {
     );
     await source.theme.setPalette(AppPalette.values.last);
     await source.theme.setTerminalFontSize(17);
+    await source.theme.setVoice(
+      source.theme.voice.copyWith(readAloudByDefault: true, ttsRate: 1.25),
+    );
     source.connect.values = {
       'a': {'rememberChoice': true},
     };
@@ -168,6 +171,8 @@ void main() {
 
     expect(target.theme.selectedPalette, AppPalette.values.last);
     expect(target.theme.terminalFontSize, 17);
+    expect(target.theme.voice.readAloudByDefault, isTrue);
+    expect(target.theme.voice.ttsRate, 1.25);
     expect(target.verifier.records.single.fingerprint, 'SHA256:abc');
     expect(target.connect.values['a'], {'rememberChoice': true});
     expect(target.recentDirs.values['a'], ['~/src']);
