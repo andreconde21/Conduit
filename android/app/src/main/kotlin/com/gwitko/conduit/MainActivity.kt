@@ -134,6 +134,11 @@ class MainActivity : FlutterFragmentActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
     }
 
+    override fun onStop() {
+        speechRecognition?.onStop()
+        super.onStop()
+    }
+
     override fun onDestroy() {
         speechRecognition?.dispose()
         speechRecognition = null
