@@ -219,8 +219,8 @@ void main() {
           builder: (context) => TextButton(
             onPressed: () async => picked = await pickChatAgent(
               context,
-              attention: controller,
               host: host,
+              agents: controller.statusFor(host.id)!.agents,
             ),
             child: const Text('go'),
           ),

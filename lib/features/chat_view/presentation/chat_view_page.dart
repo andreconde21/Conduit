@@ -22,6 +22,7 @@ class ChatViewPage extends StatefulWidget {
     this.dictation,
     this.ownsController = true,
     this.onSetUpCompanion,
+    this.onEnableMonitoring,
     super.key,
   });
 
@@ -39,6 +40,11 @@ class ChatViewPage extends StatefulWidget {
   /// state; null hides the button.
   final VoidCallback? onSetUpCompanion;
 
+  /// Turns agent monitoring on for this machine (approval notifications,
+  /// the Agents panel and live updates need it). Non-null only while it is
+  /// off; the banner offering it hides once tapped.
+  final Future<void> Function()? onEnableMonitoring;
+
   @override
   State<ChatViewPage> createState() => _ChatViewPageState();
 }
@@ -46,6 +52,21 @@ class ChatViewPage extends StatefulWidget {
 class _ChatViewPageState extends State<ChatViewPage>
     with WidgetsBindingObserver {
   final _scroll = ScrollController();
+  bool _monitoringTurnedOn = false;
+
+  Future<void> _enableMonitoring() async {
+    setState(() => _monitoringTurnedOn = true);
+    try {
+      await widget.onEnableMonitoring?.call();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _monitoringTurnedOn = false);
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(content: Text('Could not turn on monitoring: $error')),
+      );
+    }
+  }
+
   bool _showJump = false;
   Timer? _clock;
 
@@ -218,6 +239,21 @@ class _ChatViewPageState extends State<ChatViewPage>
                       TextButton(
                         onPressed: _chat.refresh,
                         child: const Text('Retry'),
+                      ),
+                    ],
+                  ),
+                if (widget.onEnableMonitoring != null && !_monitoringTurnedOn)
+                  MaterialBanner(
+                    key: const ValueKey('chat-enable-monitoring'),
+                    leading: const Icon(Icons.monitor_heart_outlined),
+                    content: const Text(
+                      'Agent monitoring is off for this machine. Turn it on '
+                      'for approval alerts and the Agents panel.',
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: _enableMonitoring,
+                        child: const Text('Turn on'),
                       ),
                     ],
                   ),

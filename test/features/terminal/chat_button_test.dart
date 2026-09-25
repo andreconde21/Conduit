@@ -4,6 +4,7 @@ import 'package:conduit/features/agent_attention/domain/agent_command_runner.dar
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_launcher.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_page.dart';
+import 'package:conduit/features/companion_setup/presentation/companion_setup_controller.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/terminal/presentation/terminal_page.dart';
@@ -11,12 +12,27 @@ import 'package:conduit/features/terminal/presentation/terminal_workspace_contro
 import 'package:conduit_vt/conduit_vt.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:wakelock_plus_platform_interface/wakelock_plus_platform_interface.dart';
 
 import '../../support/test_doubles.dart';
+import '../companion_setup/companion_fakes.dart' as fakes;
 
 /// The floating pill's Chat button: Chat View for a Claude session the
 /// companion knows, else the inline composer, which must take over at once.
+class _NoopWakelock extends WakelockPlusPlatformInterface {
+  @override
+  Future<void> toggle({required bool enable}) async {}
+
+  @override
+  Future<bool> get enabled async => false;
+}
+
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  // The page toggles the wakelock; runAsync below would reach the real
+  // (absent) platform channel.
+  WakelockPlusPlatformInterface.instance = _NoopWakelock();
+
   AgentCommandResult ok(String stdout) =>
       AgentCommandResult(stdout: stdout, stderr: '', exitCode: 0);
 
@@ -250,6 +266,71 @@ void main() {
       await tester.pump();
       expect(find.text(hint), findsNothing);
       await drainSnackBars(tester);
+    });
+
+    testWidgets('monitoring off but a working companion still opens Chat '
+        'View', (tester) async {
+      final runner = fakes.MatchingRunner({
+        ...fakes.healthyResponses(),
+        'conductore-hostd status': fakes.ok(
+          fakes.statusJson(
+            agents: [fakes.agent('s-1', updatedAt: DateTime.now())],
+          ),
+        ),
+      });
+      final host = buildHost('h');
+      final workspace = TerminalWorkspaceController(
+        ImmediateTerminalRepository(TrackableTerminalSession()),
+      );
+      final attention = AgentAttentionController(
+        workspace: workspace,
+        runnerFactory: (_) => runner,
+        provider: const ConductoreHostAttentionProvider(),
+        pollInterval: const Duration(days: 1),
+      );
+      attention.setAppForeground(false);
+      final companion = CompanionSetupController(
+        runnerFactory: (_) => runner,
+        sftpRepository: NoNetworkSftpRepository(),
+        loadBundle: () async => fakes.fakeBundle(),
+      );
+      final session = workspace.open(host);
+      await tester.runAsync(session.connect);
+      // What the Agent hooks chip already found out.
+      await tester.runAsync(() => companion.refresh(host));
+      expect(attention.isMonitoring(host.id), isFalse);
+
+      await tester.pumpWidget(
+        CompanionSetupScope(
+          controller: companion,
+          agentAttention: attention,
+          child: MaterialApp(
+            home: TerminalPage(
+              workspace: workspace,
+              themeController: themeController,
+              sftpRepository: NoNetworkSftpRepository(),
+              agentAttention: attention,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      await tester.tap(chatButton);
+      for (var i = 0; i < 5; i += 1) {
+        await tester.runAsync(pumpEventQueue);
+        await tester.pump(const Duration(milliseconds: 200));
+      }
+
+      expect(find.byType(ChatViewPage), findsOneWidget);
+      expect(find.byTooltip('Close chat mode'), findsNothing);
+
+      await tester.pumpWidget(const SizedBox());
+      attention.dispose();
+      companion.dispose();
+      workspace.dispose();
+      await tester.pump(const Duration(days: 2));
     });
   });
 }

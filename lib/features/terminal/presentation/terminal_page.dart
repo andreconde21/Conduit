@@ -11,6 +11,7 @@ import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_launcher.dart';
+import 'package:conduit/features/companion_setup/presentation/companion_setup_controller.dart';
 import 'package:conduit/features/diff_view/data/ssh_git_diff_source.dart';
 import 'package:conduit/features/diff_view/presentation/diff_view.dart';
 import 'package:conduit/features/diff_view/presentation/diff_view_controller.dart';
@@ -311,23 +312,63 @@ class _TerminalPageState extends State<TerminalPage> {
     }
     final attention = widget.agentAttention;
     final host = session.host;
-    final agent = attention == null || host.isLocal
-        ? null
-        : chatAgentForSession(attention, host);
-    if (attention != null && agent != null) {
-      unawaited(
-        openChatView(
-          context: context,
-          attention: attention,
-          host: host,
-          agent: agent,
-          dictation: _dictation,
-          onOpenTerminal: () => _showAgentTerminal(attention, host, agent),
-        ),
-      );
+    if (attention == null || host.isLocal) {
+      setState(() => _composeMode = true);
+      return;
+    }
+    final agent = chatAgentForSession(attention, host);
+    if (agent != null) {
+      _openChat(attention, host, agent);
+      return;
+    }
+    // Not monitored through the companion, but the Agent hooks check
+    // found it working: ask the machine for its sessions.
+    final companion = CompanionSetupScope.maybeOf(context);
+    final known = companion?.statusFor(host.copyWith(id: baseHostId(host.id)));
+    if (!chatViewAvailable(attention, host) &&
+        (known?.state.isWorking ?? false)) {
+      unawaited(_openChatOrComposer(attention, session));
       return;
     }
     setState(() => _composeMode = true);
+  }
+
+  void _openChat(
+    AgentAttentionController attention,
+    SavedHost host,
+    AgentInfo agent,
+  ) {
+    unawaited(
+      openChatView(
+        context: context,
+        attention: attention,
+        host: host,
+        agent: agent,
+        dictation: _dictation,
+        onOpenTerminal: () => _showAgentTerminal(attention, host, agent),
+      ),
+    );
+  }
+
+  Future<void> _openChatOrComposer(
+    AgentAttentionController attention,
+    TerminalSessionController session,
+  ) async {
+    final host = session.host;
+    final access = await checkChatViewAccessWithProgress(
+      context,
+      attention: attention,
+      host: host,
+    );
+    if (!mounted) return;
+    final agent = access != null && access.ready
+        ? matchChatAgent(host, access.agents)
+        : null;
+    if (agent != null) {
+      _openChat(attention, host, agent);
+    } else {
+      setState(() => _composeMode = true);
+    }
   }
 
   void _maybeShowChatButtonHint() {
@@ -670,28 +711,39 @@ class _TerminalPageState extends State<TerminalPage> {
       },
       onOpenChat: (host, agent) {
         Navigator.of(context).pop();
-        if (!chatViewAvailable(attention, host)) {
-          // Herdr-only machines have no transcript or prompt relay.
-          unawaited(
-            showChatViewUnavailable(context, attention: attention, host: host),
-          );
-          return;
-        }
-        unawaited(
-          openChatView(
-            context: context,
-            attention: attention,
-            host: host,
-            agent: agent,
-            dictation: _dictation,
-            onOpenTerminal: () => _showAgentTerminal(attention, host, agent),
-          ),
-        );
+        unawaited(_openChatForAgent(attention, host, agent));
       },
     );
     if (mounted) {
       _focusNode.requestFocus();
     }
+  }
+
+  /// The Agents panel's Chat button: the companion on [host] decides, not
+  /// the monitor's provider (Herdr-monitored machines can have it too).
+  Future<void> _openChatForAgent(
+    AgentAttentionController attention,
+    SavedHost host,
+    AgentInfo agent,
+  ) async {
+    final access = await checkChatViewAccessWithProgress(
+      context,
+      attention: attention,
+      host: host,
+    );
+    if (access == null || !mounted) return;
+    if (!access.ready) {
+      await showChatViewUnavailable(context, host: host, access: access);
+      return;
+    }
+    await openChatView(
+      context: context,
+      attention: attention,
+      host: host,
+      agent: agent,
+      dictation: _dictation,
+      onOpenTerminal: () => _showAgentTerminal(attention, host, agent),
+    );
   }
 
   /// After the chat view: show the agent's session and focus its pane.
