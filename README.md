@@ -373,6 +373,39 @@ What it changes on the host:
 Details, the command reference and the JSON contract are in
 [host/README.md](host/README.md).
 
+## Privacy
+
+Conductore sends two things to servers Outsmartis runs itself, to help fix
+bugs:
+
+- **Crash reports** to GlitchTip: the error type, a scrubbed message, the
+  app's own stack frames, app version, platform and coarse device facts.
+  Saved machines' names, addresses, users and secrets, IPs, hostnames,
+  paths, file names, keys and tokens are removed on the device first.
+- **Anonymous usage counts** to Plausible: app opened, screens shown,
+  connections made (SSH or Mosh, Herdr or tmux, worked or failed and a
+  coarse reason), Chat View, voice and companion version. No identifiers.
+
+Nothing from your machines or terminals is sent: no commands, output,
+clipboard, chat text or transcripts. Both are on by default and each has a
+switch in **Settings › Privacy** (stored on the device, applied at once);
+the app says so once on the home screen. Development builds send nothing.
+Details: [docs/privacy-policy.md](docs/privacy-policy.md).
+
+Builds from source can point elsewhere or turn either half off:
+
+```sh
+flutter build apk --flavor full \
+  --dart-define=CONDUCTORE_SENTRY_DSN= \
+  --dart-define=CONDUCTORE_PLAUSIBLE_HOST=
+```
+
+`CONDUCTORE_SENTRY_DSN`, `CONDUCTORE_PLAUSIBLE_HOST` and
+`CONDUCTORE_PLAUSIBLE_DOMAIN` replace the endpoints (empty turns that half
+off), `CONDUCTORE_TELEMETRY_ENV` sets the release channel (default
+`preview`), and `CONDUCTORE_TELEMETRY_IN_DEBUG=true` makes a debug build
+send, for checking the pipeline by hand.
+
 ## Branches
 
 - `main`: Conductore. Releases are tagged `v0.1.0-conductore.N`.

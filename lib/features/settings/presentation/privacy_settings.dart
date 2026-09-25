@@ -53,8 +53,8 @@ class PrivacySettingsControls extends StatelessWidget {
             const SizedBox(height: 14),
             Text(
               telemetry.config.sendEnabled
-                  ? 'Kept on this device, never synced. PRIVACY.md in the '
-                        'source lists every field sent.'
+                  ? 'Kept on this device, never synced. The privacy policy '
+                        '(docs/privacy-policy.md) lists every field sent.'
                   : 'This is a development build: it sends nothing, '
                         'whatever the switches say.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
