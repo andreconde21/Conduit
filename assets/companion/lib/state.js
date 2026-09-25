@@ -112,6 +112,11 @@ function reduce (state, event, now = Date.now()) {
   if (!agent) {
     agent = newAgent(sid, now)
     state.agents[sid] = agent
+    // A statusline report can arrive before the session's first hook event.
+    if (state.pendingUsage && state.pendingUsage[sid]) {
+      agent.usage = state.pendingUsage[sid]
+      delete state.pendingUsage[sid]
+    }
   }
   applyContext(agent, event)
   agent.lastEvent = kind
@@ -216,6 +221,34 @@ function resolvePermission (state, requestId, resolution, now = Date.now()) {
   return []
 }
 
+const PENDING_USAGE_MAX = 50
+
+// Stores a statusline usage record on the session without touching its
+// state or updatedAt. Returns 'unchanged', 'stored' (agent updated, caller
+// decides when to publish) or 'pending' (session not known yet; kept until
+// its first hook event).
+function setUsage (state, sessionId, usage) {
+  const agent = state.agents[sessionId]
+  if (!agent) {
+    state.pendingUsage = state.pendingUsage || {}
+    delete state.pendingUsage[sessionId]
+    state.pendingUsage[sessionId] = usage
+    const keys = Object.keys(state.pendingUsage)
+    if (keys.length > PENDING_USAGE_MAX) delete state.pendingUsage[keys[0]]
+    return 'pending'
+  }
+  if (JSON.stringify(agent.usage || null) === JSON.stringify(usage || null)) return 'unchanged'
+  if (usage) agent.usage = usage
+  else delete agent.usage
+  return 'stored'
+}
+
+// The change record that publishes an agent's current usage.
+function usageChange (state, sessionId) {
+  const agent = state.agents[sessionId]
+  return agent ? [record(state, 'change', agent, 'usage')] : []
+}
+
 function findPending (state, requestId) {
   for (const agent of Object.values(state.agents)) {
     const p = agent.pending.find(p => p.id === requestId)
@@ -260,6 +293,8 @@ module.exports = {
   reduce,
   resolvePermission,
   findPending,
+  setUsage,
+  usageChange,
   prune,
   snapshot,
   summarize,
