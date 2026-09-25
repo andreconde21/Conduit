@@ -34,6 +34,7 @@ class TerminalKeyboardBar extends StatelessWidget {
     this.onTerminalMouseInputChanged,
     this.onRemoteMouseTrackingActivated,
     this.onOpenRecentDirectories,
+    this.onPasteImage,
     super.key,
   });
 
@@ -75,6 +76,11 @@ class TerminalKeyboardBar extends StatelessWidget {
   /// Opens the "cd to…" recent-directories sheet; offered first in the
   /// Tmux+ menu and in the Herdr navigator. Null hides the entry.
   final VoidCallback? onOpenRecentDirectories;
+
+  /// Tried before a text paste: pastes the clipboard's image (uploaded to
+  /// the host, its path typed in) and resolves to true, or resolves to
+  /// false when there is no image so the text is pasted. Null: text only.
+  final Future<bool> Function()? onPasteImage;
 
   @override
   Widget build(BuildContext context) {
@@ -513,6 +519,10 @@ class TerminalKeyboardBar extends StatelessWidget {
   }
 
   Future<void> _paste() async {
+    if (await onPasteImage?.call() ?? false) {
+      _focusTerminal();
+      return;
+    }
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     final text = data?.text;
     if (text != null && text.isNotEmpty) {

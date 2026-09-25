@@ -13,6 +13,7 @@ import 'package:conduit/features/companion_setup/presentation/companion_setup_co
 import 'package:conduit/features/companion_setup/presentation/companion_setup_page.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
+import 'package:conduit/features/terminal/domain/prompt_image.dart';
 import 'package:conduit/features/voice/presentation/dictation_controller.dart';
 import 'package:flutter/material.dart';
 
@@ -364,6 +365,8 @@ Future<void> openChatView({
   DictationController? dictation,
   Widget Function(BuildContext routeContext)? accessoryBuilder,
   String initialDraft = '',
+  PromptImageAttacher? imageAttacher,
+  bool pasteImages = true,
 }) async {
   final (runner, :owned) = attention.runnerFor(host);
   final changes = _AgentChangeSignal(attention, host.id, agent.id);
@@ -407,6 +410,8 @@ Future<void> openChatView({
         dictation: dictation,
         accessory: accessoryBuilder?.call(routeContext),
         initialDraft: initialDraft,
+        imageAttacher: imageAttacher,
+        pasteImages: pasteImages,
         onSetUpCompanion: CompanionSetupScope.maybeOf(routeContext) == null
             ? null
             : () => showCompanionSetup(routeContext, host),
@@ -616,6 +621,8 @@ Future<void> openChatViewForHost({
   DictationController? dictation,
   ChatSessionLocation location = const ChatSessionLocation(),
   Widget Function(BuildContext routeContext)? accessoryBuilder,
+  PromptImageAttacher? imageAttacher,
+  bool pasteImages = true,
 }) async {
   if (attention == null) {
     await showChatViewUnavailable(context, host: host);
@@ -654,5 +661,7 @@ Future<void> openChatViewForHost({
     dictation: dictation,
     onOpenTerminal: () => onOpenTerminal(agent),
     accessoryBuilder: accessoryBuilder,
+    imageAttacher: imageAttacher,
+    pasteImages: pasteImages,
   );
 }

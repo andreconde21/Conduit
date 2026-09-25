@@ -12,6 +12,9 @@ import 'package:conduit/features/chat_view/presentation/widgets/chat_composer.da
 import 'package:conduit/features/chat_view/presentation/widgets/chat_thread_items.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_working_indicator.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/talk_panel.dart';
+import 'package:conduit/features/terminal/data/platform_prompt_image_source.dart';
+import 'package:conduit/features/terminal/domain/clipboard_image_paste.dart';
+import 'package:conduit/features/terminal/domain/prompt_image.dart';
 import 'package:conduit/features/terminal/presentation/widgets/prompt_composer_sheet.dart';
 import 'package:conduit/features/voice/data/platform_text_to_speech.dart';
 import 'package:conduit/features/voice/domain/text_to_speech.dart';
@@ -36,6 +39,9 @@ class ChatViewPage extends StatefulWidget {
     this.onEnableMonitoring,
     this.accessory,
     this.initialDraft = '',
+    this.imageAttacher,
+    this.pasteImages = true,
+    this.clipboardHasImage = PlatformPromptImageSource.clipboardHasImage,
     this.textToSpeech,
     super.key,
   });
@@ -64,6 +70,16 @@ class ChatViewPage extends StatefulWidget {
 
   /// What the composer starts with.
   final String initialDraft;
+
+  /// Images for the prompt (the full composer's image button, and pasting
+  /// an image in the inline field); null hides both.
+  final PromptImageAttacher? imageAttacher;
+
+  /// "Paste images as uploaded files": off keeps paste text-only.
+  final bool pasteImages;
+
+  /// Whether the clipboard holds an image (offers "Paste image").
+  final Future<bool> Function() clipboardHasImage;
 
   /// Speaks replies when "Read replies aloud" is on; defaults to the
   /// on-device engine on Android and to none elsewhere (tests inject one).
@@ -395,7 +411,60 @@ class _ChatViewPageState extends State<ChatViewPage>
       // `send` pastes multiline text as one bracketed paste on the host.
       bracketedPasteSupported: () => true,
       dictation: widget.dictation,
+      imageAttacher: widget.imageAttacher,
+      pasteImages: widget.pasteImages,
     ).whenComplete(() => setDraft(draft));
+  }
+
+  /// The inline field's "Paste image": uploads the clipboard image and puts
+  /// its path at the cursor, like the terminal's paste.
+  Future<void> _pasteImage() async {
+    final attacher = widget.imageAttacher;
+    if (attacher == null) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    try {
+      final path = await ClipboardImagePaster.fromAttacher(attacher).paste(
+        onUploading: () => messenger?.showSnackBar(
+          const SnackBar(
+            content: Text('Uploading image…'),
+            duration: Duration(minutes: 1),
+          ),
+        ),
+      );
+      messenger?.hideCurrentSnackBar();
+      if (!mounted) return;
+      if (path == null) {
+        messenger?.showSnackBar(
+          const SnackBar(content: Text('There is no image on the clipboard.')),
+        );
+        return;
+      }
+      insertImagePath(path);
+    } catch (error) {
+      messenger
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              'Could not paste the image: '
+              '${error is AppFailure ? error.userMessage : error}',
+            ),
+          ),
+        );
+    }
+  }
+
+  /// Puts [path] at the composer's cursor as its own word.
+  void insertImagePath(String path) {
+    final value = _composerText.value;
+    final selection = value.selection;
+    final start = selection.isValid ? selection.start : value.text.length;
+    final end = selection.isValid ? selection.end : value.text.length;
+    final inserted = insertPromptImagePath(value.text, start, end, path);
+    _composerText.value = TextEditingValue(
+      text: inserted.text,
+      selection: TextSelection.collapsed(offset: inserted.cursor),
+    );
   }
 
   static String _elapsed(DateTime? since) {
@@ -546,6 +615,10 @@ class _ChatViewPageState extends State<ChatViewPage>
     onInterrupt: _chat.interrupt,
     onExpand: _openComposer,
     dictation: widget.dictation,
+    onPasteImage: widget.imageAttacher != null && widget.pasteImages
+        ? () => unawaited(_pasteImage())
+        : null,
+    clipboardHasImage: widget.clipboardHasImage,
   );
 
   Widget _buildThread(BuildContext context) {

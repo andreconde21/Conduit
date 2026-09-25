@@ -559,6 +559,10 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
   }
 
   Future<void> _paste() async {
+    if (await widget.keyRows.onPasteImage?.call() ?? false) {
+      _focusTerminal();
+      return;
+    }
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     final text = data?.text;
     if (text != null && text.isNotEmpty) {

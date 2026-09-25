@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:conduit/core/platform_features.dart';
+import 'package:conduit/features/terminal/domain/clipboard_image_paste.dart';
 import 'package:conduit/features/terminal/domain/prompt_image.dart';
 import 'package:conduit/features/voice/presentation/dictation_button.dart';
 import 'package:conduit/features/voice/presentation/dictation_controller.dart';
@@ -39,6 +40,7 @@ Future<void> showPromptComposerSheet({
   bool Function()? bracketedPasteSupported,
   DictationController? dictation,
   PromptImageAttacher? imageAttacher,
+  bool pasteImages = true,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -54,6 +56,7 @@ Future<void> showPromptComposerSheet({
       bracketedPasteSupported: bracketedPasteSupported,
       dictation: dictation,
       imageAttacher: imageAttacher,
+      pasteImages: pasteImages,
     ),
   );
 }
@@ -69,6 +72,7 @@ class PromptComposerSheet extends StatefulWidget {
     this.bracketedPasteSupported,
     this.dictation,
     this.imageAttacher,
+    this.pasteImages = true,
     super.key,
   });
 
@@ -86,6 +90,10 @@ class PromptComposerSheet extends StatefulWidget {
   /// Attaches images (gallery, camera, clipboard) by uploading them to the
   /// host and inserting the remote path; null hides the image button.
   final PromptImageAttacher? imageAttacher;
+
+  /// Whether Paste uploads a clipboard image (through [imageAttacher]) and
+  /// inserts its path before falling back to text.
+  final bool pasteImages;
 
   @override
   State<PromptComposerSheet> createState() => _PromptComposerSheetState();
@@ -164,6 +172,27 @@ class _PromptComposerSheetState extends State<PromptComposerSheet> {
   }
 
   Future<void> _pasteFromClipboard() async {
+    final attacher = widget.imageAttacher;
+    if (widget.pasteImages && attacher != null) {
+      if (_attaching || _sending) return;
+      setState(() {
+        _attaching = true;
+        _error = null;
+      });
+      try {
+        final path = await ClipboardImagePaster.fromAttacher(attacher).paste();
+        if (path != null) {
+          if (mounted) _insertImagePath(path);
+          return;
+        }
+      } catch (error) {
+        if (mounted) _showError('Could not paste the image: $error');
+        return;
+      } finally {
+        if (mounted) setState(() => _attaching = false);
+      }
+      if (!mounted) return;
+    }
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     if (!mounted) {
       return;
@@ -180,6 +209,20 @@ class _PromptComposerSheetState extends State<PromptComposerSheet> {
     _controller.value = TextEditingValue(
       text: updated,
       selection: TextSelection.collapsed(offset: start + text.length),
+    );
+    _focusNode.requestFocus();
+  }
+
+  /// Puts [remotePath] at the cursor as its own word.
+  void _insertImagePath(String remotePath) {
+    final value = _controller.value;
+    final selection = value.selection;
+    final start = selection.isValid ? selection.start : value.text.length;
+    final end = selection.isValid ? selection.end : value.text.length;
+    final inserted = insertPromptImagePath(value.text, start, end, remotePath);
+    _controller.value = TextEditingValue(
+      text: inserted.text,
+      selection: TextSelection.collapsed(offset: inserted.cursor),
     );
     _focusNode.requestFocus();
   }
@@ -213,21 +256,7 @@ class _PromptComposerSheetState extends State<PromptComposerSheet> {
       if (!mounted) {
         return;
       }
-      final value = _controller.value;
-      final selection = value.selection;
-      final start = selection.isValid ? selection.start : value.text.length;
-      final end = selection.isValid ? selection.end : value.text.length;
-      final inserted = insertPromptImagePath(
-        value.text,
-        start,
-        end,
-        remotePath,
-      );
-      _controller.value = TextEditingValue(
-        text: inserted.text,
-        selection: TextSelection.collapsed(offset: inserted.cursor),
-      );
-      _focusNode.requestFocus();
+      _insertImagePath(remotePath);
     } catch (error) {
       if (mounted) {
         _showError('Could not attach the image: $error');

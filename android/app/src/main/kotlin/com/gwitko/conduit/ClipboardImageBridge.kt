@@ -23,6 +23,8 @@ import java.util.concurrent.Executors
  * Method channel (`conduit/clipboard_image`):
  *  - `readImage` -> {path, name, size, mimeType} or null when the clipboard
  *    holds no image.
+ *  - `hasImage` -> whether it holds one, without copying anything (for
+ *    offering "Paste image").
  */
 class ClipboardImageBridge(private val context: Context) {
     companion object {
@@ -36,6 +38,7 @@ class ClipboardImageBridge(private val context: Context) {
     fun handle(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "readImage" -> readImage(result)
+            "hasImage" -> result.success(imageUri() != null)
             else -> result.notImplemented()
         }
     }

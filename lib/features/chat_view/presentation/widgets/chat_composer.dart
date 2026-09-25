@@ -19,6 +19,8 @@ class ChatComposer extends StatefulWidget {
     this.initialText = '',
     this.onTalk,
     this.textController,
+    this.onPasteImage,
+    this.clipboardHasImage,
     super.key,
   });
 
@@ -49,6 +51,15 @@ class ChatComposer extends StatefulWidget {
   /// back here); otherwise the composer owns one.
   final TextEditingController? textController;
 
+  /// Uploads the clipboard's image and inserts its path; offered as
+  /// "Paste image" in the field's menu while [clipboardHasImage] says so.
+  /// Null: text paste only.
+  final VoidCallback? onPasteImage;
+
+  /// Whether the clipboard holds an image; asked when the field gains
+  /// focus and when the app comes back to the front.
+  final Future<bool> Function()? clipboardHasImage;
+
   @override
   State<ChatComposer> createState() => _ChatComposerState();
 }
@@ -57,12 +68,59 @@ class _ChatComposerState extends State<ChatComposer> {
   late final TextEditingController _controller =
       widget.textController ?? TextEditingController(text: widget.initialText);
   final _focusNode = FocusNode();
+  AppLifecycleListener? _lifecycle;
+  bool _clipboardHasImage = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.onPasteImage != null) {
+      _focusNode.addListener(_onFocusChanged);
+      _lifecycle = AppLifecycleListener(onResume: _probeClipboard);
+    }
+  }
 
   @override
   void dispose() {
+    _lifecycle?.dispose();
     if (widget.textController == null) _controller.dispose();
     _focusNode.dispose();
     super.dispose();
+  }
+
+  void _onFocusChanged() {
+    if (_focusNode.hasFocus) _probeClipboard();
+  }
+
+  Future<void> _probeClipboard() async {
+    final probe = widget.clipboardHasImage;
+    if (probe == null) return;
+    final hasImage = await probe();
+    if (mounted && hasImage != _clipboardHasImage) {
+      setState(() => _clipboardHasImage = hasImage);
+    }
+  }
+
+  Widget _contextMenu(BuildContext context, EditableTextState state) {
+    final paste = widget.onPasteImage;
+    if (paste == null || !_clipboardHasImage) {
+      return AdaptiveTextSelectionToolbar.editableText(
+        editableTextState: state,
+      );
+    }
+    return AdaptiveTextSelectionToolbar.buttonItems(
+      anchors: state.contextMenuAnchors,
+      buttonItems: [
+        ...state.contextMenuButtonItems,
+        ContextMenuButtonItem(
+          label: 'Paste image',
+          onPressed: () {
+            state.hideToolbar();
+            paste();
+          },
+        ),
+      ],
+    );
   }
 
   Future<void> _send() async {
@@ -129,6 +187,7 @@ class _ChatComposerState extends State<ChatComposer> {
                 keyboardType: TextInputType.text,
                 textInputAction: TextInputAction.send,
                 onSubmitted: (_) => _send(),
+                contextMenuBuilder: _contextMenu,
                 decoration: InputDecoration(
                   isDense: true,
                   hintText: widget.enabled
