@@ -6,6 +6,7 @@ import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/terminal_pill_items.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
 import 'package:conduit/features/terminal/domain/herdr_navigator.dart';
 import 'package:conduit/features/terminal/domain/herdr_remote_control.dart';
@@ -426,6 +427,11 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
     final reason = _paneListUnavailableReason(host);
     final runner = reason == null ? widget.runnerFactory!(host) : null;
     final cache = HerdrPaneListingCache.instance;
+    // A tab opened on a named Herdr session talks to that server.
+    final herdrTarget = ConnectTarget.fromSessionHostId(host.id);
+    final herdrSession = herdrTarget?.kind == ConnectTargetKind.herdr
+        ? herdrTarget!.session
+        : '';
     try {
       final pick = await showHerdrNavigatorSheet(
         context: context,
@@ -437,7 +443,10 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
         load: runner == null
             ? null
             : () async {
-                final listing = await HerdrNavigator.load(runner);
+                final listing = await HerdrNavigator.load(
+                  runner,
+                  session: herdrSession,
+                );
                 if (listing is! HerdrListingFailed) {
                   cache[host.id] = listing;
                 }
@@ -461,14 +470,18 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
           // (the app just asked).
           if (shortcut == HerdrShortcut.closePane &&
               runner != null &&
-              await HerdrRemoteControl.closeFocusedPaneOn(runner)) {
+              await HerdrRemoteControl.closeFocusedPaneOn(
+                runner,
+                HerdrCommands(herdrSession),
+              )) {
             _focusTerminal();
             return;
           }
           _sendHerdrShortcut(shortcut);
         case HerdrPanePick(:final entry):
           final switched =
-              runner != null && await HerdrNavigator.focus(runner, entry);
+              runner != null &&
+              await HerdrNavigator.focus(runner, entry, session: herdrSession);
           if (!switched) {
             // No CLI route (older Herdr, security-key host): let Herdr's own
             // picker take over inside the session.

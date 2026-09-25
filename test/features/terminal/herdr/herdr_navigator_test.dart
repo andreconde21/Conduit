@@ -109,4 +109,21 @@ void main() {
       },
     );
   });
+
+  test('a named Herdr session is listed and focused with --session', () async {
+    final runner = FakeHerdrRunner.withPanes();
+    final listing = await HerdrNavigator.load(runner, session: 'work');
+    expect(listing, isA<HerdrPanesAvailable>());
+    expect(runner.commands, hasLength(3));
+    expect(
+      runner.commands.every((command) => command.contains('--session work')),
+      isTrue,
+    );
+    final entry = (listing as HerdrPanesAvailable).entries.first;
+    expect(await HerdrNavigator.focus(runner, entry, session: 'work'), isTrue);
+    expect(
+      runner.commands.last,
+      contains('herdr --session work agent focus w1:p1'),
+    );
+  });
 }
