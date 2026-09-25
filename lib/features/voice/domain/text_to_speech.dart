@@ -39,6 +39,11 @@ sealed class TtsEvent {
       'done' => TtsDone(id),
       'stopped' => TtsStopped(id),
       'interrupted' => const TtsInterrupted(),
+      'paused' => TtsPaused(
+        id,
+        offset: raw['offset'] is int ? raw['offset'] as int : 0,
+      ),
+      'resumed' => const TtsResumed(),
       'error' => TtsFailed(
         id,
         raw['message'] is String
@@ -63,9 +68,23 @@ class TtsStopped extends TtsEvent {
   const TtsStopped(super.id);
 }
 
-/// Another app (a call, a navigation prompt) took the audio for good.
+/// Another app (music, a video) took the audio for good.
 class TtsInterrupted extends TtsEvent {
   const TtsInterrupted() : super('');
+}
+
+/// Another app took the audio for a moment (a notification sound, a
+/// ringtone): the utterance [id] was cut near character [offset]. The
+/// audio comes back with [TtsResumed] (or is lost with [TtsInterrupted]).
+class TtsPaused extends TtsEvent {
+  const TtsPaused(super.id, {this.offset = 0});
+
+  final int offset;
+}
+
+/// The audio is ours again after [TtsPaused].
+class TtsResumed extends TtsEvent {
+  const TtsResumed() : super('');
 }
 
 class TtsFailed extends TtsEvent {
@@ -82,7 +101,7 @@ abstract class TextToSpeech {
   /// Offline voices for [language] (a BCP-47 tag; empty lists them all).
   Future<List<TtsVoice>> voices({String language = ''});
 
-  /// Speaks [text], replacing whatever is playing. [language] empty uses
+  /// Speaks [text] after whatever is playing. [language] empty uses
   /// the device locale; [voice] empty picks the best offline voice.
   Future<void> speak(
     String text, {

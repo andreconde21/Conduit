@@ -18,6 +18,9 @@ class FakeTts implements TextToSpeech {
 
   void done() => _events.add(TtsDone(ids.last));
 
+  /// Sends an engine event (started, paused, interrupted…).
+  void emit(TtsEvent event) => _events.add(event);
+
   @override
   Stream<TtsEvent> get events => _events.stream;
 
