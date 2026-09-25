@@ -58,6 +58,10 @@ import io.flutter.plugin.common.MethodChannel
  * restored on `stop` (before the final stop beep), `cancel`, when the
  * activity stops, and on dispose. Streams the user had already muted are
  * left alone. Muting can fail under Do Not Disturb; the beeps then stay.
+ * This is opt-in (off by default in Settings → Speech): a crash or a kill
+ * while muted would leave the phone muted, so the muted streams and their
+ * pre-mute levels are written to SharedPreferences before muting and
+ * restored (then cleared) when the bridge is created on the next start.
  */
 class SpeechRecognitionBridge(private val activity: Activity) :
     EventChannel.StreamHandler {
@@ -75,6 +79,13 @@ class SpeechRecognitionBridge(private val activity: Activity) :
     private val mutedStreams = mutableListOf<Int>()
     private var lastLevelAt = 0L
     private val muteAfterFirstBeep = Runnable { muteEarcons() }
+    private val prefs =
+        activity.getSharedPreferences(MUTE_PREFS, Context.MODE_PRIVATE)
+
+    init {
+        // A previous run died while muted: give the user their sound back.
+        restorePersistedMute()
+    }
 
     /** Per-start tuning sent by the Dart side (see the class docs). */
     private data class ListenOptions(
@@ -338,16 +349,42 @@ class SpeechRecognitionBridge(private val activity: Activity) :
 
     private fun muteEarcons() {
         if (recognizer == null || !options.continuous) return
-        for (stream in EARCON_STREAMS) {
-            if (mutedStreams.contains(stream)) continue
+        val toMute = EARCON_STREAMS.filter { stream ->
+            !mutedStreams.contains(stream) &&
+                !audioManager.isStreamMute(stream)
+        }
+        if (toMute.isEmpty()) return
+        // Written (synchronously) before anything is muted, so a crash in
+        // between can still be undone on the next start.
+        val record = (mutedStreams + toMute).joinToString(",") { stream ->
+            "$stream:${audioManager.getStreamVolume(stream)}"
+        }
+        prefs.edit().putString(MUTED_KEY, record).commit()
+        for (stream in toMute) {
             try {
-                if (audioManager.isStreamMute(stream)) continue
                 audioManager.adjustStreamVolume(stream, AudioManager.ADJUST_MUTE, 0)
                 mutedStreams.add(stream)
             } catch (_: SecurityException) {
                 // Do Not Disturb: the stream cannot be changed; beeps stay.
             }
         }
+    }
+
+    private fun restorePersistedMute() {
+        val record = prefs.getString(MUTED_KEY, null) ?: return
+        for (entry in record.split(',')) {
+            val parts = entry.split(':')
+            val stream = parts.getOrNull(0)?.toIntOrNull() ?: continue
+            val level = parts.getOrNull(1)?.toIntOrNull() ?: 0
+            try {
+                audioManager.adjustStreamVolume(stream, AudioManager.ADJUST_UNMUTE, 0)
+                if (level > 0 && audioManager.getStreamVolume(stream) == 0) {
+                    audioManager.setStreamVolume(stream, level, 0)
+                }
+            } catch (_: SecurityException) {
+            }
+        }
+        prefs.edit().remove(MUTED_KEY).apply()
     }
 
     private fun restoreVolume() {
@@ -358,7 +395,10 @@ class SpeechRecognitionBridge(private val activity: Activity) :
             } catch (_: SecurityException) {
             }
         }
-        mutedStreams.clear()
+        if (mutedStreams.isNotEmpty()) {
+            mutedStreams.clear()
+            prefs.edit().remove(MUTED_KEY).apply()
+        }
     }
 
     private fun emit(event: Map<String, Any?>) {
@@ -397,6 +437,8 @@ class SpeechRecognitionBridge(private val activity: Activity) :
         private const val ERROR_UNAVAILABLE = 1000
         private const val LEVEL_INTERVAL_MS = 100L
         private const val BEEP_GRACE_MS = 600L
+        private const val MUTE_PREFS = "conduit_speech"
+        private const val MUTED_KEY = "muted_streams"
         private val EARCON_STREAMS = listOf(
             AudioManager.STREAM_MUSIC,
             AudioManager.STREAM_NOTIFICATION,

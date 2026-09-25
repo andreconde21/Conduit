@@ -29,7 +29,7 @@ class DictationOptions {
     this.continuous = false,
     this.silenceTimeout = const Duration(seconds: 8),
     this.maxSession = const Duration(minutes: 5),
-    this.muteRestartBeeps = true,
+    this.muteRestartBeeps = false,
     this.waitForSpeech = false,
   });
 

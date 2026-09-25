@@ -195,8 +195,10 @@ class _SpeechSettingsControlsState extends State<SpeechSettingsControls> {
                   secondary: const Icon(Icons.notifications_off_outlined),
                   title: const Text('Silence beeps between phrases'),
                   subtitle: Text(
-                    'Mutes media and notification sounds while dictating, '
-                    'so restarts are quiet. Restored when you stop.',
+                    'Experimental. Mutes media, notification and system '
+                    'sounds while dictating so restarts are quiet. Restored '
+                    'when you stop, or on the next start if the app was '
+                    'closed while muted.',
                     style: muted,
                   ),
                   value: voice.muteRestartBeeps,

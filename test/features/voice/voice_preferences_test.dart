@@ -14,6 +14,7 @@ void main() {
     expect(controller.voice.continuousDictation, isTrue);
     expect(controller.voice.dictationSilenceSeconds, 8);
     expect(controller.voice.dictationMaxMinutes, 5);
+    expect(controller.voice.muteRestartBeeps, isFalse, reason: 'opt-in');
 
     await controller.setVoice(
       controller.voice
@@ -26,7 +27,7 @@ void main() {
             continuousDictation: false,
             dictationSilenceSeconds: 12,
             dictationMaxMinutes: 10,
-            muteRestartBeeps: false,
+            muteRestartBeeps: true,
             talkSendSilenceSeconds: 4,
           )
           .withSessionReadAloud('s1', false),
@@ -43,7 +44,7 @@ void main() {
     expect(voice.continuousDictation, isFalse);
     expect(voice.dictationSilence, const Duration(seconds: 12));
     expect(voice.dictationMaxSession, const Duration(minutes: 10));
-    expect(voice.muteRestartBeeps, isFalse);
+    expect(voice.muteRestartBeeps, isTrue);
     expect(voice.talkSendSilenceSeconds, 4);
     expect(voice.readAloudFor('s1'), isFalse);
     expect(voice.readAloudFor('other'), isTrue);

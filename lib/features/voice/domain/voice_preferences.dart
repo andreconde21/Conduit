@@ -15,7 +15,7 @@ class VoicePreferences {
     this.continuousDictation = true,
     this.dictationSilenceSeconds = defaultSilenceSeconds,
     this.dictationMaxMinutes = defaultMaxMinutes,
-    this.muteRestartBeeps = true,
+    this.muteRestartBeeps = false,
     this.readAloudSessions = const {},
     this.talkSendSilenceSeconds = defaultTalkSendSeconds,
   });
@@ -67,8 +67,9 @@ class VoicePreferences {
   /// Hard cap on one continuous dictation session.
   final int dictationMaxMinutes;
 
-  /// Briefly mutes the recognizer's start/stop earcon while it restarts
-  /// between phrases (best effort; see SpeechRecognitionBridge.kt).
+  /// Mutes the recognizer's start/stop earcons while it restarts between
+  /// phrases (best effort; see SpeechRecognitionBridge.kt). Opt-in and off
+  /// by default: it mutes whole system streams.
   final bool muteRestartBeeps;
 
   /// The Chat View speaker toggle per session id, most recent last.
