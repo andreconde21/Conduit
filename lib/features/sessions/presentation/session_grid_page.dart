@@ -4,6 +4,7 @@ import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_palette.dart';
+import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
@@ -357,13 +358,13 @@ class SessionTile extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
         onTap: onTap,
         onLongPress: onLongPress,
         child: Container(
           decoration: BoxDecoration(
             color: palette.panelFor(brightness),
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(AppTheme.radius),
             border: Border.all(
               color: selected
                   ? accent.withValues(alpha: 0.7)
@@ -554,7 +555,7 @@ class _AgentBadge extends StatelessWidget {
       AgentAttentionState.needsInput => ('Needs input', colorScheme.error),
       AgentAttentionState.blocked => ('Blocked', colorScheme.error),
       AgentAttentionState.working => ('Working', colorScheme.primary),
-      AgentAttentionState.finished => ('Done', const Color(0xFF16A34A)),
+      AgentAttentionState.finished => ('Done', AppPalette.of(context).success),
       AgentAttentionState.idle => ('Idle', colorScheme.onSurfaceVariant),
       AgentAttentionState.unknown => ('Agent', colorScheme.onSurfaceVariant),
     };
@@ -562,7 +563,7 @@ class _AgentBadge extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.16),
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
       ),
       child: Text(
         label,
@@ -584,11 +585,11 @@ class _StatusDot extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = switch (status) {
-      TerminalConnectionStatus.connected => const Color(0xFF22C55E),
-      TerminalConnectionStatus.connecting => const Color(0xFFEAB308),
+      TerminalConnectionStatus.connected => AppPalette.of(context).success,
+      TerminalConnectionStatus.connecting => AppPalette.of(context).warning,
       TerminalConnectionStatus.failed => Theme.of(context).colorScheme.error,
       TerminalConnectionStatus.idle ||
-      TerminalConnectionStatus.disconnected => const Color(0xFF64748B),
+      TerminalConnectionStatus.disconnected => AppPalette.of(context).inactive,
     };
     return Container(
       width: 8,
@@ -615,11 +616,11 @@ class _AddTile extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
         onTap: onTap,
         child: Container(
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(AppTheme.radius),
             border: Border.all(color: palette.borderFor(brightness)),
             color: palette.panelFor(brightness).withValues(alpha: 0.5),
           ),

@@ -129,7 +129,10 @@ class MachineChip extends StatelessWidget {
     final colorScheme = theme.colorScheme;
     return Material(
       color: colorScheme.surface.withValues(alpha: 0.6),
-      shape: StadiumBorder(side: BorderSide(color: colorScheme.outlineVariant)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppTheme.radius),
+        side: BorderSide(color: colorScheme.outlineVariant),
+      ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         key: const ValueKey('machine-chip'),
@@ -390,8 +393,7 @@ class _MachineSheetState extends State<MachineSheet> {
                 key: ValueKey('machine-row-${host.id}'),
                 checked: _filter.keys.contains(host.id),
                 title: host.name,
-                subtitle:
-                    '${host.endpoint} · ${host.useMosh ? 'Mosh' : 'SSH'}',
+                subtitle: '${host.endpoint} · ${host.useMosh ? 'Mosh' : 'SSH'}',
                 live: widget.liveKeys.contains(host.id),
                 onToggle: () => _toggle(host.id),
                 onOnly: () => _set({host.id}),

@@ -1,3 +1,4 @@
+import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/local_shell/domain/local_shell_instance.dart';
 import 'package:conduit/features/local_shell/domain/local_shell_state.dart';
 import 'package:conduit/features/local_shell/presentation/local_shell_controller.dart';
@@ -157,7 +158,7 @@ class _SetupPromptCard extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
         onTap: onTap,
         child: _CardShell(
           highlighted: false,
@@ -230,7 +231,7 @@ class _InstanceCard extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
         onTap: () {
           if (ready) {
             onOpen();
@@ -338,7 +339,7 @@ class _CardShell extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: colorScheme.surface,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
         border: Border.all(
           color: highlighted
               ? colorScheme.primary.withValues(alpha: 0.55)
@@ -365,17 +366,8 @@ class _Avatar extends StatelessWidget {
       height: 36,
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: ready
-              ? [accent, colorScheme.secondary]
-              : [
-                  colorScheme.surfaceContainerHigh,
-                  colorScheme.surfaceContainerHigh,
-                ],
-        ),
-        borderRadius: BorderRadius.circular(10),
+        color: ready ? accent : colorScheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(AppTheme.radius),
         border: Border.all(
           color: ready
               ? accent.withValues(alpha: 0.4)
