@@ -33,6 +33,42 @@ More in [Screenshots](#screenshots). Jump to [Install](#install).
 - **Agents first.** The app is built around watching and steering coding agents
   (Claude Code) inside Herdr and tmux, not around a generic terminal.
 
+## New in preview 13
+
+- **Settings screen**: one searchable page for every preference, with the
+  section list and the open section side by side on a desktop.
+- **Import refresh**: machines imported from a backup show their workspaces
+  on the home screen straight away, without a restart.
+- **This computer** on the desktop: a local terminal, Herdr and tmux on the
+  machine the app runs on, listed with your other machines.
+- **Herdr and tmux tabs**: a compact tab label with a tab list on phones, a
+  full tab strip on desktops, and rename, move and close.
+- **Desktop shortcuts and zoom**: standard terminal shortcuts,
+  Ctrl+PgUp/PgDn between tabs, and Ctrl+wheel, Ctrl+= or Ctrl+- to zoom
+  (Cmd on macOS).
+- **Desktop dialogs**: pickers open as centred dialogs and action menus as
+  popovers instead of bottom sheets.
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/07-settings.png" width="200" alt="Settings section list on a phone"><br><sub>Settings on a phone</sub></td>
+    <td align="center"><img src="docs/screenshots/18-herdr-tabs.png" width="200" alt="Compact Herdr tab label and the tab list"><br><sub>Herdr tabs: compact label and tab list</sub></td>
+  </tr>
+</table>
+
+<p align="center"><img src="docs/screenshots/17-desktop-settings.png" width="820" alt="Settings on a 1280x800 desktop window, two panes"><br><sub>Settings on the desktop: sections beside the open one</sub></p>
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/20-desktop-this-computer.png" width="400" alt="Machine list with This computer first"><br><sub>This computer in the machine list</sub></td>
+    <td align="center"><img src="docs/screenshots/21-desktop-connect-dialog.png" width="400" alt="Connect picker as a centred dialog"><br><sub>The connect picker as a centred dialog</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/15-desktop-terminal.png" width="400" alt="Desktop terminal with the Herdr tab strip"><br><sub>The tab strip under the session tabs</sub></td>
+    <td align="center"><img src="docs/screenshots/19-desktop-tab-popover.png" width="400" alt="Tab actions popover on the desktop"><br><sub>Tab actions as a popover</sub></td>
+  </tr>
+</table>
+
 ## New in preview 12
 
 - **Desktop builds** for Linux, Windows and macOS, next to the Android and
@@ -201,9 +237,9 @@ Rendered from the app's own widgets with demo data by
     <td align="center"><img src="docs/screenshots/06-menu-buttons.png" width="200" alt="Menu buttons over a Claude Code permission prompt"><br><sub>Menu buttons answer a prompt in one tap</sub></td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/screenshots/07-appearance.png" width="200" alt="Appearance sheet with Omarchy themes"><br><sub>Appearance: the Omarchy themes</sub></td>
+    <td align="center"><img src="docs/screenshots/07-settings.png" width="200" alt="Settings section list"><br><sub>Settings: every preference, searchable</sub></td>
     <td align="center"><img src="docs/screenshots/08-agent-hooks.png" width="200" alt="Agent hooks screen showing Active"><br><sub>Agent hooks: companion status and checks</sub></td>
-    <td></td>
+    <td align="center"><img src="docs/screenshots/18-herdr-tabs.png" width="200" alt="Compact Herdr tab label and the tab list"><br><sub>Herdr tabs on a phone</sub></td>
     <td></td>
   </tr>
 </table>

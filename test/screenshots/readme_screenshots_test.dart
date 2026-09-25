@@ -5,7 +5,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:conduit/core/presentation/theme_sheet.dart';
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/core/theme/theme_preferences_repository.dart';
@@ -45,6 +45,7 @@ import 'package:conduit/features/terminal/presentation/host_key_prompt_coordinat
 import 'package:conduit/features/terminal/presentation/terminal_page.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
+import 'package:conduit/features/this_computer/domain/this_computer_settings.dart';
 import 'package:conduit/features/voice/presentation/dictation_controller.dart';
 import 'package:conduit/features/voice/presentation/voice_settings_scope.dart';
 import 'package:flutter/foundation.dart';
@@ -91,7 +92,7 @@ final buildBox = SavedHost(
 const workstationWorkspaces =
     '{"id":"1","result":{"workspaces":['
     '{"workspace_id":"w1","label":"api","number":1,'
-    '"agent_status":"blocked","focused":true,"tab_count":2,'
+    '"agent_status":"blocked","focused":true,"tab_count":4,'
     '"active_tab_id":"w1:t1"},'
     '{"workspace_id":"w2","label":"web","number":2,'
     '"agent_status":"working","tab_count":1,"active_tab_id":"w2:t1"},'
@@ -100,15 +101,34 @@ const workstationWorkspaces =
     '{"workspace_id":"w4","label":"docs","number":4,'
     '"agent_status":"idle","tab_count":1,"active_tab_id":"w4:t1"}]}}';
 
+/// `herdr tab list` (Herdr 0.9.1 shape): api has four tabs, claude focused.
 const workstationTabs =
     '{"id":"2","result":{"tabs":['
-    '{"tab_id":"w1:t1","workspace_id":"w1","label":"claude","number":1},'
-    '{"tab_id":"w1:t2","workspace_id":"w1","label":"server","number":2},'
-    '{"tab_id":"w2:t1","workspace_id":"w2","label":"claude","number":1},'
-    '{"tab_id":"w3:t1","workspace_id":"w3","label":"plan","number":1},'
-    '{"tab_id":"w3:t2","workspace_id":"w3","label":"apply","number":2},'
-    '{"tab_id":"w3:t3","workspace_id":"w3","label":"logs","number":3},'
-    '{"tab_id":"w4:t1","workspace_id":"w4","label":"","number":1}]}}';
+    '{"tab_id":"w1:t1","workspace_id":"w1","label":"claude","number":1,'
+    '"agent_status":"working","focused":true,"pane_count":1},'
+    '{"tab_id":"w1:t2","workspace_id":"w1","label":"server","number":2,'
+    '"agent_status":"idle","focused":false,"pane_count":1},'
+    '{"tab_id":"w1:t3","workspace_id":"w1","label":"tests","number":3,'
+    '"agent_status":"blocked","focused":false,"pane_count":2},'
+    '{"tab_id":"w1:t4","workspace_id":"w1","label":"logs","number":4,'
+    '"agent_status":"idle","focused":false,"pane_count":1},'
+    '{"tab_id":"w2:t1","workspace_id":"w2","label":"claude","number":1,'
+    '"agent_status":"working","focused":true,"pane_count":1},'
+    '{"tab_id":"w3:t1","workspace_id":"w3","label":"plan","number":1,'
+    '"agent_status":"done","focused":true,"pane_count":1},'
+    '{"tab_id":"w3:t2","workspace_id":"w3","label":"apply","number":2,'
+    '"agent_status":"working","focused":false,"pane_count":1},'
+    '{"tab_id":"w3:t3","workspace_id":"w3","label":"logs","number":3,'
+    '"agent_status":"idle","focused":false,"pane_count":1},'
+    '{"tab_id":"w4:t1","workspace_id":"w4","label":"","number":1,'
+    '"agent_status":"idle","focused":true,"pane_count":1}]}}';
+
+/// Herdr on This computer: one workspace, "notes".
+const thisComputerWorkspaces =
+    '{"id":"1","result":{"workspaces":['
+    '{"workspace_id":"w1","label":"notes","number":1,'
+    '"agent_status":"idle","focused":true,"tab_count":1,'
+    '"active_tab_id":"w1:t1"}]}}';
 
 const workstationAgents =
     '{"id":"3","result":{"agents":['
@@ -363,9 +383,13 @@ void main() {
   }
 
   /// The home page: two Herdr sessions open, other workspaces listed.
+  SessionConnectFlow? homeFlow;
+
   Future<ThemeController> pumpHome(
     WidgetTester tester, {
     bool desktop = false,
+    bool thisComputer = false,
+    bool withFlow = false,
   }) async {
     if (desktop) {
       useDesktopView(tester);
@@ -375,7 +399,20 @@ void main() {
     final theme = await everforest();
     final repository = FakeHostsRepository()
       ..persisted = [workstation, buildBox];
-    final hostsController = HostsController(repository);
+    final hostsController = HostsController(
+      repository,
+      thisComputerStore: thisComputer
+          ? InMemoryThisComputerStore(
+              ThisComputerSettings(
+                // No agent polling timers in the screenshots.
+                host: SavedHost.thisComputer(
+                  hostname: 'devbox',
+                  username: 'demo',
+                ).copyWith(agentAttentionEnabled: false),
+              ),
+            )
+          : null,
+    );
     final workspace = TerminalWorkspaceController(DemoTerminalRepository());
     addTearDown(workspace.dispose);
     final agentAttention = AgentAttentionController(
@@ -393,12 +430,26 @@ void main() {
         tmuxSessions: tmuxLine('scratch', minutesAgo: 12),
       ),
       'build-box': HerdrFakeRunner.tmuxOnly(tmuxSessions: buildBoxTmux()),
+      thisComputerHostId: HerdrFakeRunner(
+        workspaces: thisComputerWorkspaces,
+        tabs: '{"result":{"tabs":[]}}',
+        agents: '{"result":{"agents":[]}}',
+        tmuxSessions: tmuxLine('dotfiles', minutesAgo: 30),
+      ),
     };
     final boards = HomeBoards(
       runnerFactory: (host) => runners[host.id]!,
       pollInterval: const Duration(days: 1),
     );
     addTearDown(boards.dispose);
+    homeFlow = withFlow
+        ? SessionConnectFlow(
+            hostsController: hostsController,
+            workspace: workspace,
+            runnerFactory: (host) => runners[baseHostId(host.id)]!,
+            preferences: InMemoryConnectPreferencesRepository(),
+          )
+        : null;
 
     await openDemoSession(
       tester,
@@ -442,6 +493,7 @@ void main() {
           fileExport: RecordingFileExport(),
           homeBoards: boards,
           homePreferences: InMemoryHomePreferencesRepository(),
+          connectFlow: homeFlow,
           previewRefreshInterval: const Duration(days: 1),
         ),
         systemBars: !desktop,
@@ -700,12 +752,11 @@ void main() {
     await tearDownPage(tester);
   });
 
-  testWidgets('07 appearance', (tester) async {
-    final theme = await pumpHome(tester);
-    final context = tester.element(find.byType(HostsPage));
-    unawaited(showThemeSheet(context: context, controller: theme));
+  testWidgets('07 settings', (tester) async {
+    await pumpHome(tester);
+    await tester.tap(find.byTooltip('Settings'));
     await pumpFrames(tester, 8);
-    await saveShot(tester, '07-appearance');
+    await saveShot(tester, '07-settings');
     await tearDownPage(tester);
   });
 
@@ -1046,5 +1097,79 @@ void main() {
     } finally {
       debugDefaultTargetPlatformOverride = null;
     }
+  });
+
+  /// Runs [body] as a Linux desktop.
+  Future<void> asDesktop(Future<void> Function() body) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    try {
+      await body();
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  }
+
+  testWidgets('17 desktop settings', (tester) async {
+    await asDesktop(() async {
+      await pumpHome(tester, desktop: true);
+      await tester.tap(find.byTooltip('Settings'));
+      await pumpFrames(tester, 8);
+      await saveShot(tester, '17-desktop-settings', pixelRatio: 1);
+      await tearDownPage(tester);
+    });
+  });
+
+  testWidgets('18 herdr tabs', (tester) async {
+    await pumpTerminal(tester, withPrompt: false);
+    await tester.runAsync(pumpEventQueue);
+    await pumpFrames(tester);
+    await tester.tap(find.byKey(const ValueKey('mux-inline-label')));
+    await tester.runAsync(pumpEventQueue);
+    await pumpFrames(tester, 8);
+    await saveShot(tester, '18-herdr-tabs');
+    await tearDownPage(tester);
+  });
+
+  testWidgets('19 desktop tab popover', (tester) async {
+    await asDesktop(() async {
+      AdaptiveModalPointer.install();
+      await pumpTerminal(tester, withPrompt: false, desktop: true);
+      await tester.runAsync(pumpEventQueue);
+      await pumpFrames(tester);
+      await tester.longPress(find.byKey(const ValueKey('mux-tab-w1:t3')));
+      await pumpFrames(tester, 8);
+      await saveShot(tester, '19-desktop-tab-popover', pixelRatio: 1);
+      await tearDownPage(tester);
+    });
+  });
+
+  testWidgets('20 desktop this computer', (tester) async {
+    await asDesktop(() async {
+      await pumpHome(tester, desktop: true, thisComputer: true);
+      await tester.tap(find.byKey(const ValueKey('machine-name')));
+      await pumpFrames(tester, 8);
+      await saveShot(tester, '20-desktop-this-computer', pixelRatio: 1);
+      await tearDownPage(tester);
+    });
+  });
+
+  testWidgets('21 desktop connect dialog', (tester) async {
+    await asDesktop(() async {
+      await pumpHome(tester, desktop: true, withFlow: true);
+      final context = tester.element(find.byType(HostsPage));
+      unawaited(homeFlow!.connect(context, workstation, forcePicker: true));
+      await tester.runAsync(pumpEventQueue);
+      await pumpFrames(tester, 8);
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const ValueKey('adaptive-modal-dialog')),
+          matching: find.text('Herdr'),
+        ),
+      );
+      await tester.runAsync(pumpEventQueue);
+      await pumpFrames(tester, 8);
+      await saveShot(tester, '21-desktop-connect-dialog', pixelRatio: 1);
+      await tearDownPage(tester);
+    });
   });
 }
