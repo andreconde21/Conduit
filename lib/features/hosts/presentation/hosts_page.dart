@@ -214,12 +214,6 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
         store: const SecureDesktopShellStore(conductoreSecureStorage),
       ));
 
-  /// Whether this device gets the desktop shell: desktops, and tablets at
-  /// least 900 dp wide (phones in landscape stay on the phone home).
-  static bool shellModeFor(Size size) =>
-      PlatformFeatures.isDesktop ||
-      (size.width >= 900 && size.shortestSide >= 600);
-
   /// Where dialogs and Chat View open from: inside the shell (below its
   /// Chat View presenter), else this page.
   BuildContext get _actionContext =>
@@ -491,7 +485,8 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     if (_shellMode == null) {
-      _shellMode = widget.shellMode ?? shellModeFor(MediaQuery.sizeOf(context));
+      _shellMode =
+          widget.shellMode ?? usesDesktopShell(MediaQuery.sizeOf(context));
       if (_shellMode!) {
         // Every machine gets a board in the shell, whatever the filter.
         WidgetsBinding.instance.addPostFrameCallback((_) => _syncBoards());

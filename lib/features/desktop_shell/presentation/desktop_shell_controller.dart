@@ -32,7 +32,13 @@ class DesktopShellController extends ChangeNotifier {
     this.saveDelay = const Duration(milliseconds: 800),
     DateTime Function()? clock,
   }) : _store = store ?? InMemoryDesktopShellStore(),
+       _clock = clock ?? DateTime.now,
        unread = UnreadTracker(clock: clock);
+
+  final DateTime Function() _clock;
+
+  /// The shell's clock (tests move it).
+  DateTime now() => _clock();
 
   final DesktopShellStore _store;
   final Duration saveDelay;

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
@@ -29,6 +30,13 @@ import 'package:conduit/features/terminal/presentation/terminal_session_controll
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:conduit/features/terminal/presentation/widgets/desktop_shortcuts_sheet.dart';
 import 'package:flutter/material.dart';
+
+/// Whether a window of [size] gets the desktop shell: desktops always,
+/// and tablets at least 900 dp wide. Phones (in landscape too) and
+/// narrower tablets keep the phone home.
+bool usesDesktopShell(Size size) =>
+    PlatformFeatures.isDesktop ||
+    (size.width >= 900 && size.shortestSide >= 600);
 
 /// What the desktop home asks the home page to do (the page owns the
 /// connect flow, the machine forms and the dialogs).
@@ -137,9 +145,14 @@ class DesktopHomeState extends State<DesktopHome> {
   AppLifecycleListener? _lifecycle;
 
   /// When each open session last printed something (not right after it
-  /// connected: a reattach redraws the whole screen).
+  /// connected: a reattach redraws the whole screen). The terminal model
+  /// notifies on every write.
   final Map<TerminalSessionController, int> _outputAt = {};
   final Map<TerminalSessionController, VoidCallback> _paintListeners = {};
+
+  /// Each session's terminal size when it last changed: a resize redraws
+  /// without news (a pane moving offstage, a split).
+  final Map<TerminalSessionController, (int, int)> _sizes = {};
   final Map<TerminalSessionController, DateTime> _connectedAt = {};
   final Map<TerminalSessionController, TerminalConnectionStatus> _status = {};
 
@@ -219,7 +232,7 @@ class DesktopHomeState extends State<DesktopHome> {
     _feedTimer?.cancel();
     for (final MapEntry(key: session, value: listener)
         in _paintListeners.entries) {
-      session.terminalPaintListenable.removeListener(listener);
+      session.terminal.removeListener(listener);
       session.removeListener(_handleSessionChanged);
     }
     _paintListeners.clear();
@@ -261,11 +274,10 @@ class DesktopHomeState extends State<DesktopHome> {
     final sessions = widget.workspace.sessions.toSet();
     for (final session in List.of(_paintListeners.keys)) {
       if (sessions.contains(session)) continue;
-      session.terminalPaintListenable.removeListener(
-        _paintListeners.remove(session)!,
-      );
+      session.terminal.removeListener(_paintListeners.remove(session)!);
       session.removeListener(_handleSessionChanged);
       _outputAt.remove(session);
+      _sizes.remove(session);
       _connectedAt.remove(session);
       _status.remove(session);
     }
@@ -274,8 +286,9 @@ class DesktopHomeState extends State<DesktopHome> {
       void listener() => _noteOutput(session);
       _paintListeners[session] = listener;
       _status[session] = session.status;
-      if (session.isConnected) _connectedAt[session] = DateTime.now();
-      session.terminalPaintListenable.addListener(listener);
+      if (session.isConnected) _connectedAt[session] = _controller.now();
+      _sizes[session] = _sizeOf(session);
+      session.terminal.addListener(listener);
       session.addListener(_handleSessionChanged);
     }
   }
@@ -286,7 +299,7 @@ class DesktopHomeState extends State<DesktopHome> {
       if (_status[session] == status) continue;
       _status[session] = status;
       if (status == TerminalConnectionStatus.connected) {
-        _connectedAt[session] = DateTime.now();
+        _connectedAt[session] = _controller.now();
       }
     }
   }
@@ -294,9 +307,17 @@ class DesktopHomeState extends State<DesktopHome> {
   /// A reconnect or reattach repaints the whole screen: not news.
   static const _settleAfterConnect = Duration(seconds: 4);
 
+  static (int, int) _sizeOf(TerminalSessionController session) =>
+      (session.terminal.viewWidth, session.terminal.viewHeight);
+
   void _noteOutput(TerminalSessionController session) {
+    final size = _sizeOf(session);
+    if (_sizes[session] != size) {
+      _sizes[session] = size;
+      return;
+    }
     final connected = _connectedAt[session];
-    final now = DateTime.now();
+    final now = _controller.now();
     if (connected == null || now.difference(connected) < _settleAfterConnect) {
       return;
     }
@@ -702,7 +723,7 @@ class DesktopHomeState extends State<DesktopHome> {
       case _NodeActionKind.newGroup:
         final name = await _askName(context, title: 'New group');
         if (name == null || name.isEmpty) return;
-        final id = 'g${DateTime.now().microsecondsSinceEpoch}';
+        final id = 'g${_controller.now().microsecondsSinceEpoch}';
         _controller.updatePrefs(
           (prefs) => prefs
               .addGroup(SidebarGroup(id: id, name: name))
@@ -1440,7 +1461,14 @@ class _MenuRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Row(
-    children: [Icon(icon, size: 18), const SizedBox(width: 10), Text(label)],
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(icon, size: 18),
+      const SizedBox(width: 10),
+      Flexible(
+        child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+      ),
+    ],
   );
 }
 
@@ -1448,15 +1476,41 @@ Future<String?> _askName(
   BuildContext context, {
   required String title,
   String initial = '',
-}) {
-  final text = TextEditingController(text: initial);
-  return showDialog<String>(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: Text(title),
+}) => showDialog<String>(
+  context: context,
+  builder: (context) => _NameDialog(title: title, initial: initial),
+);
+
+/// Asks for a group's name; owns its text field's controller, which must
+/// outlive the dialog's closing animation.
+class _NameDialog extends StatefulWidget {
+  const _NameDialog({required this.title, required this.initial});
+
+  final String title;
+  final String initial;
+
+  @override
+  State<_NameDialog> createState() => _NameDialogState();
+}
+
+class _NameDialogState extends State<_NameDialog> {
+  late final TextEditingController _text = TextEditingController(
+    text: widget.initial,
+  );
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
       content: TextField(
         key: const ValueKey('group-name-field'),
-        controller: text,
+        controller: _text,
         autofocus: true,
         decoration: const InputDecoration(hintText: 'Clients, Infra…'),
         onSubmitted: (value) => Navigator.of(context).pop(value.trim()),
@@ -1468,12 +1522,12 @@ Future<String?> _askName(
         ),
         FilledButton(
           key: const ValueKey('group-name-save'),
-          onPressed: () => Navigator.of(context).pop(text.text.trim()),
+          onPressed: () => Navigator.of(context).pop(_text.text.trim()),
           child: const Text('Save'),
         ),
       ],
-    ),
-  ).whenComplete(text.dispose);
+    );
+  }
 }
 
 /// A thin vertical grab bar that resizes the panel next to it.

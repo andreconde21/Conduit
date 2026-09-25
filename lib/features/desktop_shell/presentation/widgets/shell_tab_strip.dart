@@ -161,7 +161,7 @@ class _ShellTabState extends State<_ShellTab> {
         ),
         const PopupMenuItem(
           value: ShellTabAction.openInPane,
-          child: _MenuRow(Icons.open_in_full_rounded, 'Show in focused pane'),
+          child: _MenuRow(Icons.open_in_full_rounded, 'Show in this pane'),
         ),
         const PopupMenuDivider(),
         const PopupMenuItem(
@@ -338,7 +338,14 @@ class _MenuRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Row(
-    children: [Icon(icon, size: 18), const SizedBox(width: 10), Text(label)],
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(icon, size: 18),
+      const SizedBox(width: 10),
+      Flexible(
+        child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+      ),
+    ],
   );
 }
 
