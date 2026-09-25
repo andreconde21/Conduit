@@ -36,7 +36,7 @@ void main() {
           ],
           rows: [
             usageRow('2026-09-25', output: 1200000, costUsd: 4.2),
-            usageRow('2026-09-24', project: 'web', costUsd: 1),
+            usageRow('2026-09-24', project: 'web'),
           ],
         ),
       ),
@@ -61,7 +61,7 @@ void main() {
   );
 
   test('ring colours: accent, then warning from 80 %, danger from 95 %', () {
-    final palette = AppPalette.defaultPalette;
+    const palette = AppPalette.defaultPalette;
     expect(usageColor(79, palette), palette.accent);
     expect(usageColor(80, palette), palette.warning);
     expect(usageColor(95, palette), palette.danger);
