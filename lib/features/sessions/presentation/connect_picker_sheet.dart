@@ -1,6 +1,8 @@
 import 'dart:async';
 
+import 'package:conduit/core/connection_problem.dart';
 import 'package:conduit/core/presentation/adaptive_modal.dart';
+import 'package:conduit/core/presentation/connection_details.dart';
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_palette.dart';
@@ -302,10 +304,9 @@ class _ConnectPickerSheetState extends State<ConnectPickerSheet> {
                 icon: Icons.power_settings_new_rounded,
                 message: message,
               ),
-              RemoteListingFailed(:final message) => _Message(
-                icon: Icons.error_outline_rounded,
-                message: 'Could not list tmux sessions. $message',
-                onRetry: _load,
+              final RemoteListingFailed<TmuxSessionInfo> failed => _failed(
+                failed,
+                'Could not list tmux sessions.',
               ),
               RemoteListingAvailable(:final items) =>
                 items.isEmpty
@@ -334,6 +335,36 @@ class _ConnectPickerSheetState extends State<ConnectPickerSheet> {
           },
         ),
     ];
+  }
+
+  /// A failed listing: the shared wording when the machine was not
+  /// reached or refused the sign-in, else [headline] and the command's
+  /// error.
+  Widget _failed(RemoteListingFailed<Object?> listing, String headline) {
+    final error = listing.error;
+    final problem = error == null
+        ? null
+        : connectionProblemFor(
+            error,
+            machine: widget.host.name,
+            address: widget.host.host,
+          );
+    if (problem == null) {
+      return _Message(
+        icon: Icons.error_outline_rounded,
+        message: '$headline ${listing.message}',
+        onRetry: _load,
+      );
+    }
+    return _Message(
+      icon: problem.kind == ConnectionProblemKind.unreachable
+          ? Icons.cloud_off_rounded
+          : Icons.lock_outline_rounded,
+      title: problem.title,
+      message: problem.message,
+      detail: problem.detail,
+      onRetry: _load,
+    );
   }
 
   static String _tmuxSubtitle(TmuxSessionInfo session) {
@@ -371,10 +402,9 @@ class _ConnectPickerSheetState extends State<ConnectPickerSheet> {
               actionLabel: 'Start Herdr',
               onAction: () => _pick(const ConnectTarget.herdr(workspaceId: '')),
             ),
-            RemoteListingFailed(:final message) => _Message(
-              icon: Icons.error_outline_rounded,
-              message: 'Could not list Herdr workspaces. $message',
-              onRetry: _load,
+            final RemoteListingFailed<HerdrWorkspaceInfo> failed => _failed(
+              failed,
+              'Could not list Herdr workspaces.',
             ),
             RemoteListingAvailable(:final items) =>
               items.isEmpty
@@ -701,13 +731,19 @@ class _Message extends StatelessWidget {
   const _Message({
     required this.icon,
     required this.message,
+    this.title,
+    this.detail,
     this.onRetry,
     this.actionLabel,
     this.onAction,
   });
 
   final IconData icon;
+  final String? title;
   final String message;
+
+  /// Technical reason, behind "Details".
+  final String? detail;
   final VoidCallback? onRetry;
   final String? actionLabel;
   final VoidCallback? onAction;
@@ -721,6 +757,14 @@ class _Message extends StatelessWidget {
         children: [
           Icon(icon, size: 28, color: theme.colorScheme.onSurfaceVariant),
           const SizedBox(height: 10),
+          if (title case final title?) ...[
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.titleSmall,
+            ),
+            const SizedBox(height: 4),
+          ],
           Text(
             message,
             textAlign: TextAlign.center,
@@ -728,6 +772,8 @@ class _Message extends StatelessWidget {
               color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
+          if (detail case final detail?)
+            ConnectionDetails(detail: detail, textAlign: TextAlign.center),
           if (onRetry != null) ...[
             const SizedBox(height: 8),
             TextButton(onPressed: onRetry, child: const Text('Retry')),

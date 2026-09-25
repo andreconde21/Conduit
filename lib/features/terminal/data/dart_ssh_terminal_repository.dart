@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:conduit/core/app_failure.dart';
+import 'package:conduit/core/connection_problem.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/terminal/data/ssh_client_factory.dart';
 import 'package:conduit/features/terminal/data/ssh_error_formatter.dart';
@@ -34,9 +35,10 @@ class DartSshTerminalRepository implements SshTerminalRepository {
       return DartSshTerminalSession(client: client, shell: shell);
     } catch (error) {
       client?.close();
-      throw AppFailure(
+      throw ConnectionFailure(
         'Could not connect to ${host.host}:${host.port}.',
         describeSshConnectionError(error),
+        kind: classifyConnectionError(error),
       );
     }
   }

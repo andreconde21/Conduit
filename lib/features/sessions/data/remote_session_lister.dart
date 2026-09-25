@@ -19,9 +19,9 @@ class RemoteSessionLister {
       );
       return RemoteSessionListing.interpretTmux(result);
     } on AppFailure catch (failure) {
-      return RemoteListingFailed(failure.toString());
+      return RemoteListingFailed(failure.toString(), error: failure);
     } catch (error) {
-      return RemoteListingFailed(error.toString());
+      return RemoteListingFailed(error.toString(), error: error);
     }
   }
 
@@ -123,9 +123,9 @@ class RemoteSessionLister {
       }
       return listing;
     } on AppFailure catch (failure) {
-      return RemoteListingFailed(failure.toString());
+      return RemoteListingFailed(failure.toString(), error: failure);
     } catch (error) {
-      return RemoteListingFailed(error.toString());
+      return RemoteListingFailed(error.toString(), error: error);
     }
   }
 }

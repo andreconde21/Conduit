@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:conduit/core/app_failure.dart';
+import 'package:conduit/core/connection_problem.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/terminal/data/ssh_client_factory.dart';
@@ -62,9 +63,10 @@ class MoshTerminalRepository implements SshTerminalRepository {
       );
     } catch (error) {
       client?.close();
-      throw AppFailure(
+      throw ConnectionFailure(
         'Could not start a Mosh session on ${host.host}:${host.port}.',
         error,
+        kind: classifyConnectionError(error),
       );
     }
   }

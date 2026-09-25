@@ -1,3 +1,4 @@
+import 'package:conduit/core/connection_problem.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/data/herdr_attention_provider.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
@@ -532,6 +533,39 @@ void main() {
     await pumpHome(tester, hosts: [host('a')]);
     expect(find.text('Could not list workspaces'), findsOneWidget);
     expect(find.textContaining('connection refused'), findsOneWidget);
+
+    runner.error = null;
+    await tester.tap(find.text('Retry'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.byType(HomeBoardNoticeTile), findsNothing);
+    expect(dormant('w1'), findsOneWidget);
+  });
+
+  testWidgets('an unreachable Tailscale machine says to check Tailscale', (
+    tester,
+  ) async {
+    runner.error = const ConnectionFailure(
+      'Could not reach Host a.',
+      'SocketException: Connection timed out (OS Error: Connection timed '
+          'out, errno = 110), address = 100.106.7.32, port = 22',
+      kind: ConnectionProblemKind.unreachable,
+    );
+    await pumpHome(tester, hosts: [host('a').copyWith(host: '100.106.7.32')]);
+    expect(find.text("Can't reach Host a"), findsOneWidget);
+    expect(
+      find.text(
+        'This machine is on your Tailscale network. Check that Tailscale '
+        'is on, then tap Retry.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Could not list workspaces'), findsNothing);
+    // The technical reason waits behind Details.
+    expect(find.textContaining('errno = 110'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('home-board-notice-details')));
+    await tester.pump();
+    expect(find.textContaining('errno = 110'), findsOneWidget);
 
     runner.error = null;
     await tester.tap(find.text('Retry'));
