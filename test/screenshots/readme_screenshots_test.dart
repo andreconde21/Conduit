@@ -5,6 +5,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:conduit/core/connection_problem.dart';
 import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
@@ -33,6 +34,7 @@ import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/home_board_controller.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/hosts/presentation/hosts_page.dart';
+import 'package:conduit/features/hosts/presentation/widgets/home_session_grid.dart';
 import 'package:conduit/features/live_preview/presentation/preview_ready_controller.dart';
 import 'package:conduit/features/local_shell/presentation/local_shell_controller.dart';
 import 'package:conduit/features/prompt_menus/presentation/prompt_menu_strip.dart';
@@ -56,6 +58,7 @@ import 'package:conduit/features/this_computer/domain/this_computer_settings.dar
 import 'package:conduit/features/usage/data/usage_preferences.dart';
 import 'package:conduit/features/usage/presentation/usage_controller.dart';
 import 'package:conduit/features/usage/presentation/usage_widgets.dart';
+import 'package:conduit/features/voice/domain/voice_preferences.dart';
 import 'package:conduit/features/voice/presentation/dictation_controller.dart';
 import 'package:conduit/features/voice/presentation/voice_settings_scope.dart';
 import 'package:flutter/foundation.dart';
@@ -379,8 +382,9 @@ Widget _withUsage(UsageController? usage, Widget page) =>
     usage == null ? page : UsageScope(controller: usage, child: page);
 
 /// Usage on the workstation: the 5-hour limit at 62 %, the week at 31 %,
-/// today's tokens and cost.
-UsageController demoUsage() {
+/// today's tokens and cost. [detailed] adds the build box and a week of
+/// projects and models, for the breakdown.
+UsageController demoUsage({bool detailed = false}) {
   final now = DateTime.now();
   String day(int back) {
     final d = now.subtract(Duration(days: back));
@@ -388,35 +392,94 @@ UsageController demoUsage() {
         '${'${d.day}'.padLeft(2, '0')}';
   }
 
+  final limits = [
+    {
+      'label': '5h',
+      'usedPct': 62,
+      'resetsAt': now
+          .add(const Duration(hours: 2, minutes: 14))
+          .millisecondsSinceEpoch,
+    },
+    {
+      'label': '7d',
+      'usedPct': 31,
+      'resetsAt': now.add(const Duration(days: 3)).millisecondsSinceEpoch,
+    },
+  ];
   final runner = FakeUsageRunner(
     () => FakeUsageRunner.ok(
       usageReplyJson(
         machine: 'workstation',
         today: day(0),
         from: day(6),
-        limits: [
-          {
-            'label': '5h',
-            'usedPct': 62,
-            'resetsAt': now
-                .add(const Duration(hours: 2, minutes: 14))
-                .millisecondsSinceEpoch,
-          },
-          {
-            'label': '7d',
-            'usedPct': 31,
-            'resetsAt': now.add(const Duration(days: 3)).millisecondsSinceEpoch,
-          },
-        ],
+        limits: limits,
         rows: [
           usageRow(day(0), output: 1840000, costUsd: 6.4),
           usageRow(day(1), project: 'todo-web', output: 920000, costUsd: 3.1),
+          if (detailed) ...[
+            usageRow(
+              day(0),
+              project: 'todo-web',
+              model: 'claude-sonnet-5',
+              output: 610000,
+              costUsd: 1.2,
+            ),
+            usageRow(day(1), output: 1320000, costUsd: 4.6),
+            usageRow(day(2), output: 1510000, costUsd: 5.3),
+            usageRow(
+              day(2),
+              project: 'infra',
+              model: 'claude-haiku-4-5',
+              output: 380000,
+              costUsd: 0.4,
+            ),
+            usageRow(day(3), project: 'todo-web', output: 700000, costUsd: 2.5),
+            usageRow(day(4), output: 1100000, costUsd: 3.8),
+            usageRow(
+              day(5),
+              project: 'infra',
+              model: 'claude-sonnet-5',
+              output: 450000,
+              costUsd: 0.9,
+            ),
+            usageRow(day(6), output: 800000, costUsd: 2.8),
+          ],
+        ],
+      ),
+    ),
+  );
+  final buildBoxRunner = FakeUsageRunner(
+    () => FakeUsageRunner.ok(
+      usageReplyJson(
+        machine: 'build-box',
+        today: day(0),
+        from: day(6),
+        // The same Claude account as the workstation.
+        limits: limits,
+        rows: [
+          usageRow(
+            day(0),
+            project: 'ci',
+            model: 'claude-sonnet-5',
+            output: 420000,
+            costUsd: 0.8,
+          ),
+          usageRow(
+            day(3),
+            project: 'ci',
+            model: 'claude-sonnet-5',
+            output: 510000,
+            costUsd: 1.1,
+          ),
         ],
       ),
     ),
   );
   final controller = UsageController(
-    source: FakeUsageSource([workstation], {'workstation': runner}),
+    source: FakeUsageSource(
+      [workstation, if (detailed) buildBox],
+      {'workstation': runner, 'build-box': buildBoxRunner},
+    ),
     preferences: MemoryUsagePreferencesStore(),
     observeLifecycle: false,
   );
@@ -455,6 +518,7 @@ void main() {
     AgentAttentionController? attention,
     void Function(TerminalWorkspaceController workspace)? onWorkspace,
     UsageController? usage,
+    bool buildBoxUnreachable = false,
   }) async {
     if (desktop) {
       useDesktopView(tester);
@@ -462,8 +526,16 @@ void main() {
       usePhoneView(tester);
     }
     final theme = await everforest();
+    // Unreachable: the build box on the tailnet, timing out.
+    const tailnetAddress = 'build-box.tail4a2c.ts.net';
     final repository = FakeHostsRepository()
-      ..persisted = [workstation, buildBox];
+      ..persisted = [
+        workstation,
+        if (buildBoxUnreachable)
+          buildBox.copyWith(host: tailnetAddress)
+        else
+          buildBox,
+      ];
     final hostsController = HostsController(
       repository,
       thisComputerStore: thisComputer
@@ -496,7 +568,17 @@ void main() {
         agents: workstationAgents,
         tmuxSessions: tmuxLine('scratch', minutesAgo: 12),
       ),
-      'build-box': HerdrFakeRunner.tmuxOnly(tmuxSessions: buildBoxTmux()),
+      'build-box': buildBoxUnreachable
+          ? HerdrFakeRunner(
+              error: const ConnectionFailure(
+                'Could not reach build-box.',
+                'SocketException: Connection timed out (OS Error: '
+                    'Connection timed out, errno = 110), '
+                    'address = $tailnetAddress, port = 22',
+                kind: ConnectionProblemKind.unreachable,
+              ),
+            )
+          : HerdrFakeRunner.tmuxOnly(tmuxSessions: buildBoxTmux()),
       thisComputerHostId: HerdrFakeRunner(
         workspaces: thisComputerWorkspaces,
         tabs: '{"result":{"tabs":[]}}',
@@ -789,7 +871,15 @@ void main() {
       decide: (_, _) async {},
       pollInterval: const Duration(days: 1),
     );
-    await tester.pumpWidget(shotApp(home: const Scaffold()));
+    // Every tool call as its own card, so the edit's diff can open.
+    final theme = await everforest();
+    await theme.setVoice(theme.voice.copyWith(toolActivity: ToolActivity.all));
+    await tester.pumpWidget(
+      VoiceSettingsScope(
+        settings: theme,
+        child: shotApp(home: const Scaffold()),
+      ),
+    );
     await pushPage(
       tester,
       ChatViewPage(
@@ -1407,5 +1497,185 @@ void main() {
       await saveShot(tester, '24-desktop-shell-chat-split', pixelRatio: 1);
       await tearDownPage(tester);
     });
+  });
+
+  testWidgets('25 home usage', (tester) async {
+    await pumpHome(tester, usage: demoUsage(detailed: true));
+    await tester.runAsync(pumpEventQueue);
+    await pumpFrames(tester, 6);
+    await saveShot(tester, '25-home-usage');
+    await tearDownPage(tester);
+  });
+
+  testWidgets('26 usage breakdown', (tester) async {
+    await pumpHome(tester, usage: demoUsage(detailed: true));
+    await tester.runAsync(pumpEventQueue);
+    await pumpFrames(tester, 6);
+    await tester.tap(find.byType(UsageSummaryView));
+    await tester.runAsync(pumpEventQueue);
+    await pumpFrames(tester, 8);
+    // Up to the full sheet, the project list in view.
+    await tester.drag(
+      find.byKey(const ValueKey('usage-breakdown')),
+      const Offset(0, -500),
+    );
+    await pumpFrames(tester, 8);
+    await saveShot(tester, '26-usage-breakdown');
+    await tearDownPage(tester);
+  });
+
+  /// Chat View with a run of tool calls collapsed into one row, read
+  /// aloud available, so the header shows its toggles and menu.
+  Future<void> pumpCollapsedChat(WidgetTester tester) async {
+    usePhoneView(tester);
+    final theme = await everforest();
+    final dictation = DictationController(
+      FakeSpeechRecognizer(),
+      language: () => 'en-US',
+    );
+    addTearDown(dictation.dispose);
+    final thread = [
+      stamped(
+        userLine('u0', 'Add a due date to todos and sort overdue ones first'),
+        const Duration(minutes: 21),
+      ),
+      assistantLine('b1', [
+        toolUse('p1', 'Read', {
+          'file_path': '/home/demo/todo-api/src/routes/todos.ts',
+        }),
+      ]),
+      userLine('q1', [toolResult('p1', '  1 import { z } from "zod";')]),
+      assistantLine('b2', [
+        toolUse('p2', 'Edit', {
+          'file_path': '/home/demo/todo-api/src/routes/todos.ts',
+          'old_string': '  done: z.boolean(),',
+          'new_string':
+              '  dueDate: z.string().datetime().optional(),\n'
+              '  done: z.boolean(),',
+        }),
+      ]),
+      userLine('q2', [toolResult('p2', 'ok')]),
+      assistantLine('b3', [
+        toolUse('p3', 'Write', {
+          'file_path': '/home/demo/todo-api/src/lib/sort.ts',
+          'content': 'export function byDue(a, b) { ... }',
+        }),
+      ]),
+      userLine('q3', [toolResult('p3', 'ok')]),
+      assistantLine('b4', [
+        toolUse('p4', 'Bash', {
+          'command': 'npm test',
+          'description': 'Run the tests',
+        }),
+      ]),
+      userLine('q4', [toolResult('p4', 'Tests  24 passed (24)')]),
+      assistantLine('b5', [
+        text(
+          'Todos have an optional **`dueDate`**, validated as an ISO date, '
+          'and `byDue` sorts overdue todos first. All 24 tests pass.',
+        ),
+      ]),
+      stamped(
+        userLine(
+          'u1',
+          'Why does the overdue sort put todos without a date '
+              'first?',
+        ),
+        const Duration(minutes: 6),
+      ),
+      assistantLine('a1', [
+        text('Let me look at the comparator and its tests.'),
+        toolUse('t1', 'Grep', {'pattern': 'isOverdue'}),
+      ]),
+      userLine('r1', [toolResult('t1', 'Found 3 files')]),
+      assistantLine('a2', [
+        toolUse('t2', 'Read', {
+          'file_path': '/home/demo/todo-api/src/lib/sort.ts',
+        }),
+      ]),
+      userLine('r2', [toolResult('t2', '  1 export function byDue(...')]),
+      assistantLine('a3', [
+        toolUse('t3', 'Edit', {
+          'file_path': '/home/demo/todo-api/src/lib/sort.ts',
+          'old_string': '  if (!a.dueDate) return -1;',
+          'new_string': '  if (!a.dueDate) return 1;',
+        }),
+      ]),
+      userLine('r3', [toolResult('t3', 'ok')]),
+      assistantLine('a4', [
+        toolUse('t4', 'Bash', {
+          'command': 'npm test -- sort',
+          'description': 'Run the sort tests',
+        }),
+      ]),
+      userLine('r4', [toolResult('t4', 'Tests  9 passed (9)')]),
+      assistantLine('a5', [
+        text(
+          '`byDue` returned **-1** for a todo without a date, so those '
+          'came first. It now returns 1: overdue todos lead, undated ones '
+          'go last, and the 9 sort tests pass.',
+        ),
+      ]),
+    ];
+    final controller = ChatViewController(
+      runner: ScriptedAgentCommandRunner([
+        ok(livePage(thread, state: 'waiting_input')),
+      ]),
+      sessionId: 's-1',
+      decide: (_, _) async {},
+      pollInterval: const Duration(days: 1),
+    );
+    await tester.pumpWidget(
+      VoiceSettingsScope(
+        settings: theme,
+        child: shotApp(home: const Scaffold()),
+      ),
+    );
+    await pushPage(
+      tester,
+      ChatViewPage(
+        controller: controller,
+        hostName: 'workstation',
+        onOpenTerminal: () {},
+        textToSpeech: FakeTts(),
+        dictation: dictation,
+      ),
+    );
+    await pumpFrames(tester, 8);
+  }
+
+  testWidgets('27 chat tool activity', (tester) async {
+    await pumpCollapsedChat(tester);
+    // The latest run opened, the earlier one still one line.
+    await tester.tap(find.textContaining('searched once'));
+    await pumpFrames(tester, 8);
+    await saveShot(tester, '27-chat-tool-activity');
+    await tearDownPage(tester);
+  });
+
+  testWidgets('28 chat menu', (tester) async {
+    await pumpCollapsedChat(tester);
+    await tester.tap(find.byKey(const ValueKey('chat-menu')));
+    await pumpFrames(tester, 8);
+    await saveShot(tester, '28-chat-menu');
+    await tearDownPage(tester);
+  });
+
+  testWidgets('29 cant reach', (tester) async {
+    await pumpHome(tester, buildBoxUnreachable: true);
+    final details = find.byKey(const ValueKey('home-board-notice-details'));
+    await tester.scrollUntilVisible(
+      details,
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await pumpFrames(tester);
+    await tester.tap(details);
+    await pumpFrames(tester);
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -200));
+    await pumpFrames(tester);
+    expect(find.byType(HomeBoardNoticeTile), findsOneWidget);
+    await saveShot(tester, '29-cant-reach');
+    await tearDownPage(tester);
   });
 }

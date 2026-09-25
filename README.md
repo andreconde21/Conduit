@@ -7,7 +7,8 @@ Drive Claude Code, Herdr and tmux sessions on your own machines from your phone 
 [![Latest release](https://img.shields.io/github/v/release/andreconde21/conductore-mobile?include_prereleases&label=release)](../../releases)
 
 Conductore runs on Android, iOS, Linux, Windows and macOS from one Flutter
-code base. Preview 12 is the first release on all five. It is a fork of
+code base, and on desktops and tablets it opens a sidebar and split-pane
+shell. It is a fork of
 [Conduit](https://github.com/gwitko/Conduit) by gwitko.
 
 <table>
@@ -19,7 +20,7 @@ code base. Preview 12 is the first release on all five. It is a fork of
   </tr>
 </table>
 
-<p align="center"><img src="docs/screenshots/15-desktop-terminal.png" width="820" alt="Conductore on a Linux desktop, 1280x800, Everforest theme"><br><sub>The Linux desktop build, keyboard first</sub></p>
+<p align="center"><img src="docs/screenshots/24-desktop-shell-chat-split.png" width="820" alt="The desktop shell on Linux: sidebar tree, a terminal and Chat View side by side"><br><sub>The desktop shell: sidebar, a terminal and Chat View in two splits</sub></p>
 
 More in [Screenshots](#screenshots). Jump to [Install](#install).
 
@@ -32,6 +33,58 @@ More in [Screenshots](#screenshots). Jump to [Install](#install).
   listens on a new port. Device sync goes through one of your own machines.
 - **Agents first.** The app is built around watching and steering coding agents
   (Claude Code) inside Herdr and tmux, not around a generic terminal.
+
+## New in preview 14
+
+- **Desktop shell** on desktops and tablets (900 dp and wider):
+  - a sidebar tree of machines, Herdr workspaces, tabs and agents, and tmux
+    sessions and windows, with state dots, unread markers, a **Needs you**
+    group, pins, groups, a filter, drag and drop, and a resizable,
+    collapsible width;
+  - up to 4 split panes that mix terminal, Chat View, file, diff and
+    preview, with Chat View opening as a tab;
+  - a dashboard home (Needs you, usage, live previews, other workspaces)
+    and a right panel (inbox, preview, usage);
+  - shortcuts: Ctrl+Shift+\ splits right, Ctrl+Shift+- splits down,
+    Alt+arrows move between splits and Ctrl+Shift+U opens the next unread
+    (on macOS Cmd+D, Cmd+Shift+D, Cmd+Option+arrows and Cmd+Shift+U).
+
+  Phones are unchanged. See [docs/desktop.md](docs/desktop.md#the-desktop-shell).
+- **Usage at a glance** (companion 0.6 or newer): Claude's 5-hour and weekly
+  limit rings, today's tokens and an estimated cost at API prices, and a
+  breakdown by machine, project, model and day, with Codex when it is
+  installed. It shows in a bar on the phone's home screen, the Usage tab,
+  and rings on the Android widget and Quick Settings tile. An optional alert
+  fires at 80% of the 5-hour window.
+- **Voice**:
+  - new messages, unlocking and notification sounds no longer cut speech
+    off, and calls pause and resume it;
+  - read-aloud length: Brief (the default; say "more" in Talk), Full, or a
+    Claude summary (companion 0.7 `summarize`);
+  - tool activity in Chat View: Show all, Collapsed (the default) or Hidden;
+  - speech stays with its own chat when agents open and close;
+  - read-aloud and Talk have toggles that are always in the header;
+  - the mic is never hidden: it is muted with an explanation instead, and
+    Dictate is in the terminal palette and pill.
+- **Clearer connection errors**: "Can't reach *machine*", with a Tailscale
+  hint for 100.x and `ts.net` addresses, and plain sign-in and host key
+  messages, each with Details and Retry. Back from Chat View goes straight
+  home.
+- **Privacy**: crash reports (self-hosted GlitchTip) and anonymous usage
+  counts (self-hosted Plausible), each with a switch in Settings › Privacy.
+  See [Privacy](#privacy).
+- Host companion **0.7.0**, with the `usage` and `summarize` commands.
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/25-home-usage.png" width="200" alt="Usage bar with limit rings on the phone's home screen"><br><sub>Usage bar on the home screen</sub></td>
+    <td align="center"><img src="docs/screenshots/26-usage-breakdown.png" width="200" alt="Usage breakdown: limits per machine, cost per day, tokens per project"><br><sub>Usage breakdown</sub></td>
+    <td align="center"><img src="docs/screenshots/27-chat-tool-activity.png" width="200" alt="Chat View with collapsed tool calls, one run opened"><br><sub>Tool activity collapsed</sub></td>
+    <td align="center"><img src="docs/screenshots/28-chat-menu.png" width="200" alt="Chat View menu: read-aloud length and tool activity"><br><sub>The Chat View menu</sub></td>
+  </tr>
+</table>
+
+<p align="center"><img src="docs/screenshots/22-desktop-shell-dashboard.png" width="820" alt="Desktop shell dashboard: Needs you, usage, recent sessions and other workspaces"><br><sub>The desktop shell's dashboard home</sub></p>
 
 ## New in preview 13
 
@@ -98,8 +151,15 @@ More in [Screenshots](#screenshots). Jump to [Install](#install).
 - **Voice** (Android): read Claude's final answer aloud, and hands-free
   **Talk mode** that listens, sends after a pause, reads the answer and
   answers approvals by voice. Dictation keeps listening across pauses.
+- **Read-aloud length** (Brief, Full or a Claude summary) and **tool
+  activity** in Chat View (Show all, Collapsed or Hidden), from the header
+  menu or Settings.
 - **Inbox** of every agent across your machines, with permission requests you
-  answer with Allow, Deny or Always, and a Usage tab (context and plan limits).
+  answer with Allow, Deny or Always, and a Usage tab.
+- **Usage** (companion 0.6 or newer): Claude's 5-hour and weekly limits,
+  tokens and an estimated cost per day, machine, project and model, Codex
+  too. On the home screen, the widget and the Quick Settings tile, with an
+  optional alert at 80% of the 5-hour window.
 - **Notifications with actions**: approve or deny a permission prompt, or jump
   to the agent's exact pane, straight from the notification.
 - **Home screen widget and Quick Settings tile** showing agents that need you.
@@ -182,6 +242,9 @@ tmux.
 - Host key trust you review and manage yourself.
 - Works over Tailscale like any other network: point a host at its tailnet
   name or IP.
+- Plain connection errors: "Can't reach" (with a Tailscale hint for
+  tailnet addresses), failed sign-in and untrusted host key, each with
+  Details and Retry.
 - **Device sync through one of your own machines**, end-to-end encrypted, no
   cloud: saved machines, snippets, settings, connect preferences and the
   session list. Add a device by scanning a QR code and typing six words
@@ -192,6 +255,10 @@ tmux.
 
 ### Desktop
 
+- **Desktop shell** on desktops and tablets: a sidebar tree of machines,
+  workspaces, tabs and agents with a Needs you group, pins and groups; up
+  to 4 splits mixing terminal, Chat View, file, diff and preview; a
+  dashboard home; and a right panel for the inbox, preview and usage.
 - The same app on Linux, Windows and macOS, with the terminal **keyboard
   first**: keys go straight to the shell, Alt is Meta, mouse selection and
   wheel scrollback. The on-screen keys are one toggle away.
@@ -244,16 +311,26 @@ Rendered from the app's own widgets with demo data by
     <td align="center"><img src="docs/screenshots/07-settings.png" width="200" alt="Settings section list"><br><sub>Settings: every preference, searchable</sub></td>
     <td align="center"><img src="docs/screenshots/08-agent-hooks.png" width="200" alt="Agent hooks screen showing Active"><br><sub>Agent hooks: companion status and checks</sub></td>
     <td align="center"><img src="docs/screenshots/18-herdr-tabs.png" width="200" alt="Compact Herdr tab label and the tab list"><br><sub>Herdr tabs on a phone</sub></td>
-    <td></td>
+    <td align="center"><img src="docs/screenshots/29-cant-reach.png" width="200" alt="Can't reach build-box, with a Tailscale hint and details"><br><sub>Can't reach: a Tailscale hint and details</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/25-home-usage.png" width="200" alt="Usage bar with limit rings on the phone's home screen"><br><sub>Usage bar on the home screen</sub></td>
+    <td align="center"><img src="docs/screenshots/26-usage-breakdown.png" width="200" alt="Usage breakdown: limits per machine, cost per day, tokens per project"><br><sub>Usage: per machine, day and project</sub></td>
+    <td align="center"><img src="docs/screenshots/27-chat-tool-activity.png" width="200" alt="Chat View with collapsed tool calls, one run opened"><br><sub>Chat View: tool calls collapsed</sub></td>
+    <td align="center"><img src="docs/screenshots/28-chat-menu.png" width="200" alt="Chat View menu: read-aloud length and tool activity"><br><sub>Read-aloud length and tool activity</sub></td>
   </tr>
 </table>
 
-<p align="center"><img src="docs/screenshots/16-desktop-home.png" width="820" alt="Home screen on a 1280x800 desktop window"><br><sub>Home on the desktop, centred</sub></p>
+<p align="center"><img src="docs/screenshots/22-desktop-shell-dashboard.png" width="820" alt="Desktop shell dashboard: Needs you, usage, recent sessions and other workspaces"><br><sub>Desktop shell: the dashboard home</sub></p>
+
+<p align="center"><img src="docs/screenshots/23-desktop-shell-split.png" width="820" alt="Desktop shell with two terminal splits side by side"><br><sub>Desktop shell: two sessions in splits, the tab strip above</sub></p>
+
+<p align="center"><img src="docs/screenshots/24-desktop-shell-chat-split.png" width="820" alt="Desktop shell with a terminal and Chat View in splits, a group and a pin in the sidebar"><br><sub>Desktop shell: a terminal beside its Chat View, with a pin and a group</sub></p>
 
 ## Install
 
 Builds are previews. Get them from
-[Releases](../../releases/tag/v0.1.0-conductore.12) or, for the Outsmartis
+[Releases](../../releases/tag/v0.1.0-conductore.14) or, for the Outsmartis
 team, from the store test channels. Each release lists `SHA256SUMS` files
 next to the downloads.
 
@@ -328,10 +405,14 @@ permission, ended) and lets the app answer permission prompts. The app
 talks to it only through SSH exec commands. It opens no ports and needs no
 relay.
 
-Preview 12 bundles **companion 0.5.0**. Its new `ports` command reports
-dev servers that start listening, which drives the Preview ready chip. The
-app offers the update on the Agent hooks screen. Older companions keep
-working; Live preview then falls back to `ss` and the terminal output.
+Preview 14 bundles **companion 0.7.0**. Its `usage` command (0.6) counts
+Claude and Codex tokens, limits and estimated cost from local files on the
+host, for the usage bar and tab. Its `summarize` command (0.7) turns a reply
+into one or two spoken sentences with Claude Haiku, for the Claude summary
+read-aloud length; it runs `claude -p` with no tools and stores nothing.
+The `ports` command (0.5) reports dev servers for the Preview ready chip.
+The app offers the update on the Agent hooks screen. Older companions keep
+working without the features they lack.
 
 It is built to stay out of the way. Claude Code hooks and the status line are
 small POSIX `sh` scripts that hand each event to a background daemon and exit;
