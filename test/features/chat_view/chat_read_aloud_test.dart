@@ -3,11 +3,14 @@ import 'package:conduit/core/theme/theme_preferences_repository.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_controller.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_page.dart';
+import 'package:conduit/features/voice/domain/speech_event.dart';
+import 'package:conduit/features/voice/presentation/dictation_controller.dart';
 import 'package:conduit/features/voice/presentation/voice_settings_scope.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../support/test_doubles.dart';
+import '../voice/fake_speech_recognizer.dart';
 import '../voice/fake_tts.dart';
 import 'chat_fixtures.dart';
 
@@ -28,10 +31,12 @@ void main() {
 
   Future<ChatViewController> pumpPage(
     WidgetTester tester,
-    List<Object> script,
-  ) async {
+    List<Object> script, {
+    DictationController? dictation,
+    ScriptedAgentCommandRunner? runner,
+  }) async {
     final controller = ChatViewController(
-      runner: ScriptedAgentCommandRunner(script),
+      runner: runner ?? ScriptedAgentCommandRunner(script),
       sessionId: 's-1',
       pollInterval: const Duration(days: 1),
     );
@@ -43,6 +48,7 @@ void main() {
             controller: controller,
             onOpenTerminal: () {},
             textToSpeech: tts,
+            dictation: dictation,
           ),
         ),
       ),
@@ -183,5 +189,66 @@ void main() {
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pump();
+  });
+
+  testWidgets('Talk: speak, auto-send, stay quiet, hear the answer, touch '
+      'to stop', (tester) async {
+    await settings.setVoice(settings.voice.copyWith(talkSendSilenceSeconds: 2));
+    final mic = FakeSpeechRecognizer();
+    final dictation = DictationController(mic, language: () => 'en-US');
+    addTearDown(dictation.dispose);
+    final runner = ScriptedAgentCommandRunner([
+      ok(page(history)),
+      ok('{"ok":true}'), // send
+      ok(
+        page([userLine('u2', 'run the tests')], offset: 200, state: 'working'),
+      ),
+      ok(
+        page([
+          assistantLine('a2', [text('All green.')]),
+        ], offset: 300),
+      ),
+    ]);
+    final chat = await pumpPage(
+      tester,
+      const [],
+      dictation: dictation,
+      runner: runner,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('chat-talk')));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('talk-panel')), findsOneWidget);
+    expect(find.text('Listening…'), findsOneWidget);
+
+    mic.say('run the tests');
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 3));
+    expect(find.byKey(const ValueKey('talk-countdown')), findsOneWidget);
+    expect(find.text('run the tests'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 3));
+    expect(runner.commands.any((c) => c.contains('send s-1')), isTrue);
+    await tester.pump();
+    expect(find.text('Claude is working…'), findsOneWidget);
+
+    // Sending polled at once: Claude works, nothing is read.
+    expect(tts.spoken, isEmpty);
+    await chat.refresh(); // Turn over: the final answer is read.
+    await tester.pump();
+    expect(tts.spoken, ['All green.']);
+    tts.done();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('Listening…'), findsOneWidget);
+
+    // Speaking, then touching the thread: the loop ends and what was
+    // said goes to the composer.
+    mic.emit(const SpeechPartial('and deploy'));
+    await tester.pump();
+    await tester.tapAt(const Offset(200, 200));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('talk-panel')), findsNothing);
+    final field = find.byKey(const ValueKey('chat-composer-field'));
+    expect(tester.widget<TextField>(field).controller!.text, 'and deploy');
+    await tester.pump(const Duration(seconds: 5));
   });
 }

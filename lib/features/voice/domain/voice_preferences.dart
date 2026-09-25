@@ -17,6 +17,7 @@ class VoicePreferences {
     this.dictationMaxMinutes = defaultMaxMinutes,
     this.muteRestartBeeps = true,
     this.readAloudSessions = const {},
+    this.talkSendSilenceSeconds = defaultTalkSendSeconds,
   });
 
   static const defaults = VoicePreferences();
@@ -27,6 +28,9 @@ class VoicePreferences {
   static const maxSilenceSeconds = 60;
   static const minMaxMinutes = 1;
   static const maxMaxMinutes = 30;
+  static const defaultTalkSendSeconds = 2;
+  static const minTalkSendSeconds = 1;
+  static const maxTalkSendSeconds = 10;
   static const minRate = 0.5;
   static const maxRate = 2.0;
   static const minPitch = 0.5;
@@ -70,6 +74,9 @@ class VoicePreferences {
   /// The Chat View speaker toggle per session id, most recent last.
   final Map<String, bool> readAloudSessions;
 
+  /// Talk mode sends what was said after this long a pause.
+  final int talkSendSilenceSeconds;
+
   Duration get dictationSilence => Duration(seconds: dictationSilenceSeconds);
   Duration get dictationMaxSession => Duration(minutes: dictationMaxMinutes);
 
@@ -104,6 +111,7 @@ class VoicePreferences {
     int? dictationMaxMinutes,
     bool? muteRestartBeeps,
     Map<String, bool>? readAloudSessions,
+    int? talkSendSilenceSeconds,
   }) {
     return VoicePreferences(
       readAloudByDefault: readAloudByDefault ?? this.readAloudByDefault,
@@ -123,6 +131,11 @@ class VoicePreferences {
           .clamp(minMaxMinutes, maxMaxMinutes),
       muteRestartBeeps: muteRestartBeeps ?? this.muteRestartBeeps,
       readAloudSessions: readAloudSessions ?? this.readAloudSessions,
+      talkSendSilenceSeconds:
+          (talkSendSilenceSeconds ?? this.talkSendSilenceSeconds).clamp(
+            minTalkSendSeconds,
+            maxTalkSendSeconds,
+          ),
     );
   }
 
@@ -138,6 +151,7 @@ class VoicePreferences {
     'dictationSilenceSeconds': dictationSilenceSeconds,
     'dictationMaxMinutes': dictationMaxMinutes,
     'muteRestartBeeps': muteRestartBeeps,
+    'talkSendSilenceSeconds': talkSendSilenceSeconds,
     if (includeSessions) 'readAloudSessions': readAloudSessions,
   };
 
@@ -188,6 +202,10 @@ class VoicePreferences {
         fallback.dictationMaxMinutes,
       ),
       muteRestartBeeps: pick('muteRestartBeeps', fallback.muteRestartBeeps),
+      talkSendSilenceSeconds: integer(
+        'talkSendSilenceSeconds',
+        fallback.talkSendSilenceSeconds,
+      ),
       readAloudSessions: rawSessions is Map
           ? {
               for (final entry in rawSessions.entries)

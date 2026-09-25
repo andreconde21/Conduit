@@ -253,6 +253,19 @@ class _SpeechSettingsControlsState extends State<SpeechSettingsControls> {
                   onTap: _pickVoice,
                 ),
                 _SliderTile(
+                  key: const ValueKey('speech-talk-send'),
+                  icon: Icons.send_rounded,
+                  title: 'Talk: send after a pause of',
+                  value: voice.talkSendSilenceSeconds.toDouble(),
+                  min: VoicePreferences.minTalkSendSeconds.toDouble(),
+                  max: VoicePreferences.maxTalkSendSeconds.toDouble(),
+                  divisions: 9,
+                  label: '${voice.talkSendSilenceSeconds} s',
+                  onChanged: (value) => _update(
+                    (v) => v.copyWith(talkSendSilenceSeconds: value.round()),
+                  ),
+                ),
+                _SliderTile(
                   key: const ValueKey('speech-rate'),
                   icon: Icons.speed_rounded,
                   title: 'Speed',

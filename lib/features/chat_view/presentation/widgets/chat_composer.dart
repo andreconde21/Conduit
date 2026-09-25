@@ -16,6 +16,8 @@ class ChatComposer extends StatefulWidget {
     this.showInterrupt = false,
     this.onExpand,
     this.dictation,
+    this.onTalk,
+    this.textController,
     super.key,
   });
 
@@ -36,17 +38,25 @@ class ChatComposer extends StatefulWidget {
   final void Function(String text, ValueChanged<String> setDraft)? onExpand;
   final DictationController? dictation;
 
+  /// Starts the hands-free Talk loop; null hides the button.
+  final VoidCallback? onTalk;
+
+  /// The field's text, when the page needs it (Talk puts unsent speech
+  /// back here); otherwise the composer owns one.
+  final TextEditingController? textController;
+
   @override
   State<ChatComposer> createState() => _ChatComposerState();
 }
 
 class _ChatComposerState extends State<ChatComposer> {
-  final _controller = TextEditingController();
+  late final TextEditingController _controller =
+      widget.textController ?? TextEditingController();
   final _focusNode = FocusNode();
 
   @override
   void dispose() {
-    _controller.dispose();
+    if (widget.textController == null) _controller.dispose();
     _focusNode.dispose();
     super.dispose();
   }
@@ -132,6 +142,13 @@ class _ChatComposerState extends State<ChatComposer> {
                 ),
               ),
             ),
+            if (widget.onTalk != null && widget.enabled)
+              IconButton(
+                key: const ValueKey('chat-talk'),
+                tooltip: 'Talk',
+                icon: const Icon(Icons.record_voice_over_outlined),
+                onPressed: widget.onTalk,
+              ),
             if (widget.dictation != null && widget.enabled)
               DictationButton(
                 controller: widget.dictation!,

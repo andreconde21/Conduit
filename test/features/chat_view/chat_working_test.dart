@@ -212,13 +212,10 @@ void main() {
           ], state: 'working'),
         ),
         ok(
-          page(
-            [
-              userLine('r1', [toolResult('t1', 'ok')]),
-              assistantLine('a2', [text('All green.')]),
-            ],
-            offset: 200,
-          ),
+          page([
+            userLine('r1', [toolResult('t1', 'ok')]),
+            assistantLine('a2', [text('All green.')]),
+          ], offset: 200),
         ),
       ]),
       sessionId: 's-1',

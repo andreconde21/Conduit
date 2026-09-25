@@ -30,6 +30,7 @@ class DictationOptions {
     this.silenceTimeout = const Duration(seconds: 8),
     this.maxSession = const Duration(minutes: 5),
     this.muteRestartBeeps = true,
+    this.waitForSpeech = false,
   });
 
   /// One phrase: the session ends when the recognizer hears a pause.
@@ -54,6 +55,10 @@ class DictationOptions {
   final Duration maxSession;
 
   final bool muteRestartBeeps;
+
+  /// Count [silenceTimeout] only once something was said (the Talk loop
+  /// waits for the user to start; it only ends on a pause after speech).
+  final bool waitForSpeech;
 }
 
 /// Why a continuous session stopped on its own.
@@ -429,7 +434,9 @@ class DictationController extends ChangeNotifier {
       return;
     }
     _elapsed += tick;
-    _silence += tick;
+    if (!_options.waitForSpeech || _sessionText.isNotEmpty) {
+      _silence += tick;
+    }
     if (_elapsed >= _options.maxSession) {
       _autoStop(DictationPause.maxSession);
     } else if (_silence >= _options.silenceTimeout) {

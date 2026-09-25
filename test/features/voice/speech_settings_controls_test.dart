@@ -75,6 +75,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(settings.voice.readAloudByDefault, isTrue);
     expect(find.text('Same as dictation'), findsOneWidget);
+    expect(find.byKey(const ValueKey('speech-talk-send')), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey('speech-tts-voice')));
     await tester.pumpAndSettle();

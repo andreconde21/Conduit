@@ -11,12 +11,14 @@ import 'package:conduit/features/chat_view/presentation/chat_view_controller.dar
 import 'package:conduit/features/chat_view/presentation/widgets/chat_composer.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_thread_items.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_working_indicator.dart';
+import 'package:conduit/features/chat_view/presentation/widgets/talk_panel.dart';
 import 'package:conduit/features/terminal/presentation/widgets/prompt_composer_sheet.dart';
 import 'package:conduit/features/voice/data/platform_text_to_speech.dart';
 import 'package:conduit/features/voice/domain/text_to_speech.dart';
 import 'package:conduit/features/voice/domain/voice_preferences.dart';
 import 'package:conduit/features/voice/presentation/dictation_controller.dart';
 import 'package:conduit/features/voice/presentation/read_aloud_controller.dart';
+import 'package:conduit/features/voice/presentation/talk_controller.dart';
 import 'package:conduit/features/voice/presentation/voice_settings_scope.dart';
 import 'package:flutter/material.dart';
 
@@ -85,6 +87,11 @@ class _ChatViewPageState extends State<ChatViewPage>
   Timer? _clock;
   ReadAloudController? _readAloud;
 
+  /// The hands-free Talk loop; null without dictation or speech.
+  TalkController? _talk;
+  String? _talkMessageShown;
+  final _composerText = TextEditingController();
+
   /// When the working indicator appeared, for turns whose prompt has no
   /// timestamp.
   DateTime? _workingShownAt;
@@ -114,6 +121,25 @@ class _ChatViewPageState extends State<ChatViewPage>
       unawaited(_readAloud!.checkAvailability());
       _chat.addListener(_feedReadAloud);
       widget.dictation?.addListener(_syncDictation);
+      final dictation = widget.dictation;
+      if (dictation != null) {
+        _talk = TalkController(
+          dictation: dictation,
+          readAloud: _readAloud!,
+          send: (text) => _chat.send(text),
+          decide: _chat.decide,
+          answer: _chat.answerQuestion,
+          options: () {
+            final voice = _settings?.voice ?? VoicePreferences.defaults;
+            return DictationOptions(
+              continuous: true,
+              silenceTimeout: Duration(seconds: voice.talkSendSilenceSeconds),
+              maxSession: voice.dictationMaxSession,
+              muteRestartBeeps: voice.muteRestartBeeps,
+            );
+          },
+        )..addListener(_onTalkChanged);
+      }
     }
     // The elapsed time in the header.
     _clock = Timer.periodic(const Duration(seconds: 15), (_) {
@@ -141,8 +167,38 @@ class _ChatViewPageState extends State<ChatViewPage>
   /// marks what is already there as read.
   void _feedReadAloud() {
     if (!_chat.loading && _chat.unsupported == null) {
-      _readAloud?.observe(_chat.items, _chat.pending, _chat.agent?.state);
+      final state = _chat.agent?.state;
+      _readAloud?.observe(_chat.items, _chat.pending, state);
+      // After the reader, so the turn's answer is already queued.
+      _talk?.update(_chat.items, _chat.pending, state);
     }
+  }
+
+  void _startTalk() {
+    FocusManager.instance.primaryFocus?.unfocus();
+    _talk?.start();
+  }
+
+  /// Ends the Talk loop; anything said but not sent goes to the composer.
+  void _stopTalk() {
+    final unsent = _talk?.stop();
+    if (unsent != null) {
+      final current = _composerText.text.trimRight();
+      _composerText.text = current.isEmpty ? unsent : '$current $unsent';
+    }
+  }
+
+  void _onTalkChanged() {
+    final talk = _talk;
+    if (talk == null || !mounted) return;
+    final message = talk.message;
+    if (!talk.active && message != null && message != _talkMessageShown) {
+      _talkMessageShown = message;
+      ScaffoldMessenger.maybeOf(
+        context,
+      )?.showSnackBar(SnackBar(content: Text(message)));
+    }
+    if (talk.active) _talkMessageShown = null;
   }
 
   void _syncDictation() {
@@ -175,9 +231,10 @@ class _ChatViewPageState extends State<ChatViewPage>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final readAloud = _readAloud;
+    final talking = _talk?.active ?? false;
     if (state == AppLifecycleState.resumed ||
         readAloud == null ||
-        !readAloud.enabled) {
+        !(readAloud.enabled || talking)) {
       _chat.setVisible(state == AppLifecycleState.resumed);
       return;
     }
@@ -193,7 +250,10 @@ class _ChatViewPageState extends State<ChatViewPage>
         if (!mounted) return;
         final keep = onTop && !screenOn;
         _chat.setVisible(keep);
-        if (!keep) readAloud.stop();
+        if (!keep) {
+          readAloud.stop();
+          _stopTalk();
+        }
       }),
     );
   }
@@ -204,7 +264,11 @@ class _ChatViewPageState extends State<ChatViewPage>
     _chat.removeListener(_feedReadAloud);
     _chat.removeListener(_stickToBottom);
     widget.dictation?.removeListener(_syncDictation);
+    _talk
+      ?..removeListener(_onTalkChanged)
+      ..dispose();
     _readAloud?.dispose();
+    _composerText.dispose();
     _clock?.cancel();
     _scroll.dispose();
     _chat.setVisible(false);
@@ -424,23 +488,24 @@ class _ChatViewPageState extends State<ChatViewPage>
                       ),
                     ],
                   ),
-                Expanded(child: _buildThread(context)),
-                ChatComposer(
-                  enabled: _chat.canSend,
-                  disabledHint: _chat.unsupported != null
-                      ? 'Chat unavailable'
-                      : _chat.agent?.state == 'ended'
-                      ? 'This session has ended'
-                      : 'Answer the approval above first',
-                  sending: _chat.sending,
-                  showInterrupt:
-                      activity == ChatActivity.working ||
-                      activity == ChatActivity.thinking,
-                  onSend: _send,
-                  onInterrupt: _chat.interrupt,
-                  onExpand: _openComposer,
-                  dictation: widget.dictation,
+                Expanded(
+                  // Touching the thread ends the Talk loop.
+                  child: Listener(
+                    onPointerDown: (_) {
+                      if (_talk?.active ?? false) _stopTalk();
+                    },
+                    child: _buildThread(context),
+                  ),
                 ),
+                if (_talk case final talk?)
+                  ListenableBuilder(
+                    listenable: talk,
+                    builder: (context, _) => talk.active
+                        ? TalkPanel(controller: talk, onStop: _stopTalk)
+                        : _composer(activity),
+                  )
+                else
+                  _composer(activity),
               ],
             ),
           ),
@@ -448,6 +513,24 @@ class _ChatViewPageState extends State<ChatViewPage>
       },
     );
   }
+
+  Widget _composer(ChatActivity? activity) => ChatComposer(
+    textController: _composerText,
+    onTalk: _talk == null ? null : _startTalk,
+    enabled: _chat.canSend,
+    disabledHint: _chat.unsupported != null
+        ? 'Chat unavailable'
+        : _chat.agent?.state == 'ended'
+        ? 'This session has ended'
+        : 'Answer the approval above first',
+    sending: _chat.sending,
+    showInterrupt:
+        activity == ChatActivity.working || activity == ChatActivity.thinking,
+    onSend: _send,
+    onInterrupt: _chat.interrupt,
+    onExpand: _openComposer,
+    dictation: widget.dictation,
+  );
 
   Widget _buildThread(BuildContext context) {
     final theme = Theme.of(context);

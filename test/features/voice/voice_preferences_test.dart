@@ -27,6 +27,7 @@ void main() {
             dictationSilenceSeconds: 12,
             dictationMaxMinutes: 10,
             muteRestartBeeps: false,
+            talkSendSilenceSeconds: 4,
           )
           .withSessionReadAloud('s1', false),
     );
@@ -43,6 +44,7 @@ void main() {
     expect(voice.dictationSilence, const Duration(seconds: 12));
     expect(voice.dictationMaxSession, const Duration(minutes: 10));
     expect(voice.muteRestartBeeps, isFalse);
+    expect(voice.talkSendSilenceSeconds, 4);
     expect(voice.readAloudFor('s1'), isFalse);
     expect(voice.readAloudFor('other'), isTrue);
   });
