@@ -120,6 +120,7 @@ class AppTheme {
       useMaterial3: true,
       brightness: themeBrightness,
       colorScheme: colorScheme,
+      extensions: [AppPaletteTheme(palette)],
       scaffoldBackgroundColor: canvas,
       canvasColor: canvas,
       splashFactory: InkRipple.splashFactory,

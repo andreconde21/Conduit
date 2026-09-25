@@ -128,9 +128,9 @@ class MachineChip extends StatelessWidget {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     return Material(
-      color: colorScheme.surface,
+      color: colorScheme.surface.withValues(alpha: 0.6),
       shape: RoundedRectangleBorder(
-        borderRadius: AppTheme.borderRadius,
+        borderRadius: BorderRadius.circular(AppTheme.radius),
         side: BorderSide(color: colorScheme.outlineVariant),
       ),
       clipBehavior: Clip.antiAlias,
@@ -164,7 +164,6 @@ class MachineChip extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.titleSmall?.copyWith(
-                    fontFamily: AppTheme.monoFontFamily,
                     fontWeight: FontWeight.w700,
                   ),
                 ),

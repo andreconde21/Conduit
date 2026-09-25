@@ -1,5 +1,6 @@
 import 'dart:ui' as ui;
 
+import 'package:conduit/core/theme/app_palette.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -23,8 +24,11 @@ enum MultiplexerKind {
 /// * Herdr: `herdrdev/herdr` `assets/logo.svg` (Apache-2.0): the dark
 ///   herding-dog mark with a `>_` prompt on its light grey square.
 ///
-/// Brand colours are the logos' own, so the icon reads the same on every
-/// theme; Herdr's square is rounded to sit with the app's other badges.
+/// Brand colours are the logos' own, with one exception: on a dark theme
+/// the tmux screen is drawn in the theme's foreground, because the official
+/// dark grey all but disappears on a dark background. The shape and the
+/// green status bar stay exactly as upstream. Herdr's square is rounded to
+/// sit with the app's other badges.
 class MultiplexerIcon extends StatelessWidget {
   const MultiplexerIcon(
     this.kind, {
@@ -40,6 +44,13 @@ class MultiplexerIcon extends StatelessWidget {
   /// empty string when a neighbouring label already names it.
   final String? semanticLabel;
 
+  /// The colour of the tmux logomark's screen: the official grey on light
+  /// themes, the theme foreground on dark ones.
+  static Color tmuxScreenColor(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+      ? AppPalette.of(context).foreground
+      : _TmuxLogoPainter.officialScreenGrey;
+
   @override
   Widget build(BuildContext context) {
     final label = semanticLabel ?? kind.label;
@@ -48,7 +59,7 @@ class MultiplexerIcon extends StatelessWidget {
       dimension: size,
       child: CustomPaint(
         painter: switch (kind) {
-          MultiplexerKind.tmux => const _TmuxLogoPainter(),
+          MultiplexerKind.tmux => _TmuxLogoPainter(tmuxScreenColor(context)),
           MultiplexerKind.herdr => const _HerdrLogoPainter(),
         },
       ),
@@ -60,10 +71,14 @@ class MultiplexerIcon extends StatelessWidget {
 
 /// tmux logomark, 160 × 160 viewBox.
 class _TmuxLogoPainter extends CustomPainter {
-  const _TmuxLogoPainter();
+  const _TmuxLogoPainter(this.screenColor);
 
   static const _statusBarGreen = Color(0xFF1BB91F);
-  static const _screenGrey = Color(0xFF3C3C3C);
+
+  /// The logomark's own screen colour, used on light themes.
+  static const officialScreenGrey = Color(0xFF3C3C3C);
+
+  final Color screenColor;
 
   // The logo's group is `fill-rule="evenodd"`: the bar's two overlapping
   // subpaths leave only the rounded strip under the screen.
@@ -79,12 +94,13 @@ class _TmuxLogoPainter extends CustomPainter {
       ..save()
       ..scale(size.width / 160, size.height / 160)
       ..drawPath(_statusBar, Paint()..color = _statusBarGreen)
-      ..drawPath(_screen, Paint()..color = _screenGrey)
+      ..drawPath(_screen, Paint()..color = screenColor)
       ..restore();
   }
 
   @override
-  bool shouldRepaint(_TmuxLogoPainter oldDelegate) => false;
+  bool shouldRepaint(_TmuxLogoPainter oldDelegate) =>
+      oldDelegate.screenColor != screenColor;
 }
 
 /// Herdr logo, 512 × 512 viewBox; the mark is potrace output in a

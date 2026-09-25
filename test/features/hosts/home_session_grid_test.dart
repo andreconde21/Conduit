@@ -276,8 +276,10 @@ void main() {
       final dot = tester.widget<Container>(
         find.byKey(const ValueKey('home-tile-dot')),
       );
-      // Needs input: the dot takes the theme's warning colour.
-      expect((dot.decoration! as BoxDecoration).color, palette.warning);
+      expect(
+        (dot.decoration! as BoxDecoration).color,
+        AppPalette.defaultPalette.attention,
+      );
       final text = tester.widget<RichText>(
         find.byKey(const ValueKey('live-preview-text')),
       );

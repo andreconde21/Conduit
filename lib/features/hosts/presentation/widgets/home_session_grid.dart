@@ -11,6 +11,8 @@ import 'package:conduit/features/sessions/presentation/terminal_preview.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:flutter/material.dart';
 
+/// Herdr's colour on the home page (workspace labels, the Herdr glyph).
+
 /// Sizes of the home grid for a given content width: two columns on a
 /// phone (one in the large layout), more on tablets.
 @immutable
@@ -176,25 +178,23 @@ bool showsAgentState(AgentAttentionState? state) =>
 
 /// Solid, prominent pill for an agent state on a session tile.
 class AgentStateBanner extends StatelessWidget {
-  const AgentStateBanner({
-    required this.state,
-    required this.palette,
-    super.key,
-  });
+  const AgentStateBanner({required this.state, super.key});
 
   final AgentAttentionState state;
-  final AppPalette palette;
 
   @override
   Widget build(BuildContext context) {
-    final color = agentStateColor(palette, state);
-    final onColor = onFill(palette, color);
+    final color = agentStateColor(context, state);
+    final onColor =
+        ThemeData.estimateBrightnessForColor(color) == Brightness.dark
+        ? Colors.white
+        : Colors.black;
     return Container(
       key: const ValueKey('agent-state-banner'),
       padding: const EdgeInsets.fromLTRB(8, 3, 10, 3),
       decoration: BoxDecoration(
         color: color,
-        borderRadius: AppTheme.borderRadius,
+        borderRadius: BorderRadius.circular(AppTheme.radius),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -260,7 +260,7 @@ class HomeSessionTile extends StatelessWidget {
     final foreground = palette.foregroundFor(brightness);
     final muted = palette.mutedForegroundFor(brightness);
     final preview = StyledTerminalPreview.capture(session.terminal);
-    final radius = AppTheme.borderRadius;
+    final radius = BorderRadius.circular(AppTheme.radius);
     final state = info.agentState;
     final attention = state != null && state.needsAttention;
     return Semantics(
@@ -280,7 +280,7 @@ class HomeSessionTile extends StatelessWidget {
                 borderRadius: radius,
                 side: BorderSide(
                   color: attention
-                      ? agentStateColor(palette, state).withValues(alpha: 0.8)
+                      ? agentStateColor(context, state).withValues(alpha: 0.8)
                       : selected
                       ? palette.accent.withValues(alpha: 0.75)
                       : palette.hairlineFor(brightness),
@@ -313,10 +313,7 @@ class HomeSessionTile extends StatelessWidget {
                         right: 8,
                         child: Align(
                           alignment: Alignment.bottomLeft,
-                          child: AgentStateBanner(
-                            state: state!,
-                            palette: palette,
-                          ),
+                          child: AgentStateBanner(state: state!),
                         ),
                       ),
                     Positioned(
@@ -325,10 +322,10 @@ class HomeSessionTile extends StatelessWidget {
                       top: 0,
                       child: _TileHeader(
                         title: session.title,
-                        dotColor: dotColor(palette, session.status, state),
+                        dotColor: dotColor(context, session.status, state),
                         background: terminalTheme.background,
                         foreground: terminalTheme.foreground,
-                        badge: TransportBadge.forSession(session, palette),
+                        badge: TransportBadge.forSession(session),
                       ),
                     ),
                   ],
@@ -362,7 +359,9 @@ class HomeSessionTile extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        color: info.isHerdr ? palette.success : muted,
+                        color: info.isHerdr
+                            ? AppPalette.of(context).success
+                            : muted,
                         fontSize: 13.5,
                         fontWeight: FontWeight.w600,
                       ),
@@ -407,19 +406,19 @@ class HomeSessionTile extends StatelessWidget {
 
   /// Agent needing input wins; otherwise the connection state.
   static Color dotColor(
-    AppPalette palette,
+    BuildContext context,
     TerminalConnectionStatus status,
     AgentAttentionState? state,
   ) {
     if (state != null && state.needsAttention) {
-      return agentStateColor(palette, state);
+      return agentStateColor(context, state);
     }
     return switch (status) {
-      TerminalConnectionStatus.connected => palette.success,
-      TerminalConnectionStatus.connecting => palette.warning,
-      TerminalConnectionStatus.failed => palette.danger,
+      TerminalConnectionStatus.connected => AppPalette.of(context).success,
+      TerminalConnectionStatus.connecting => AppPalette.of(context).warning,
+      TerminalConnectionStatus.failed => Theme.of(context).colorScheme.error,
       TerminalConnectionStatus.idle ||
-      TerminalConnectionStatus.disconnected => palette.subtleForeground,
+      TerminalConnectionStatus.disconnected => AppPalette.of(context).inactive,
     };
   }
 }
@@ -442,13 +441,7 @@ class _TileHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [background, background.withValues(alpha: 0.85)],
-        ),
-      ),
+      decoration: BoxDecoration(color: background),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(9, 7, 6, 5),
         child: Row(
@@ -471,7 +464,7 @@ class _TileHeader extends StatelessWidget {
                 softWrap: false,
                 style: TextStyle(
                   color: foreground.withValues(alpha: 0.9),
-                  fontFamily: AppTheme.monoFontFamily,
+                  fontFamily: 'monospace',
                   fontSize: 11.5,
                 ),
               ),
@@ -485,51 +478,44 @@ class _TileHeader extends StatelessWidget {
   }
 }
 
-/// Pill naming how the session is carried: Mosh (teal), SSH (blue) or the
-/// on-device shell.
+/// Badge naming how the session is carried, in the theme's colours: Mosh
+/// (cyan), SSH (blue) or the on-device shell (muted).
 class TransportBadge extends StatelessWidget {
-  const TransportBadge({
-    required this.label,
-    required this.color,
-    required this.onColor,
-    super.key,
-  });
+  const TransportBadge({required this.label, this.color, super.key});
 
-  /// Mosh in the theme's cyan, SSH in its blue, the device shell muted.
-  factory TransportBadge.forSession(
-    TerminalSessionController session,
-    AppPalette palette,
-  ) {
+  factory TransportBadge.forSession(TerminalSessionController session) {
     final host = session.host;
-    final (label, color) = host.isLocal
-        ? ('Local', palette.subtleForeground)
-        : host.useMosh
-        ? ('Mosh', palette.colors.cyan)
-        : ('SSH', palette.colors.blue);
-    return TransportBadge(
-      label: label,
-      color: color,
-      onColor: onFill(palette, color),
-    );
+    if (host.isLocal) {
+      return const TransportBadge(label: 'Local');
+    }
+    return TransportBadge(label: host.useMosh ? 'Mosh' : 'SSH');
   }
 
   final String label;
-  final Color color;
-  final Color onColor;
+
+  /// Overrides the theme colour picked from [label].
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    final color =
+        this.color ??
+        switch (label) {
+          'Mosh' => palette.colors.cyan,
+          'SSH' => palette.colors.blue,
+          _ => palette.inactive,
+        };
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
         color: color,
-        borderRadius: AppTheme.borderRadius,
+        borderRadius: BorderRadius.circular(AppTheme.radius),
       ),
       child: Text(
         label,
         style: TextStyle(
-          color: onColor,
-          fontFamily: AppTheme.monoFontFamily,
+          color: palette.canvas,
           fontSize: 11,
           fontWeight: FontWeight.w700,
           height: 1.2,
@@ -539,14 +525,7 @@ class TransportBadge extends StatelessWidget {
   }
 }
 
-/// Text colour on a filled [color]: the theme background on a light fill,
-/// its foreground on a dark one.
-Color onFill(AppPalette palette, Color color) {
-  final dark = palette.isDark ? palette.canvas : palette.foreground;
-  final light = palette.isDark ? palette.foreground : palette.canvas;
-  return color.computeLuminance() > 0.4 ? dark : light;
-}
-
+/// The "+" tile: opens the connect picker for the selected machine.
 class HomeAddTile extends StatelessWidget {
   const HomeAddTile({
     required this.palette,
@@ -564,7 +543,7 @@ class HomeAddTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final muted = palette.mutedForegroundFor(brightness);
-    final radius = AppTheme.borderRadius;
+    final radius = BorderRadius.circular(AppTheme.radius);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -631,10 +610,10 @@ class DormantWorkspaceTile extends StatelessWidget {
     return Material(
       color: palette.panelFor(brightness),
       shape: RoundedRectangleBorder(
-        borderRadius: AppTheme.borderRadius,
+        borderRadius: BorderRadius.circular(AppTheme.radius),
         side: BorderSide(
           color: attention
-              ? agentStateColor(palette, summary).withValues(alpha: 0.6)
+              ? agentStateColor(context, summary).withValues(alpha: 0.6)
               : palette.hairlineFor(brightness),
         ),
       ),
@@ -684,7 +663,7 @@ class DormantWorkspaceTile extends StatelessWidget {
                   child: Wrap(
                     spacing: 4,
                     runSpacing: 4,
-                    children: herdrStateChips(workspace, palette),
+                    children: herdrStateChips(workspace),
                   ),
                 ),
               ),
@@ -724,7 +703,7 @@ class DormantTmuxTile extends StatelessWidget {
     return Material(
       color: palette.panelFor(brightness),
       shape: RoundedRectangleBorder(
-        borderRadius: AppTheme.borderRadius,
+        borderRadius: BorderRadius.circular(AppTheme.radius),
         side: BorderSide(color: palette.hairlineFor(brightness)),
       ),
       clipBehavior: Clip.antiAlias,
@@ -822,7 +801,7 @@ class AttachedChip extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
         color: colorScheme.surfaceContainerHighest,
-        borderRadius: AppTheme.borderRadius,
+        borderRadius: BorderRadius.circular(AppTheme.radius),
       ),
       child: Text(
         'Attached elsewhere',
@@ -889,10 +868,10 @@ class HomeSessionRow extends StatelessWidget {
       child: Material(
         color: palette.panelFor(brightness),
         shape: RoundedRectangleBorder(
-          borderRadius: AppTheme.borderRadius,
+          borderRadius: BorderRadius.circular(AppTheme.radius),
           side: BorderSide(
             color: attention
-                ? agentStateColor(palette, state).withValues(alpha: 0.8)
+                ? agentStateColor(context, state).withValues(alpha: 0.8)
                 : selected
                 ? palette.accent.withValues(alpha: 0.75)
                 : palette.hairlineFor(brightness),
@@ -916,7 +895,7 @@ class HomeSessionRow extends StatelessWidget {
                       height: 9,
                       decoration: BoxDecoration(
                         color: HomeSessionTile.dotColor(
-                          palette,
+                          context,
                           session.status,
                           state,
                         ),
@@ -938,10 +917,10 @@ class HomeSessionRow extends StatelessWidget {
                     ),
                     const SizedBox(width: 6),
                     if (showsAgentState(state)) ...[
-                      AgentStateChip(state: state!, palette: palette),
+                      AgentStateChip(state: state!),
                       const SizedBox(width: 6),
                     ],
-                    TransportBadge.forSession(session, palette),
+                    TransportBadge.forSession(session),
                   ],
                 ),
                 const SizedBox(height: 4),
@@ -957,7 +936,9 @@ class HomeSessionRow extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            color: info.isHerdr ? palette.success : muted,
+                            color: info.isHerdr
+                                ? AppPalette.of(context).success
+                                : muted,
                             fontSize: 12.5,
                             fontWeight: FontWeight.w600,
                           ),
@@ -1038,10 +1019,10 @@ class OtherWorkspaceRow extends StatelessWidget {
     return Material(
       color: palette.panelFor(brightness),
       shape: RoundedRectangleBorder(
-        borderRadius: AppTheme.borderRadius,
+        borderRadius: BorderRadius.circular(AppTheme.radius),
         side: BorderSide(
           color: urgent
-              ? agentStateColor(palette, attention).withValues(alpha: 0.6)
+              ? agentStateColor(context, attention).withValues(alpha: 0.6)
               : palette.hairlineFor(brightness),
         ),
       ),
@@ -1100,7 +1081,7 @@ class OtherWorkspaceRow extends StatelessWidget {
 
 /// Chips for a Herdr workspace's agents, most urgent first ("Needs input
 /// ×2"), or its Herdr-level status when no agent is listed.
-List<Widget> herdrStateChips(HomeBoardWorkspace workspace, AppPalette palette) {
+List<Widget> herdrStateChips(HomeBoardWorkspace workspace) {
   final counts = <AgentAttentionState, int>{};
   for (final pane in workspace.panes) {
     counts.update(pane.agent.state, (count) => count + 1, ifAbsent: () => 1);
@@ -1110,11 +1091,10 @@ List<Widget> herdrStateChips(HomeBoardWorkspace workspace, AppPalette palette) {
   final summary = workspace.summary;
   return [
     if (states.isEmpty && summary != null)
-      AgentStateChip(state: summary, palette: palette, dense: true),
+      AgentStateChip(state: summary, dense: true),
     for (final state in states)
       AgentStateChip(
         state: state,
-        palette: palette,
         dense: true,
         label: counts[state]! > 1
             ? '${AgentStateChip.labelFor(state)} ×${counts[state]}'
@@ -1301,7 +1281,7 @@ class HomeBoardNoticeTile extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
       decoration: BoxDecoration(
         color: palette.panelFor(brightness),
-        borderRadius: AppTheme.borderRadius,
+        borderRadius: BorderRadius.circular(AppTheme.radius),
         border: Border.all(color: palette.hairlineFor(brightness)),
       ),
       child: Row(
@@ -1366,14 +1346,12 @@ class HomeBoardNoticeTile extends StatelessWidget {
 class AgentStateChip extends StatelessWidget {
   const AgentStateChip({
     required this.state,
-    required this.palette,
     this.label,
     this.dense = false,
     super.key,
   });
 
   final AgentAttentionState state;
-  final AppPalette palette;
 
   /// Overrides the state's label.
   final String? label;
@@ -1392,7 +1370,7 @@ class AgentStateChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = agentStateColor(palette, state);
+    final color = agentStateColor(context, state);
     return Container(
       padding: EdgeInsets.symmetric(
         horizontal: dense ? 6 : 8,
@@ -1400,7 +1378,7 @@ class AgentStateChip extends StatelessWidget {
       ),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.16),
-        borderRadius: AppTheme.borderRadius,
+        borderRadius: BorderRadius.circular(AppTheme.radius),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -1426,14 +1404,15 @@ class AgentStateChip extends StatelessWidget {
 }
 
 /// Colour of an agent state across the home page.
-Color agentStateColor(AppPalette palette, AgentAttentionState? state) {
+Color agentStateColor(BuildContext context, AgentAttentionState? state) {
+  final colorScheme = Theme.of(context).colorScheme;
   return switch (state) {
     AgentAttentionState.needsInput ||
-    AgentAttentionState.blocked => palette.warning,
-    AgentAttentionState.working => palette.accent,
-    AgentAttentionState.finished => palette.success,
+    AgentAttentionState.blocked => AppPalette.of(context).attention,
+    AgentAttentionState.working => colorScheme.primary,
+    AgentAttentionState.finished => AppPalette.of(context).success,
     AgentAttentionState.idle ||
     AgentAttentionState.unknown ||
-    null => palette.mutedForeground,
+    null => colorScheme.onSurfaceVariant,
   };
 }
