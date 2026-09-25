@@ -33,6 +33,7 @@ class ThemePreferences {
     this.remoteClipboardEnabled = true,
     this.pasteImagesAsFiles = true,
     this.restoreSessionsOnLaunch = true,
+    this.multiplexerTabs = MultiplexerTabsMode.compact,
     this.omarchySyncHostId,
     this.omarchySyncedTheme,
   });
@@ -90,6 +91,9 @@ class ThemePreferences {
   /// list is kept in secure storage). On by default.
   final bool restoreSessionsOnLaunch;
 
+  /// How a phone or tablet shows the multiplexer's tabs.
+  final MultiplexerTabsMode multiplexerTabs;
+
   /// The saved machine whose Omarchy theme the app follows; null when the
   /// app uses [palette].
   final String? omarchySyncHostId;
@@ -137,6 +141,7 @@ class ThemePreferencesRepository {
   static const _pasteImagesAsFilesKey = 'conductore.paste_images_as_files.v1';
   static const _restoreSessionsOnLaunchKey =
       'conductore.restore_sessions_on_launch.v1';
+  static const _multiplexerTabsKey = 'conductore.multiplexer_tabs_phone.v1';
 
   final FlutterSecureStorage _storage;
 
@@ -199,6 +204,7 @@ class ThemePreferencesRepository {
     final rawRestoreSessionsOnLaunch = await _storage.read(
       key: _restoreSessionsOnLaunchKey,
     );
+    final rawMultiplexerTabs = await _storage.read(key: _multiplexerTabsKey);
     final rawPasteImagesAsFiles = await _storage.read(
       key: _pasteImagesAsFilesKey,
     );
@@ -248,6 +254,10 @@ class ThemePreferencesRepository {
       restoreSessionsOnLaunch:
           rawRestoreSessionsOnLaunch == null ||
           rawRestoreSessionsOnLaunch == 'true',
+      multiplexerTabs: MultiplexerTabsMode.values.firstWhere(
+        (value) => value.name == rawMultiplexerTabs,
+        orElse: () => MultiplexerTabsMode.compact,
+      ),
       pasteImagesAsFiles:
           rawPasteImagesAsFiles == null || rawPasteImagesAsFiles == 'true',
       omarchySyncHostId: (rawOmarchySyncHost?.trim().isEmpty ?? true)
@@ -369,6 +379,10 @@ class ThemePreferencesRepository {
     await _storage.write(
       key: _restoreSessionsOnLaunchKey,
       value: preferences.restoreSessionsOnLaunch.toString(),
+    );
+    await _storage.write(
+      key: _multiplexerTabsKey,
+      value: preferences.multiplexerTabs.name,
     );
     await _storage.write(
       key: _pasteImagesAsFilesKey,

@@ -47,6 +47,7 @@ import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/presentation/herdr_session_focus.dart';
 import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
 import 'package:conduit/features/sessions/presentation/session_grid_page.dart';
+import 'package:conduit/features/sessions/presentation/tmux_session_focus.dart';
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/discard_changes_dialog.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/sftp_file_viewer.dart';
@@ -59,12 +60,15 @@ import 'package:conduit/features/terminal/data/prompt_image_preparer.dart';
 import 'package:conduit/features/terminal/domain/clipboard_image_paste.dart';
 import 'package:conduit/features/terminal/domain/herdr_remote_control.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
+import 'package:conduit/features/terminal/domain/multiplexer_tabs.dart';
 import 'package:conduit/features/terminal/domain/prompt_image.dart';
 import 'package:conduit/features/terminal/domain/recent_directories.dart';
 import 'package:conduit/features/terminal/domain/security_key_interaction.dart';
 import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
 import 'package:conduit/features/terminal/domain/terminal_link_detector.dart';
 import 'package:conduit/features/terminal/presentation/gestures/terminal_gesture_layer.dart';
+import 'package:conduit/features/terminal/presentation/herdr_shortcuts.dart';
+import 'package:conduit/features/terminal/presentation/multiplexer_tabs_controller.dart';
 import 'package:conduit/features/terminal/presentation/security_key_picker_dialog.dart';
 import 'package:conduit/features/terminal/presentation/security_key_pin_dialog.dart';
 import 'package:conduit/features/terminal/presentation/terminal_file_tabs_controller.dart';
@@ -74,8 +78,12 @@ import 'package:conduit/features/terminal/presentation/terminal_workspace_contro
 import 'package:conduit/features/terminal/presentation/widgets/empty_terminal_state.dart';
 import 'package:conduit/features/terminal/presentation/widgets/floating_toolbar.dart';
 import 'package:conduit/features/terminal/presentation/widgets/image_crop_page.dart';
+import 'package:conduit/features/terminal/presentation/widgets/multiplexer_tab_actions.dart';
+import 'package:conduit/features/terminal/presentation/widgets/multiplexer_tab_compact.dart';
+import 'package:conduit/features/terminal/presentation/widgets/multiplexer_tab_strip.dart';
 import 'package:conduit/features/terminal/presentation/widgets/prompt_composer_sheet.dart';
 import 'package:conduit/features/terminal/presentation/widgets/recent_directories_sheet.dart';
+import 'package:conduit/features/terminal/presentation/widgets/session_tabs.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_header.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_link_sheet.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_surface.dart';
@@ -86,6 +94,7 @@ import 'package:conduit/features/voice/presentation/dictation_button.dart';
 import 'package:conduit/features/voice/presentation/dictation_controller.dart';
 import 'package:conduit_vt/conduit_vt.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -225,6 +234,7 @@ class _TerminalPageState extends State<TerminalPage>
       _promptSecurityKeySelection,
     );
     widget.workspace.addListener(_handleWorkspaceChanged);
+    GestureBinding.instance.pointerRouter.addGlobalRoute(_notePointer);
     _syncRemoteClipboardSubscriptions();
     _lifecycle = AppLifecycleListener(
       onStateChange: (state) {
@@ -295,6 +305,11 @@ class _TerminalPageState extends State<TerminalPage>
       _promptSecurityKeySelection,
     );
     widget.workspace.removeListener(_handleWorkspaceChanged);
+    GestureBinding.instance.pointerRouter.removeGlobalRoute(_notePointer);
+    for (final tabs in _muxTabs.values) {
+      tabs?.dispose();
+    }
+    _muxTabs.clear();
     for (final subscription in _clipboardSubscriptions.values) {
       unawaited(subscription.cancel());
     }
@@ -479,7 +494,173 @@ class _TerminalPageState extends State<TerminalPage>
     );
   }
 
+  /// Multiplexer tab strips, per session host id (null: not a Herdr or
+  /// tmux session the app can drive in the background).
+  final _muxTabs = <String, MultiplexerTabsController?>{};
+
+  MultiplexerTabsController? _muxTabsFor(TerminalSessionController session) {
+    final id = session.host.id;
+    if (_muxTabs.containsKey(id)) return _muxTabs[id];
+    return _muxTabs[id] = _createMuxTabs(session);
+  }
+
+  MultiplexerTabsController? _createMuxTabs(TerminalSessionController session) {
+    final flow = widget.connectFlow;
+    final host = session.host;
+    if (flow == null ||
+        host.isLocal ||
+        host.authMethod == SshAuthMethod.hardwareKey) {
+      return null;
+    }
+    final MultiplexerTabsBackend backend;
+    final tmuxSession = TmuxSessionFocus.tmuxSessionOf(session);
+    if (HerdrSessionFocus.herdrTargetOf(session) != null) {
+      final control = flow.herdr.controlFor(session);
+      if (control == null) return null;
+      backend = HerdrTabsBackend(
+        control: control,
+        fallbackWorkspaceId: () => flow.herdr.workspaceOf(session) ?? '',
+      );
+    } else if (tmuxSession != null) {
+      backend = TmuxTabsBackend(
+        channel: SerialCommandChannel(
+          runnerFactory: () => flow.runnerFactory(host),
+        ),
+        sessionName: tmuxSession,
+      );
+    } else {
+      return null;
+    }
+    final herdr = backend.kind == MultiplexerTabsKind.herdr;
+    return MultiplexerTabsController(
+      backend: backend,
+      agentStateFor: (tab) => _agentStateOfTab(
+        session,
+        herdr ? tab.id : '$tmuxSession:${tab.index}',
+      ),
+      keys: MultiplexerTabsKeys(
+        select: (tab, position) {
+          if (herdr) {
+            return position <= 9 &&
+                sendHerdrTab(session, position, hostPrefix: host.tmuxPrefixKey);
+          }
+          if (tab.index < 0 || tab.index > 9) return false;
+          session
+            ..sendPrefix(host.tmuxPrefixKey)
+            ..sendText('${tab.index}');
+          return true;
+        },
+        create: () {
+          if (herdr) {
+            return sendHerdrAction(
+              session,
+              'new_tab',
+              hostPrefix: host.tmuxPrefixKey,
+            );
+          }
+          session
+            ..sendPrefix(host.tmuxPrefixKey)
+            ..sendText('c');
+          return true;
+        },
+      ),
+    );
+  }
+
+  /// The most urgent state of the companion's agents in a tab: [tabKey]
+  /// is the Herdr tab id, or `session:window` for tmux, as the companion
+  /// reports an agent's tab.
+  AgentAttentionState? _agentStateOfTab(
+    TerminalSessionController session,
+    String tabKey,
+  ) {
+    final agents = widget.agentAttention?.statusFor(session.host.id)?.agents;
+    AgentAttentionState? best;
+    for (final agent in agents ?? const <AgentInfo>[]) {
+      if (agent.tab != tabKey) continue;
+      final state = agent.state;
+      if (best == null || _statePriority(state) < _statePriority(best)) {
+        best = state;
+      }
+    }
+    return best;
+  }
+
+  static int _statePriority(AgentAttentionState state) => switch (state) {
+    AgentAttentionState.needsInput => 0,
+    AgentAttentionState.blocked => 1,
+    AgentAttentionState.working => 2,
+    AgentAttentionState.finished => 3,
+    AgentAttentionState.idle => 4,
+    AgentAttentionState.unknown => 5,
+  };
+
+  /// A finger or click lifted anywhere: a swipe or tap in the terminal may
+  /// have moved the multiplexer, so the strip checks again shortly.
+  void _notePointer(PointerEvent event) {
+    if (event is! PointerUpEvent || !mounted) return;
+    final active = widget.workspace.activeSession;
+    if (active == null) return;
+    _muxTabs[active.host.id]?.refreshSoon();
+  }
+
+  /// Strip (desktop, or phones set to it), compact (phones) or none.
+  MultiplexerTabsLayout get _muxLayout => multiplexerTabsLayout(
+    widget.themeController.multiplexerTabs,
+    desktop: PlatformFeatures.isDesktop,
+  );
+
+  /// The compact mode's list of the session's multiplexer tabs.
+  void _openMuxTabsSheet(TerminalSessionController session) {
+    final tabs = _muxTabs[session.host.id];
+    if (tabs == null) return;
+    unawaited(
+      showMultiplexerTabsSheet(
+        context,
+        tabs,
+        sessionLabel: SessionTabs.labelFor(session, widget.workspace.sessions),
+        onDone: _focusNode.requestFocus,
+      ),
+    );
+  }
+
+  /// Keys the app keeps from the terminal: Ctrl+K (the quick switcher,
+  /// handled globally) and Ctrl+PageUp / Ctrl+PageDown for the previous
+  /// and next multiplexer tab.
+  KeyEventResult _handleTerminalKey(
+    TerminalSessionController session,
+    KeyEvent event,
+  ) {
+    if (isQuickSwitcherShortcut(event)) return KeyEventResult.handled;
+    final key = event.logicalKey;
+    if (key != LogicalKeyboardKey.pageUp &&
+        key != LogicalKeyboardKey.pageDown) {
+      return KeyEventResult.ignored;
+    }
+    final keyboard = HardwareKeyboard.instance;
+    final tabs = _muxTabs[session.host.id];
+    if (!keyboard.isControlPressed ||
+        keyboard.isShiftPressed ||
+        keyboard.isAltPressed ||
+        tabs == null ||
+        tabs.tabs.length < 2) {
+      return KeyEventResult.ignored;
+    }
+    if (event is! KeyUpEvent) {
+      unawaited(tabs.selectAdjacent(key == LogicalKeyboardKey.pageUp ? -1 : 1));
+    }
+    return KeyEventResult.handled;
+  }
+
   void _handleWorkspaceChanged() {
+    final open = {
+      for (final session in widget.workspace.sessions) session.host.id,
+    };
+    _muxTabs.removeWhere((id, tabs) {
+      if (open.contains(id)) return false;
+      tabs?.dispose();
+      return true;
+    });
     _syncRemoteClipboardSubscriptions();
     _syncPreviewWatchers();
     final active = widget.workspace.activeSession;
@@ -1668,6 +1849,11 @@ class _TerminalPageState extends State<TerminalPage>
                               onOpenSessionGrid: _openSwitcher,
                               onSwipeSession: _swipeSession,
                               onSessionActivated: _openPreferredView,
+                              multiplexerTabsFor:
+                                  _muxLayout == MultiplexerTabsLayout.compact
+                                  ? _muxTabsFor
+                                  : null,
+                              onOpenMultiplexerTabs: _openMuxTabsSheet,
                               onSessionLongPress: (session) =>
                                   unawaited(_pickSessionView(session)),
                               swipeDownOpensSessionGrid: widget
@@ -1683,6 +1869,26 @@ class _TerminalPageState extends State<TerminalPage>
                             );
                           },
                         ),
+                      // Keeps the active session's multiplexer tabs fresh;
+                      // only the strip layout takes a row.
+                      if (activeFileTab == null && activeSession != null)
+                        if (_muxTabsFor(activeSession) case final muxTabs?)
+                          MultiplexerTabsPoller(
+                            key: ValueKey('mux-tabs-${activeSession.host.id}'),
+                            controller: muxTabs,
+                            active: _muxLayout != MultiplexerTabsLayout.hidden,
+                            child:
+                                !_fullscreen &&
+                                    _muxLayout == MultiplexerTabsLayout.strip
+                                ? MultiplexerTabStrip(
+                                    controller: muxTabs,
+                                    palette: palette,
+                                    brightness: brightness,
+                                    desktop: PlatformFeatures.isDesktop,
+                                    onChanged: _focusNode.requestFocus,
+                                  )
+                                : const SizedBox.shrink(),
+                          ),
                       Expanded(
                         child: Stack(
                           children: [
@@ -1820,11 +2026,10 @@ class _TerminalPageState extends State<TerminalPage>
                                                         session,
                                                       ),
                                                   onKeyEvent: (_, event) =>
-                                                      isQuickSwitcherShortcut(
+                                                      _handleTerminalKey(
+                                                        session,
                                                         event,
-                                                      )
-                                                      ? KeyEventResult.handled
-                                                      : KeyEventResult.ignored,
+                                                      ),
                                                   onLinkLongPress:
                                                       (url, line) =>
                                                           _handleLinkLongPress(
@@ -1847,6 +2052,18 @@ class _TerminalPageState extends State<TerminalPage>
                                       ),
                               ),
                             ),
+                            if (activeFileTab == null &&
+                                activeSession != null &&
+                                _muxLayout == MultiplexerTabsLayout.compact &&
+                                _muxTabs[activeSession.host.id] != null)
+                              Positioned.fill(
+                                child: MultiplexerTabOverlay(
+                                  key: ValueKey(
+                                    'mux-overlay-${activeSession.host.id}',
+                                  ),
+                                  controller: _muxTabs[activeSession.host.id]!,
+                                ),
+                              ),
                             if (_pasteStatus case final status?)
                               Positioned(
                                 top: 8,

@@ -86,6 +86,16 @@ class HerdrCommands {
   String tabFocus(String tabId) =>
       _herdr('tab focus ${shellQuoteArgument(tabId)}');
 
+  /// `herdr tab rename <tab_id> <label>`.
+  String tabRename(String tabId, String label) => _herdr(
+    'tab rename ${shellQuoteArgument(tabId)} ${shellQuoteArgument(label)}',
+  );
+
+  /// `herdr tab close <tab_id>`. Herdr 0.9.1 has no command that moves a
+  /// tab, so the tab strip offers no reordering for Herdr.
+  String tabClose(String tabId) =>
+      _herdr('tab close ${shellQuoteArgument(tabId)}');
+
   /// `herdr agent focus <pane_id>`: switches workspace and tab as needed.
   String agentFocus(String paneId) =>
       _herdr('agent focus ${shellQuoteArgument(paneId)}');
@@ -172,6 +182,13 @@ class HerdrRemoteControl {
   Timer? _idle;
   Future<void> _queue = Future<void>.value();
   bool _closed = false;
+
+  /// Runs [command] and hands back its output; null when the channel
+  /// failed or is closed.
+  Future<AgentCommandResult?> query(String command) => _enqueue(command);
+
+  /// Whether [result] is a success (exit status, and no error envelope).
+  static bool succeeded(AgentCommandResult result) => _succeeded(result);
 
   /// Runs [command]; true when Herdr accepted it.
   Future<bool> run(String command) async {
