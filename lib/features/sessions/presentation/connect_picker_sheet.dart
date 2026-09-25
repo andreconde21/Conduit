@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
+import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
@@ -631,8 +632,8 @@ class _Badge extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final (background, foreground) = switch (tone) {
       _BadgeTone.success => (
-        const Color(0xFF22C55E).withValues(alpha: 0.18),
-        const Color(0xFF16A34A),
+        AppPalette.of(context).success.withValues(alpha: 0.18),
+        AppPalette.of(context).success,
       ),
       _BadgeTone.danger => (
         colorScheme.error.withValues(alpha: 0.16),
@@ -647,7 +648,7 @@ class _Badge extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
         color: background,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
       ),
       child: Text(
         label,

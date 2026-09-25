@@ -276,7 +276,10 @@ void main() {
       final dot = tester.widget<Container>(
         find.byKey(const ValueKey('home-tile-dot')),
       );
-      expect((dot.decoration! as BoxDecoration).color, const Color(0xFFF59E0B));
+      expect(
+        (dot.decoration! as BoxDecoration).color,
+        AppPalette.defaultPalette.attention,
+      );
       final text = tester.widget<RichText>(
         find.byKey(const ValueKey('live-preview-text')),
       );

@@ -1,3 +1,4 @@
+import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:flutter/material.dart';
 
@@ -37,14 +38,14 @@ class HostCard extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
         onTap: onConnect,
         child: Stack(
           children: [
             Container(
               decoration: BoxDecoration(
                 color: colorScheme.surface,
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(AppTheme.radius),
                 border: Border.all(
                   color: active
                       ? colorScheme.primary.withValues(alpha: 0.55)
@@ -217,7 +218,7 @@ class HostCard extends StatelessWidget {
                   width: 3,
                   decoration: BoxDecoration(
                     color: colorScheme.primary,
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(AppTheme.radius),
                   ),
                 ),
               ),
@@ -261,17 +262,8 @@ class _HostAvatar extends StatelessWidget {
       height: 36,
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: active
-              ? [accent, colorScheme.secondary]
-              : [
-                  colorScheme.surfaceContainerHigh,
-                  colorScheme.surfaceContainerHigh,
-                ],
-        ),
-        borderRadius: BorderRadius.circular(10),
+        color: active ? accent : colorScheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(AppTheme.radius),
         border: Border.all(
           color: active
               ? accent.withValues(alpha: 0.4)
@@ -317,7 +309,7 @@ class _MetaChip extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
       decoration: BoxDecoration(
         color: background,
-        borderRadius: BorderRadius.circular(7),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
         border: Border.all(color: border, width: selected ? 1.2 : 1),
       ),
       child: Row(
@@ -341,7 +333,7 @@ class _MetaChip extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(7),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
         onTap: onTap,
         child: chip,
       ),

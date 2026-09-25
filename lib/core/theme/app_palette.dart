@@ -219,6 +219,18 @@ class AppPalette {
   Color get warning => colors.yellow;
   Color get danger => colors.red;
 
+  /// An agent waiting on the user: Omarchy's orange, distinct from the
+  /// yellow of "connecting".
+  Color get attention => colors.orange;
+
+  /// A connection that is idle or closed.
+  Color get inactive => subtleForeground;
+
+  /// The palette the nearest [Theme] was built from ([AppTheme.build]
+  /// attaches it); the default theme when the theme is not an app theme.
+  static AppPalette of(BuildContext context) =>
+      Theme.of(context).extension<AppPaletteTheme>()?.palette ?? defaultPalette;
+
   Color get accentSoft => accent.withValues(alpha: 0.16);
   Color get accentGlow => accent.withValues(alpha: 0.08);
   Color get accentOnDark => Color.lerp(accent, Colors.black, 0.55)!;
@@ -311,3 +323,20 @@ String omarchyThemeLabel(String name) => omarchyThemeSlug(name)
     .where((part) => part.isNotEmpty)
     .map((part) => part[0].toUpperCase() + part.substring(1))
     .join(' ');
+
+/// Carries the active [AppPalette] on [ThemeData], so widgets without a
+/// palette parameter can use its status colours ([AppPalette.of]).
+@immutable
+class AppPaletteTheme extends ThemeExtension<AppPaletteTheme> {
+  const AppPaletteTheme(this.palette);
+
+  final AppPalette palette;
+
+  @override
+  AppPaletteTheme copyWith({AppPalette? palette}) =>
+      AppPaletteTheme(palette ?? this.palette);
+
+  @override
+  AppPaletteTheme lerp(AppPaletteTheme? other, double t) =>
+      t < 0.5 || other == null ? this : other;
+}
