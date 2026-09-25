@@ -423,20 +423,35 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
             ),
           );
     const gutter = HomeGridMetrics.horizontalPadding;
+    // The "+" tile fills the last row's gap (or stands alone when nothing
+    // is open); otherwise the header's "+" opens the picker.
+    final showAddTile =
+        sessions.isEmpty || sessions.length % metrics.columns != 0;
+    void newSession() => unawaited(_connect(host, forcePicker: true));
 
     return [
       SliverToBoxAdapter(
         child: _SectionHeader(
           label: 'SESSIONS',
           detail: sessions.isEmpty ? 'none open' : '${sessions.length} open',
-          trailing: IconButton(
-            tooltip: _largeTiles ? 'Two columns' : 'Large tiles',
-            icon: Icon(
-              _largeTiles
-                  ? Icons.grid_view_rounded
-                  : Icons.view_agenda_outlined,
-            ),
-            onPressed: () => setState(() => _largeTiles = !_largeTiles),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                tooltip: 'New session',
+                icon: const Icon(Icons.add_rounded),
+                onPressed: newSession,
+              ),
+              IconButton(
+                tooltip: _largeTiles ? 'Two columns' : 'Large tiles',
+                icon: Icon(
+                  _largeTiles
+                      ? Icons.grid_view_rounded
+                      : Icons.view_agenda_outlined,
+                ),
+                onPressed: () => setState(() => _largeTiles = !_largeTiles),
+              ),
+            ],
           ),
         ),
       ),
@@ -455,7 +470,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
                 palette: palette,
                 brightness: brightness,
                 label: sessions.isEmpty ? 'Connect' : 'New session',
-                onTap: () => _connect(host, forcePicker: true),
+                onTap: newSession,
               );
             }
             final session = sessions[index];
@@ -481,7 +496,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
               },
               onLongPress: () => _showSessionActions(session),
             );
-          }, childCount: sessions.length + 1),
+          }, childCount: sessions.length + (showAddTile ? 1 : 0)),
         ),
       ),
       if (notice != null)
