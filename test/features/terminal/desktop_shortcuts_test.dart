@@ -245,7 +245,27 @@ void main() {
     await press(tester, LogicalKeyboardKey.keyT, ctrl: true, shift: true);
     await tester.pumpAndSettle();
     expect(find.byType(ConnectPickerSheet), findsOneWidget);
+    // A picker: a centred dialog on desktop, not a bottom sheet.
+    expect(find.byKey(const ValueKey('adaptive-modal-dialog')), findsOneWidget);
+    expect(find.byType(BottomSheet), findsNothing);
     expect(find.textContaining('h0'), findsWidgets);
+  }, variant: _desktops);
+
+  testWidgets('the quick switcher is a command palette on desktop', (
+    tester,
+  ) async {
+    await pumpTerminal(tester, sessions: 2);
+    await press(tester, LogicalKeyboardKey.keyK, ctrl: true, shift: true);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('adaptive-modal-palette')),
+      findsOneWidget,
+    );
+    expect(find.byType(BottomSheet), findsNothing);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('adaptive-modal-palette')), findsNothing);
+    await tester.pump(const Duration(seconds: 1));
   }, variant: _desktops);
 
   testWidgets('Ctrl+Shift+/ opens the shortcuts sheet', (tester) async {
