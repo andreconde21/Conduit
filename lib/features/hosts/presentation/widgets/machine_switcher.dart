@@ -1,3 +1,4 @@
+import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_theme.dart';
@@ -89,13 +90,16 @@ class MachineFilter {
 
   bool get isAll => keys.isEmpty;
 
-  /// The filter with keys of deleted machines dropped; all machines when
+  /// The filter with keys of deleted machines dropped (and, off Android,
+  /// the proot local shells, which only exist there); all machines when
   /// nothing is left.
   MachineFilter validFor(List<SavedHost> hosts) {
     final ids = {for (final host in hosts) host.id};
     return MachineFilter({
       for (final key in keys)
-        if (ids.contains(key) || key == localMachineFilterKey) key,
+        if (ids.contains(key) ||
+            (key == localMachineFilterKey && PlatformFeatures.prootLocalShell))
+          key,
     });
   }
 

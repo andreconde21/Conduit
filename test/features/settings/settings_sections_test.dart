@@ -5,6 +5,7 @@ import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/settings/presentation/settings_catalog.dart';
 import 'package:conduit/features/settings/presentation/settings_page.dart';
 import 'package:conduit/features/settings/presentation/settings_services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -61,6 +62,16 @@ void main() {
     await tester.tap(find.text('Show local shell'));
     await tester.pumpAndSettle();
     expect(controller.showLocalShell, isFalse);
+  });
+
+  testWidgets('desktops hide the proot local shell toggle', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    try {
+      await openSection(tester, SettingsSection.appearance);
+      expect(find.text('Show local shell'), findsNothing);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
   });
 
   for (final (title, read) in <(String, bool Function(ThemeController))>[
