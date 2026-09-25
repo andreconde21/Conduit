@@ -88,7 +88,10 @@ void main() {
   final localShellController = LocalShellController();
   final terminalRepository = RoutingTerminalRepository(
     ssh: DartSshTerminalRepository(hostKeyVerifier),
-    mosh: MoshTerminalRepository(hostKeyVerifier),
+    mosh: MoshTerminalRepository(
+      hostKeyVerifier,
+      cleanupRunner: (host) => SshAgentCommandRunner(hostKeyVerifier, host),
+    ),
     local: LocalTerminalRepository(
       resolveLaunch: localShellController.requireLaunch,
     ),

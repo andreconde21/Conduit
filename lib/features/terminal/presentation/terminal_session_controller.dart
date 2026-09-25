@@ -6,6 +6,7 @@ import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/terminal/domain/herdr_keymap.dart';
+import 'package:conduit/features/terminal/domain/mosh_server_cleanup.dart';
 import 'package:conduit/features/terminal/domain/network_connectivity.dart';
 import 'package:conduit/features/terminal/domain/osc52_clipboard.dart';
 import 'package:conduit/features/terminal/domain/predictive_echo.dart';
@@ -315,8 +316,14 @@ class TerminalSessionController extends ChangeNotifier {
     final session = _session;
     _session = null;
     try {
-      await _closeRemoteMoshSession(session);
+      final leavesServer = await _closeRemoteMoshSession(session);
       await session?.close();
+      if (leavesServer && session is ReapableTerminalSession) {
+        // Nothing ended the remote side (a Herdr detach leaves its shell
+        // running): stop the server over a command channel, in the
+        // background.
+        unawaited((session as ReapableTerminalSession).reapServer());
+      }
     } finally {
       keyboard.clearModifiers();
       _status = TerminalConnectionStatus.disconnected;
@@ -483,12 +490,18 @@ class TerminalSessionController extends ChangeNotifier {
     }
   }
 
-  Future<void> _closeRemoteMoshSession(SshTerminalSession? session) async {
+  /// Types what ends the remote side cleanly; true when it leaves the
+  /// server running (a Herdr detach, or nothing typed) so it must be
+  /// stopped another way.
+  Future<bool> _closeRemoteMoshSession(SshTerminalSession? session) async {
     if (session == null || !host.useMosh) {
-      return;
+      return false;
     }
+    final keystrokes = moshCloseKeystrokes();
+    final leavesServer =
+        keystrokes is MoshCloseHerdr || keystrokes is MoshCloseNothing;
     try {
-      switch (moshCloseKeystrokes()) {
+      switch (keystrokes) {
         case MoshCloseTmux(:final detach):
           await session.send(detach);
           await Future<void>.delayed(_tmuxDetachExitDelay);
@@ -500,13 +513,14 @@ class TerminalSessionController extends ChangeNotifier {
         case MoshCloseShell():
           await session.send(const [0x04]);
         case MoshCloseNothing():
-          return;
+          return leavesServer;
       }
       await session.done.timeout(_gracefulMoshCloseTimeout);
     } catch (_) {
       // Fall back to the transport close below if the remote side ignores the
       // graceful exit sequence or the session is already gone.
     }
+    return leavesServer;
   }
 
   /// What is typed into a Mosh session before its transport closes (Close,
