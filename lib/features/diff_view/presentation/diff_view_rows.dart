@@ -104,7 +104,9 @@ class DiffRows {
         rows.add(DiffHunkHeaderRow(file, hunk));
         offset += diffHunkHeaderHeight;
         maxLength = math.max(maxLength, hunk.header.length);
-        final spans = wordDiff ? wordDiffHunk(hunk) : const <int, List<WordDiffSpan>>{};
+        final spans = wordDiff
+            ? wordDiffHunk(hunk)
+            : const <int, List<WordDiffSpan>>{};
         for (var index = 0; index < hunk.lines.length; index++) {
           final line = hunk.lines[index];
           rows.add(DiffLineRow(file, line, spans: spans[index]));
@@ -116,8 +118,7 @@ class DiffRows {
     return DiffRows._(rows, offsets, maxLength);
   }
 
-  double get totalHeight =>
-      rows.fold(0.0, (total, row) => total + row.height);
+  double get totalHeight => rows.fold(0.0, (total, row) => total + row.height);
 
   /// Vertical offset of [file]'s header, or null when it is not listed.
   double? offsetOfFile(DiffFile file) => _fileOffsets[file];
@@ -279,7 +280,8 @@ class _FileHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final muted = palette.mutedForegroundFor(brightness);
-    final title = file.status == DiffFileStatus.renamed ||
+    final title =
+        file.status == DiffFileStatus.renamed ||
             file.status == DiffFileStatus.copied
         ? '${file.oldPath} → ${file.newPath}'
         : file.displayPath;

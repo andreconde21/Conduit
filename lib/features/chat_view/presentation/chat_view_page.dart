@@ -36,6 +36,8 @@ class ChatViewPage extends StatefulWidget {
     this.onSetUpCompanion,
     this.onEnableMonitoring,
     this.textToSpeech,
+    this.accessory,
+    this.initialDraft = '',
     super.key,
   });
 
@@ -61,6 +63,12 @@ class ChatViewPage extends StatefulWidget {
   /// Speaks replies when "Read replies aloud" is on; defaults to the
   /// on-device engine on Android and to none elsewhere (tests inject one).
   final TextToSpeech? textToSpeech;
+
+  /// A small widget pinned above the composer (the "Preview ready" chip).
+  final Widget? accessory;
+
+  /// What the composer starts with.
+  final String initialDraft;
 
   @override
   State<ChatViewPage> createState() => _ChatViewPageState();
@@ -91,7 +99,7 @@ class _ChatViewPageState extends State<ChatViewPage>
   /// The hands-free Talk loop; null without dictation or speech.
   TalkController? _talk;
   String? _talkMessageShown;
-  final _composerText = TextEditingController();
+  late final _composerText = TextEditingController(text: widget.initialDraft);
 
   /// When the working indicator appeared, for turns whose prompt has no
   /// timestamp.
@@ -498,6 +506,14 @@ class _ChatViewPageState extends State<ChatViewPage>
                     child: _buildThread(context),
                   ),
                 ),
+                if (widget.accessory case final accessory?)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                      child: accessory,
+                    ),
+                  ),
                 if (_talk case final talk?)
                   ListenableBuilder(
                     listenable: talk,

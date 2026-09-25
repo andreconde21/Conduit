@@ -106,10 +106,11 @@ Map<String, Object> healthyResponses({bool daemon = true}) => {
 
 CompanionBundle fakeBundle() => CompanionBundle(
   version: '0.3.0',
-  files: {
-    'install.sh': Uint8List.fromList(utf8.encode('#!/bin/sh\n')),
-    'bin/conductore-hostd': Uint8List.fromList(utf8.encode('hostd')),
-    'bin/conductore-hook': Uint8List.fromList(utf8.encode('hook')),
-    'lib/cli.js': Uint8List.fromList(utf8.encode('cli')),
+  archive: Uint8List.fromList(utf8.encode('archive')),
+  checksums: {
+    'install.sh': 'a' * 64,
+    'bin/conductore-hostd': 'b' * 64,
+    'bin/conductore-hook': 'c' * 64,
+    'lib/cli.js': 'd' * 64,
   },
 );

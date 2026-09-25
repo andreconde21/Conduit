@@ -1,5 +1,9 @@
 # Changelog — host companion
 
+## 0.5.0 (2026-09-25)
+
+- feat: `ports [--since <seq>]` lists the TCP ports the user's own processes listen on (dev servers), with process, `label` (vite, next, …), cwd and the `seq` at which each first appeared, for the phone's "Preview ready" chip. Computed on request from `ss -ltnpH` (else `lsof`, else `/proc/net/tcp`), reused for 2 s, remembered in `~/.conductore/ports.json`; system ports and daemons are left out. No daemon change; older phones never call it.
+
 ## 0.4.0 (2026-09-25)
 
 - perf: the hook (`conductore-hook`) and the statusline (new `conductore-statusline`) are POSIX sh scripts: no Node start per event. An event is spooled as one file (`cat` + `ln`) in `~/.conductore/spool`, which the daemon watches; 2.4 ms and 1.9 MB peak per event instead of 34 ms and 46 MB. PermissionRequest waits on a FIFO the daemon answers (same decision JSON, same "always" rules, same timeout behaviour).

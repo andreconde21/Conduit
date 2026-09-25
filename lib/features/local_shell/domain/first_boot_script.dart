@@ -54,7 +54,9 @@ class FirstBootScript {
       ..writeln('mkdir -p /etc/profile.d')
       ..writeln("cat > /etc/profile.d/conduit-welcome.sh <<'WELCOME'")
       ..writeln('if [ ! -f "\$HOME/.conduit-welcomed" ]; then')
-      ..writeln('  echo "${config.distroName} - running locally via Conductore."')
+      ..writeln(
+        '  echo "${config.distroName} - running locally via Conductore."',
+      )
       ..writeln(
         '  echo "Tip: run  ${config.updateCommand}  to refresh before '
         'installing packages."',

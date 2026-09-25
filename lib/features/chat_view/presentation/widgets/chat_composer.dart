@@ -18,6 +18,7 @@ class ChatComposer extends StatefulWidget {
     this.dictation,
     this.onTalk,
     this.textController,
+    this.initialText = '',
     super.key,
   });
 
@@ -45,13 +46,16 @@ class ChatComposer extends StatefulWidget {
   /// back here); otherwise the composer owns one.
   final TextEditingController? textController;
 
+  /// Text the field starts with (e.g. an uploaded screenshot's path).
+  final String initialText;
+
   @override
   State<ChatComposer> createState() => _ChatComposerState();
 }
 
 class _ChatComposerState extends State<ChatComposer> {
   late final TextEditingController _controller =
-      widget.textController ?? TextEditingController();
+      widget.textController ?? TextEditingController(text: widget.initialText);
   final _focusNode = FocusNode();
 
   @override
