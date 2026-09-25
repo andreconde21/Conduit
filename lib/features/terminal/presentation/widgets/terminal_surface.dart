@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/features/terminal/domain/terminal_link_detector.dart';
 import 'package:conduit/features/terminal/domain/terminal_path_detector.dart';
+import 'package:conduit/features/terminal/presentation/desktop_keyboard.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit_vt/conduit_vt.dart';
 import 'package:flutter/gestures.dart';
@@ -299,6 +300,7 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
                   autofocus: widget.focusNode != null,
                   deleteDetection: true,
                   keyboardType: TextInputType.visiblePassword,
+                  shortcuts: desktopTerminalShortcuts(),
                   theme: widget.palette.terminalThemeFor(widget.brightness),
                   overlays: overlays,
                   textStyle: TerminalStyle(

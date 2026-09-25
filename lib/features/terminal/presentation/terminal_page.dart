@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/secure_storage.dart';
@@ -125,6 +126,10 @@ class _TerminalPageState extends State<TerminalPage> {
   bool _fullscreen = false;
   bool _tmuxScrollMode = false;
   bool _composeMode = false;
+
+  /// The on-screen pill and key rows. Hidden by default on desktop, where a
+  /// physical keyboard exists; a slim strip keeps them one click away.
+  bool _touchKeysVisible = PlatformFeatures.touchKeyRowsByDefault;
   // Compose recall: recently SENT lines (deduped, oldest first, capped) so a
   // line sent into a mode that discarded it can be recalled; plus one UNSENT
   // draft per session (keyed by host id), preserved across compose close,
@@ -1084,6 +1089,11 @@ class _TerminalPageState extends State<TerminalPage> {
     };
   }
 
+  void _setTouchKeysVisible(bool visible) {
+    setState(() => _touchKeysVisible = visible);
+    _focusNode.requestFocus();
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -1303,6 +1313,17 @@ class _TerminalPageState extends State<TerminalPage> {
                         brightness: brightness,
                         onSent: _focusNode.requestFocus,
                       ),
+                    if (PlatformFeatures.isDesktop &&
+                        _touchKeysVisible &&
+                        activeFileTab == null &&
+                        activeSession != null &&
+                        !_composeMode)
+                      _DesktopKeysToggle(
+                        visible: true,
+                        palette: palette,
+                        brightness: brightness,
+                        onChanged: _setTouchKeysVisible,
+                      ),
                     if (activeFileTab != null || activeSession == null)
                       const SizedBox.shrink()
                     else if (_composeMode)
@@ -1371,6 +1392,13 @@ class _TerminalPageState extends State<TerminalPage> {
                           _focusNode.requestFocus();
                         },
                       )
+                    else if (!_touchKeysVisible)
+                      _DesktopKeysToggle(
+                        visible: false,
+                        palette: palette,
+                        brightness: brightness,
+                        onChanged: _setTouchKeysVisible,
+                      )
                     else
                       TerminalKeyboardBar(
                         controller: activeSession,
@@ -1431,6 +1459,46 @@ class _TerminalPageState extends State<TerminalPage> {
           ),
         );
       },
+    );
+  }
+}
+
+/// Desktop only: shows or hides the on-screen pill and key rows, which a
+/// physical keyboard makes optional.
+class _DesktopKeysToggle extends StatelessWidget {
+  const _DesktopKeysToggle({
+    required this.visible,
+    required this.palette,
+    required this.brightness,
+    required this.onChanged,
+  });
+
+  final bool visible;
+  final AppPalette palette;
+  final Brightness brightness;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: palette.canvasFor(brightness),
+      child: Align(
+        alignment: Alignment.centerRight,
+        child: TextButton.icon(
+          key: const ValueKey('desktop-keys-toggle'),
+          style: TextButton.styleFrom(
+            foregroundColor: palette.mutedForegroundFor(brightness),
+            visualDensity: VisualDensity.compact,
+            textStyle: const TextStyle(fontSize: 12),
+          ),
+          onPressed: () => onChanged(!visible),
+          icon: Icon(
+            visible ? Icons.keyboard_hide_outlined : Icons.keyboard_outlined,
+            size: 16,
+          ),
+          label: Text(visible ? 'Hide on-screen keys' : 'On-screen keys'),
+        ),
+      ),
     );
   }
 }

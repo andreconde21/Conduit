@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:conduit/core/presentation/conduit_brand.dart';
+import 'package:conduit/core/presentation/desktop_layout.dart';
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/presentation/theme_sheet.dart';
@@ -394,7 +395,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
                 return CustomScrollView(
                   key: const ValueKey('home-scroll'),
                   physics: const AlwaysScrollableScrollPhysics(),
-                  slivers: [
+                  slivers: centerSliversOnDesktop([
                     SliverToBoxAdapter(
                       child: HomeTopBar(
                         onLock: _lock,
@@ -406,7 +407,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
                     const SliverToBoxAdapter(
                       child: SizedBox(key: ValueKey('home-end'), height: 24),
                     ),
-                  ],
+                  ]),
                 );
               },
             ),
