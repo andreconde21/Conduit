@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/core/diagnostics/app_error_log.dart';
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_theme.dart';
@@ -62,6 +63,9 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  // A release build otherwise shows a blank page for a widget that failed
+  // to build: keep the errors, and show them with a way to copy them.
+  AppErrorLog.instance.install();
   registerLocalShellLicenses();
   registerThemeLicenses();
   registerMultiplexerLogoLicenses();

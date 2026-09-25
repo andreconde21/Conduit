@@ -1,3 +1,4 @@
+import 'package:conduit/core/diagnostics/app_error_log.dart';
 import 'package:conduit/core/presentation/theme_sheet.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
@@ -329,5 +330,12 @@ void main() {
       find.text('Based on Conduit by gwitko (Apache-2.0)'),
       findsOneWidget,
     );
+    // No errors this run: nothing to copy.
+    expect(find.byKey(const ValueKey('about-copy-error-log')), findsNothing);
+
+    AppErrorLog.instance.recordError(StateError('boom'), null);
+    addTearDown(AppErrorLog.instance.clear);
+    await tester.pump();
+    expect(find.text('Copy error log (1 error)'), findsOneWidget);
   });
 }
