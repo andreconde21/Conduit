@@ -12,6 +12,7 @@ const settings = require('./settings')
 const state = require('./state')
 const transcript = require('./transcript')
 const pane = require('./pane')
+const statusline = require('./statusline')
 const { log } = require('./log')
 
 const USAGE = `usage: conductore-hostd <command>
@@ -28,6 +29,8 @@ const USAGE = `usage: conductore-hostd <command>
                                   type a prompt into the agent's pane (text
                                   from stdin when neither flag is given)
   interrupt <sessionId>           press Escape in the agent's pane
+  statusline [--chain '<cmd>']    Claude Code statusLine command: records
+                                  context/rate-limit usage, prints a line
   install | uninstall             register / remove the Claude Code hooks
   doctor | stop | version
 `
@@ -54,6 +57,10 @@ function parseFlags (args) {
     } else positional.push(a)
   }
   return { flags, positional }
+}
+
+function hostdBinPath () {
+  return path.join(__dirname, '..', 'bin', 'conductore-hostd')
 }
 
 function hookBinPath () {
@@ -249,6 +256,63 @@ async function interrupt (args) {
   return out({ ok: true, sessionId, via: r.via, paneId: r.paneId, key: 'Escape' })
 }
 
+function readAll (stream, timeoutMs) {
+  return new Promise(resolve => {
+    if (stream.isTTY) return resolve('')
+    let data = ''
+    const timer = setTimeout(() => resolve(data), timeoutMs)
+    stream.setEncoding('utf8')
+    stream.on('data', d => { if (data.length < 1024 * 1024) data += d })
+    stream.on('end', () => { clearTimeout(timer); resolve(data) })
+    stream.on('error', () => { clearTimeout(timer); resolve(data) })
+  })
+}
+
+// Runs the user's previous statusline command with the same stdin and
+// returns its stdout unchanged ('' if it fails).
+function runChain (cmd, input) {
+  return new Promise(resolve => {
+    const { spawn } = require('child_process')
+    let stdout = ''
+    let done = false
+    const finish = () => { if (!done) { done = true; clearTimeout(timer); resolve(stdout) } }
+    // The chained command is the user's own shell command line, as Claude
+    // Code itself would run it, so it goes through sh -c.
+    const child = spawn('sh', ['-c', cmd], { stdio: ['pipe', 'pipe', 'ignore'] })
+    const timer = setTimeout(() => { child.kill(); finish() }, 5000)
+    child.stdout.on('data', d => { stdout += d })
+    child.on('error', finish)
+    child.on('close', finish)
+    child.stdin.on('error', () => {})
+    child.stdin.end(input)
+  })
+}
+
+// Never fails visibly: Claude Code shows whatever this prints.
+async function statuslineCmd (args) {
+  const { flags } = parseFlags(args)
+  const raw = await readAll(process.stdin, 2000)
+  let input = null
+  try { input = JSON.parse(raw) } catch {}
+  const report = (async () => {
+    if (!input || typeof input.session_id !== 'string') return
+    const req = { op: 'usage', sessionId: input.session_id, usage: statusline.usageFrom(input) }
+    try {
+      await client.request(req, { timeoutMs: 1500 })
+    } catch (err) {
+      // Daemon down: start it for the next report, like the hooks do.
+      log('statusline', 'usage report failed', err.message)
+      try { client.spawnDaemon() } catch {}
+    }
+  })()
+  let line
+  if (typeof flags.chain === 'string' && flags.chain.trim()) line = await runChain(flags.chain, raw)
+  else line = statusline.defaultLine(input) + '\n'
+  await report
+  process.stdout.write(line)
+  return 0
+}
+
 function install () {
   const file = settings.settingsPath()
   let current
@@ -256,9 +320,10 @@ function install () {
   const hookBin = hookBinPath()
   if (!fs.existsSync(hookBin)) return fail(`hook client not found at ${hookBin}`)
   const merged = settings.merge(current, hookBin)
-  try { settings.writeSettings(merged, file) } catch (err) { return fail(`cannot write ${file}: ${err.message}`) }
+  const sl = statusline.merge(merged, hostdBinPath())
+  try { settings.writeSettings(sl.settings, file) } catch (err) { return fail(`cannot write ${file}: ${err.message}`) }
   paths.ensureDirs()
-  return out({ ok: true, settings: file, hook: hookBin, events: settings.EVENTS })
+  return out({ ok: true, settings: file, hook: hookBin, events: settings.EVENTS, statusLine: sl.action })
 }
 
 async function uninstall () {
@@ -266,12 +331,13 @@ async function uninstall () {
   let current
   try { current = settings.readSettings(file) } catch (err) { return fail(err.message) }
   const before = settings.installed(current)
-  if (before.length) {
-    try { settings.writeSettings(settings.unmerge(current), file) } catch (err) { return fail(`cannot write ${file}: ${err.message}`) }
+  const hadStatusLine = statusline.isOurs(current.statusLine)
+  if (before.length || hadStatusLine) {
+    try { settings.writeSettings(statusline.unmerge(settings.unmerge(current)), file) } catch (err) { return fail(`cannot write ${file}: ${err.message}`) }
   }
   let stopped = false
   try { await client.request({ op: 'stop' }, { timeoutMs: 3000 }); stopped = true } catch {}
-  return out({ ok: true, settings: file, removed: before, daemonStopped: stopped })
+  return out({ ok: true, settings: file, removed: before, statusLineRestored: hadStatusLine, daemonStopped: stopped })
 }
 
 async function stop () {
@@ -299,6 +365,8 @@ async function doctor () {
   const present = settings.installed(cfg)
   const missing = settings.EVENTS.filter(e => !present.includes(e))
   add('hooks registered', missing.length === 0, missing.length ? `missing: ${missing.join(', ')}` : `${present.length} events`)
+  const sl = statusline.describe(cfg)
+  add('statusline (usage)', sl.wired, sl.detail)
   try {
     const [res] = await client.request({ op: 'ping' }, { timeoutMs: 2000 })
     add('daemon', !!(res && res.ok), `pid ${res && res.pid}, seq ${res && res.seq}, ${paths.socketPath()}`)
@@ -317,7 +385,7 @@ async function doctor () {
   add('herdr', !herdr.err, herdr.err ? 'not found (optional)' : herdr.stdout.trim().split('\n')[0])
   const claude = await run('claude', ['--version'])
   add('claude', !claude.err, claude.err ? 'not found on PATH' : claude.stdout.trim())
-  const ok = checks.filter(c => !c.ok && !['herdr', 'tmux', 'daemon', 'state file', 'claude'].includes(c.name)).length === 0
+  const ok = checks.filter(c => !c.ok && !['herdr', 'tmux', 'daemon', 'state file', 'claude', 'statusline (usage)'].includes(c.name)).length === 0
   return out({ ok, user: os.userInfo().username, checks })
 }
 
@@ -332,6 +400,7 @@ async function main (argv) {
     case 'transcript': return transcriptCmd(args)
     case 'send': return send(args)
     case 'interrupt': return interrupt(args)
+    case 'statusline': return statuslineCmd(args)
     case 'install': return install()
     case 'uninstall': return uninstall()
     case 'doctor': return doctor()
