@@ -33,8 +33,7 @@ class RecentDirectoriesController extends ChangeNotifier {
           _loading.remove(hostId);
           // A record() that finished first already holds the newer list.
           final list = _cache[hostId] ??= [
-            for (final directory in value)
-              ?normalizeRecentDirectory(directory),
+            for (final directory in value) ?normalizeRecentDirectory(directory),
           ].take(maxRecentDirectories).toList();
           return List<String>.unmodifiable(list);
         })

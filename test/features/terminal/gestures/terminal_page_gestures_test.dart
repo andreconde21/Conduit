@@ -1,6 +1,8 @@
 import 'dart:convert';
 
 import 'package:conduit/core/theme/theme_controller.dart';
+import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
 import 'package:conduit/features/terminal/presentation/terminal_page.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
@@ -17,6 +19,7 @@ void main() {
   Future<(TrackableTerminalSession, ThemeController)> pumpTerminal(
     WidgetTester tester, {
     TerminalGesturePreferences gestures = TerminalGesturePreferences.defaults,
+    SavedHost? host,
   }) async {
     final repository = InMemoryThemePreferences();
     final themeController = ThemeController(repository);
@@ -27,7 +30,7 @@ void main() {
       ImmediateTerminalRepository(session),
     );
     addTearDown(workspace.dispose);
-    workspace.open(buildHost('gestures'));
+    workspace.open(host ?? buildHost('gestures'));
 
     await tester.pumpWidget(
       MaterialApp(
@@ -138,5 +141,89 @@ void main() {
 
     expect(themeController.terminalFontSize, greaterThan(initial));
     expect(session.sent, isEmpty);
+  });
+
+  Future<void> pinchOut(WidgetTester tester) async {
+    final center = tester.getCenter(find.byType(TerminalView));
+    final first = await tester.createGesture(pointer: 41);
+    final second = await tester.createGesture(pointer: 42);
+    await first.down(center.translate(-40, 0));
+    await second.down(center.translate(40, 0));
+    await tester.pump();
+    for (var i = 0; i < 4; i += 1) {
+      await first.moveBy(const Offset(-8, 0));
+      await second.moveBy(const Offset(8, 0));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await first.up();
+    await second.up();
+    await tester.pump(const Duration(milliseconds: 300));
+  }
+
+  double viewFontSize(WidgetTester tester) {
+    return tester
+        .widget<TerminalView>(find.byType(TerminalView))
+        .textStyle
+        .fontSize;
+  }
+
+  testWidgets('pinch in a Herdr session changes the font size by default', (
+    tester,
+  ) async {
+    final (session, themeController) = await pumpTerminal(
+      tester,
+      host: const ConnectTarget.herdr(
+        workspaceId: 'w1',
+      ).apply(buildHost('gestures')),
+    );
+    final initial = viewFontSize(tester);
+
+    await pinchOut(tester);
+
+    expect(themeController.terminalFontSize, greaterThan(initial));
+    // The rendered terminal picked it up, not just the preference.
+    expect(viewFontSize(tester), themeController.terminalFontSize);
+    // No Herdr zoom keys (prefix z) went to the session.
+    expect(session.sent, isEmpty);
+  });
+
+  testWidgets('a legacy saved record still pinches the font in Herdr', (
+    tester,
+  ) async {
+    // What preview 7 wrote: the old zoom-pane default, no schema version.
+    final legacy = TerminalGesturePreferences.decode(
+      '{"pinchZoom": true, "herdrPinch": "zoomPane"}',
+    );
+    final (session, themeController) = await pumpTerminal(
+      tester,
+      gestures: legacy,
+      host: const ConnectTarget.herdr(
+        workspaceId: 'w1',
+      ).apply(buildHost('gestures')),
+    );
+    final initial = viewFontSize(tester);
+
+    await pinchOut(tester);
+
+    expect(viewFontSize(tester), greaterThan(initial));
+    expect(session.sent, isEmpty);
+  });
+
+  testWidgets('Herdr zoom pane stays available as an opt-in', (tester) async {
+    final (session, themeController) = await pumpTerminal(
+      tester,
+      gestures: const TerminalGesturePreferences(
+        herdrPinch: HerdrPinchAction.zoomPane,
+      ),
+      host: const ConnectTarget.herdr(
+        workspaceId: 'w1',
+      ).apply(buildHost('gestures')),
+    );
+    final initial = themeController.terminalFontSize;
+
+    await pinchOut(tester);
+
+    expect(themeController.terminalFontSize, initial);
+    expect(sentText(session), '\x02z');
   });
 }

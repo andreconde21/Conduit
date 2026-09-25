@@ -18,12 +18,13 @@ extension TerminalWindowSwitchTargetDetails on TerminalWindowSwitchTarget {
 
 /// What a pinch does in a Herdr session.
 enum HerdrPinchAction {
-  /// Spread to zoom the focused pane full-screen, pinch in to restore
-  /// (`herdr pane zoom --on` / `--off`).
-  zoomPane,
-
-  /// Change the terminal font size, as in tmux and plain shells.
+  /// Change the terminal font size, as in tmux and plain shells. The
+  /// default since schema 2.
   fontSize,
+
+  /// Spread to zoom the focused pane full-screen, pinch in to restore
+  /// (`herdr pane zoom --on` / `--off`). Opt-in.
+  zoomPane,
 }
 
 /// What a two-finger vertical swipe does in a Herdr session.
@@ -61,12 +62,18 @@ class TerminalGesturePreferences {
     this.twoFingerScroll = true,
     this.headerSwipeOpensSessions = true,
     this.edgeSwipeOpensAgents = true,
-    this.herdrPinch = HerdrPinchAction.zoomPane,
+    this.herdrPinch = HerdrPinchAction.fontSize,
     this.herdrTwoFingerVertical = HerdrVerticalSwipe.workspaces,
     this.herdrTwoFingerPanes = true,
   });
 
   static const defaults = TerminalGesturePreferences();
+
+  /// Version of the stored record. Records before 2 always carried
+  /// `herdrPinch: zoomPane`, the old default, whether or not the user chose
+  /// it; those are read as font size. From 2 on the stored value is a real
+  /// choice and is kept.
+  static const schemaVersion = 2;
 
   /// One-finger horizontal swipe sends next/previous window to the
   /// multiplexer chosen by [windowSwitchTarget].
@@ -86,7 +93,8 @@ class TerminalGesturePreferences {
   /// Swipe in from the right edge opens the agent panel.
   final bool edgeSwipeOpensAgents;
 
-  /// In Herdr: what [pinchZoom] does.
+  /// In Herdr: what [pinchZoom] does. Font size by default, like tmux and
+  /// plain shells; zoom pane is opt-in.
   final HerdrPinchAction herdrPinch;
 
   /// In Herdr: what a two-finger vertical swipe does. With
@@ -132,6 +140,7 @@ class TerminalGesturePreferences {
 
   Map<String, Object?> toJson() {
     return {
+      'version': schemaVersion,
       'swipeSwitchesWindow': swipeSwitchesWindow,
       'windowSwitchTarget': windowSwitchTarget.name,
       'pinchZoom': pinchZoom,
@@ -174,10 +183,7 @@ class TerminalGesturePreferences {
         'edgeSwipeOpensAgents',
         defaults.edgeSwipeOpensAgents,
       ),
-      herdrPinch: HerdrPinchAction.values.firstWhere(
-        (value) => value.name == json['herdrPinch'],
-        orElse: () => defaults.herdrPinch,
-      ),
+      herdrPinch: _herdrPinchFromJson(json),
       herdrTwoFingerVertical: HerdrVerticalSwipe.values.firstWhere(
         (value) => value.name == json['herdrTwoFingerVertical'],
         orElse: () => defaults.herdrTwoFingerVertical,
@@ -186,6 +192,18 @@ class TerminalGesturePreferences {
         'herdrTwoFingerPanes',
         defaults.herdrTwoFingerPanes,
       ),
+    );
+  }
+
+  static HerdrPinchAction _herdrPinchFromJson(Map<dynamic, dynamic> json) {
+    final version = json['version'];
+    if (version is! int || version < schemaVersion) {
+      // Written while zoom pane was the default: migrate to font size.
+      return defaults.herdrPinch;
+    }
+    return HerdrPinchAction.values.firstWhere(
+      (value) => value.name == json['herdrPinch'],
+      orElse: () => defaults.herdrPinch,
     );
   }
 

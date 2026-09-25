@@ -110,13 +110,13 @@ class TerminalSessionController extends ChangeNotifier {
   /// [osc52MaxBytes]; read requests are never answered. Whether it reaches
   /// the phone clipboard is the listener's decision (a user setting).
   Stream<String> get remoteClipboardWrites => _remoteClipboardWrites.stream;
+
   /// The shell's working directory as last reported with OSC 7 (bash with
   /// vte.sh, zsh on most distros, fish), null until one arrives.
   String? get workingDirectory => _workingDirectory;
 
   /// Each change of [workingDirectory].
-  Stream<String> get workingDirectoryReports =>
-      _workingDirectoryReports.stream;
+  Stream<String> get workingDirectoryReports => _workingDirectoryReports.stream;
   bool get isConnected => _status == TerminalConnectionStatus.connected;
   bool get predictiveEchoEnabled => _predictiveEchoEnabled;
   TerminalEnterSequence get enterSequence => _enterSequence;
