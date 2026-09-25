@@ -11,6 +11,7 @@ class FakeTts implements TextToSpeech {
   double? rate;
   double? pitch;
   var interactive = true;
+  var available = true;
   var installedVoices = const <TtsVoice>[];
   final voiceQueries = <String>[];
   final voicesUsed = <String>[];
@@ -25,7 +26,7 @@ class FakeTts implements TextToSpeech {
   Stream<TtsEvent> get events => _events.stream;
 
   @override
-  Future<bool> isAvailable() async => true;
+  Future<bool> isAvailable() async => available;
 
   @override
   Future<bool> isInteractive() async => interactive;
