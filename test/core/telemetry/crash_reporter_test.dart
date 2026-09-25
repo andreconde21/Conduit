@@ -242,8 +242,6 @@ void main() {
       expect(events, hasLength(1));
       final event = events.single;
       expectClean(event);
-      // ignore: avoid_print
-      print(const JsonEncoder.withIndent('  ').convert(event));
       expect(event['release'], 'conductore@1.2.3+45');
       expect(event['environment'], 'preview');
       expect(event['tags'], {'platform': 'android', 'flavor': 'full'});
