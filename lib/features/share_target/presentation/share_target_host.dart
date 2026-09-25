@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:conduit/core/presentation/adaptive_modal.dart';
+import 'package:conduit/core/presentation/terminal_route.dart';
 import 'package:conduit/features/share_target/presentation/share_target_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
@@ -74,9 +75,12 @@ class _ShareTargetHostState extends State<ShareTargetHost> {
     final readyHostId = controller.takeReadyHostId();
     if (readyHostId != null && !controller.terminalPageAttached) {
       unawaited(
-        Navigator.of(
-          context,
-        ).push(MaterialPageRoute<void>(builder: widget.terminalPageBuilder)),
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            settings: terminalRouteSettings,
+            builder: widget.terminalPageBuilder,
+          ),
+        ),
       );
     }
     switch (controller.phase) {

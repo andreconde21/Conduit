@@ -1,3 +1,5 @@
+import 'package:conduit/core/app_failure.dart';
+import 'package:conduit/core/connection_problem.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sessions/domain/connect_preferences.dart';
@@ -59,6 +61,48 @@ void main() {
     await tester.pumpAndSettle();
     return (runner, picked);
   }
+
+  testWidgets('an unreachable machine says so on both tabs, with Retry', (
+    tester,
+  ) async {
+    const unreachable = ConnectionFailure(
+      'Could not reach Host h.',
+      'SocketException: Network is unreachable (OS Error: Network is '
+          'unreachable, errno = 101)',
+      kind: ConnectionProblemKind.unreachable,
+    );
+    final (runner, _) = await pumpPicker(tester, [
+      unreachable,
+    ], host: buildHost('h').copyWith(host: '100.106.7.32'));
+    expect(find.text("Can't reach Host h"), findsOneWidget);
+    expect(
+      find.textContaining('Tailscale is on, then tap Retry'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Could not list tmux'), findsNothing);
+    expect(find.textContaining('errno = 101'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('connection-details-toggle')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('errno = 101'), findsOneWidget);
+
+    await tester.tap(find.text('Herdr'));
+    await tester.pumpAndSettle();
+    expect(find.text("Can't reach Host h"), findsOneWidget);
+    expect(find.text('Retry'), findsOneWidget);
+    expect(runner.commands, isNotEmpty);
+  });
+
+  testWidgets('a failed command keeps the listing wording', (tester) async {
+    await pumpPicker(tester, [const AppFailure('The command timed out.')]);
+    expect(
+      find.text('Could not list tmux sessions. The command timed out.'),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('connection-details-toggle')),
+      findsNothing,
+    );
+  });
 
   for (final scale in [1.0, 1.3]) {
     testWidgets('tab labels stay on one line at 360 dp, text scale $scale', (

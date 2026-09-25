@@ -28,6 +28,10 @@ abstract class SpeechRecognizer {
   Future<void> cancel();
 
   Stream<SpeechEvent> get events;
+
+  /// Opens the system screen where a speech service is chosen (Android's
+  /// voice input settings); false when there is none to open.
+  Future<bool> openSettings();
 }
 
 /// Per-start recognizer tuning passed to the platform.

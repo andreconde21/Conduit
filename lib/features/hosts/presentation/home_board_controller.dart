@@ -3,6 +3,7 @@
 import 'dart:async';
 
 import 'package:conduit/core/app_failure.dart';
+import 'package:conduit/core/connection_problem.dart';
 import 'package:conduit/features/agent_attention/data/herdr_attention_provider.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention_provider.dart';
@@ -196,6 +197,7 @@ class HomeBoardState {
     this.tmux = HomeTmuxStatus.unknown,
     this.tmuxSessions = const [],
     this.message,
+    this.problem,
     this.updatedAt,
     this.refreshing = false,
   });
@@ -214,6 +216,11 @@ class HomeBoardState {
   /// Error or availability text for [HomeBoardPhase.failed],
   /// [HomeBoardPhase.notInstalled] and [HomeBoardPhase.notRunning].
   final String? message;
+
+  /// For [HomeBoardPhase.failed]: what went wrong connecting (the machine
+  /// is unreachable, sign-in failed), or null when the machine answered
+  /// and a command failed ([message] says how).
+  final ConnectionProblem? problem;
   final DateTime? updatedAt;
 
   /// A fetch is running while older data is on screen.
@@ -238,6 +245,7 @@ class HomeBoardState {
     HomeTmuxStatus? tmux,
     List<TmuxSessionInfo>? tmuxSessions,
     String? message,
+    ConnectionProblem? problem,
     bool clearMessage = false,
     DateTime? updatedAt,
     bool? refreshing,
@@ -248,6 +256,7 @@ class HomeBoardState {
       tmux: tmux ?? this.tmux,
       tmuxSessions: tmuxSessions ?? this.tmuxSessions,
       message: clearMessage ? null : message ?? this.message,
+      problem: clearMessage ? null : problem ?? this.problem,
       updatedAt: updatedAt ?? this.updatedAt,
       refreshing: refreshing ?? this.refreshing,
     );
@@ -588,6 +597,11 @@ class HomeBoardController extends ChangeNotifier {
         tmux: _state.tmux,
         tmuxSessions: _state.tmuxSessions,
         message: error is AppFailure ? error.toString() : '$error',
+        problem: connectionProblemFor(
+          error,
+          machine: host.name,
+          address: host.host,
+        ),
         updatedAt: _state.updatedAt,
       );
       // A broken channel reconnects on the next poll.

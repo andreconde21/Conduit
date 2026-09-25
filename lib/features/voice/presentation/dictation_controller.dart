@@ -176,7 +176,9 @@ class DictationController extends ChangeNotifier {
   /// Whether the given sink owns the running session.
   bool owns(DictationSink sink) => identical(_sink, sink);
 
-  /// Probes the platform once; the mic is hidden when no recognizer exists.
+  /// Probes the platform; without a recognizer the mic is shown muted and
+  /// explains itself. Cheap, so the mic re-checks before explaining (the
+  /// user may have just installed one).
   Future<void> checkAvailability() async {
     final available = await _recognizer.isAvailable();
     if (_disposed || available == _available) {
@@ -185,6 +187,10 @@ class DictationController extends ChangeNotifier {
     _available = available;
     notifyListeners();
   }
+
+  /// Opens the system screen where a speech service is chosen; false when
+  /// there is none.
+  Future<bool> openSpeechSettings() => _recognizer.openSettings();
 
   /// Starts a session feeding [sink], or stops the running one when [sink]
   /// owns it. A tap on the mic always maps to this.

@@ -1,3 +1,4 @@
+import 'package:conduit/core/connection_problem.dart';
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
@@ -414,6 +415,59 @@ void main() {
         of(HomeBoardPhase.ready, workspaces: [workspace('w1', 'A')]),
         isNull,
       );
+    });
+
+    test('a connection problem replaces the listing wording', () {
+      const problem = ConnectionProblem(
+        kind: ConnectionProblemKind.unreachable,
+        title: "Can't reach dev",
+        message: 'This machine is on your Tailscale network.',
+        detail: 'SocketException: Network is unreachable',
+      );
+      final fresh = HomeBoardNotice.of(
+        const HomeBoardState(
+          phase: HomeBoardPhase.failed,
+          message: 'Could not reach dev.',
+          problem: problem,
+        ),
+      )!;
+      expect(fresh.title, "Can't reach dev");
+      expect(fresh.message, 'This machine is on your Tailscale network.');
+      expect(fresh.detail, 'SocketException: Network is unreachable');
+      expect(fresh.icon, Icons.cloud_off_rounded);
+      expect(fresh.action, HomeBoardNoticeAction.retry);
+
+      // Stale data (even tmux sessions, which used to read as "Herdr
+      // broke") keeps the headline and says the list is old.
+      final stale = HomeBoardNotice.of(
+        HomeBoardState(
+          phase: HomeBoardPhase.failed,
+          tmux: HomeTmuxStatus.available,
+          tmuxSessions: const [TmuxSessionInfo(name: 'main')],
+          workspaces: [workspace('w1', 'A')],
+          problem: problem,
+        ),
+      )!;
+      expect(stale.title, "Can't reach dev");
+      expect(
+        stale.message,
+        'Showing the last list. This machine is on your Tailscale network.',
+      );
+      expect(stale.action, HomeBoardNoticeAction.retry);
+
+      final signIn = HomeBoardNotice.of(
+        const HomeBoardState(
+          phase: HomeBoardPhase.failed,
+          problem: ConnectionProblem(
+            kind: ConnectionProblemKind.authentication,
+            title: 'Sign-in to dev failed',
+            message: 'Check the key.',
+          ),
+        ),
+      )!;
+      expect(signIn.title, 'Sign-in to dev failed');
+      expect(signIn.icon, Icons.lock_outline_rounded);
+      expect(signIn.detail, isNull);
     });
 
     test('a tmux-only machine needs no Herdr notice', () {

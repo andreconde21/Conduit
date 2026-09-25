@@ -6,6 +6,7 @@ import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/desktop_layout.dart';
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
+import 'package:conduit/core/presentation/terminal_route.dart';
 import 'package:conduit/core/secure_storage.dart';
 import 'package:conduit/core/telemetry/telemetry.dart';
 import 'package:conduit/core/telemetry/telemetry_events.dart';
@@ -1660,6 +1661,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     _terminalPageOpen = true;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
+        settings: terminalRouteSettings,
         builder: (_) => TerminalPage(
           workspace: widget.workspaceController,
           themeController: widget.themeController,
