@@ -27,4 +27,13 @@ void main() {
     expect(VoiceAnswers.option('seven', labels), isNull);
     expect(VoiceAnswers.option('mongo', labels), isNull);
   });
+
+  test('isMore takes only the whole phrase', () {
+    expect(VoiceAnswers.isMore('More.'), isTrue);
+    expect(VoiceAnswers.isMore('read more'), isTrue);
+    expect(VoiceAnswers.isMore('Continue'), isTrue);
+    expect(VoiceAnswers.isMore('mais'), isTrue);
+    expect(VoiceAnswers.isMore('continue with the tests'), isFalse);
+    expect(VoiceAnswers.isMore('no more'), isFalse);
+  });
 }

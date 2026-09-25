@@ -100,4 +100,22 @@ void main() {
       'en-GB',
     );
   });
+
+  test('read-aloud length and tool activity round-trip, unknown values '
+      'fall back', () {
+    expect(VoicePreferences.defaults.readAloudLength, ReadAloudLength.brief);
+    expect(VoicePreferences.defaults.toolActivity, ToolActivity.collapsed);
+    final custom = VoicePreferences.defaults.copyWith(
+      readAloudLength: ReadAloudLength.summary,
+      toolActivity: ToolActivity.hidden,
+    );
+    final back = VoicePreferences.decode(custom.encode());
+    expect(back.readAloudLength, ReadAloudLength.summary);
+    expect(back.toolActivity, ToolActivity.hidden);
+    final odd = VoicePreferences.decode(
+      '{"readAloudLength":"everything","toolActivity":3}',
+    );
+    expect(odd.readAloudLength, ReadAloudLength.brief);
+    expect(odd.toolActivity, ToolActivity.collapsed);
+  });
 }

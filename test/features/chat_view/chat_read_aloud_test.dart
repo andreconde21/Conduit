@@ -1,9 +1,13 @@
+import 'dart:async';
+
+import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/core/theme/theme_preferences_repository.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_controller.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_page.dart';
 import 'package:conduit/features/voice/domain/speech_event.dart';
+import 'package:conduit/features/voice/domain/voice_preferences.dart';
 import 'package:conduit/features/voice/presentation/dictation_controller.dart';
 import 'package:conduit/features/voice/presentation/voice_settings_scope.dart';
 import 'package:flutter/material.dart';
@@ -14,8 +18,36 @@ import '../voice/fake_speech_recognizer.dart';
 import '../voice/fake_tts.dart';
 import 'chat_fixtures.dart';
 
+/// Scripted polls, plus `summarize` answered by [onSummarize].
+class SummarizingRunner extends ScriptedAgentCommandRunner
+    implements StdinAgentCommandRunner {
+  SummarizingRunner(super.script, this.onSummarize);
+
+  final Future<AgentCommandResult> Function(String stdin, Future<void>? cancel)
+  onSummarize;
+  final List<String> summarized = [];
+
+  @override
+  Future<AgentCommandResult> runWithStdin(
+    String command, {
+    required String stdin,
+    required Duration timeout,
+    Future<void>? cancel,
+  }) {
+    expect(command, contains('summarize --max-words 45'));
+    summarized.add(stdin);
+    return onSummarize(stdin, cancel);
+  }
+}
+
 AgentCommandResult ok(String stdout) =>
     AgentCommandResult(stdout: stdout, stderr: '', exitCode: 0);
+
+/// Opens or closes a popup menu without waiting for the working dots.
+Future<void> settleMenu(WidgetTester tester) async {
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 500));
+}
 
 void main() {
   late FakeTts tts;
@@ -363,6 +395,283 @@ void main() {
       final field = find.byKey(const ValueKey('chat-composer-field'));
       expect(tester.widget<TextField>(field).controller!.text, 'and deploy');
       await tester.pump(const Duration(seconds: 5));
+    });
+  });
+
+  group('read-aloud length', () {
+    final longAnswer = [
+      assistantLine('a2', [
+        text(
+          'First point. Second point. Third point. A fourth point with '
+          'the details.',
+        ),
+      ]),
+    ];
+
+    testWidgets('Claude summary: quiet "Summarizing…", then the summary', (
+      tester,
+    ) async {
+      await settings.setVoice(
+        settings.voice.copyWith(
+          readAloudByDefault: true,
+          readAloudLength: ReadAloudLength.summary,
+        ),
+      );
+      final reply = Completer<AgentCommandResult>();
+      final runner = SummarizingRunner([
+        ok(page(history)),
+        ok(page(longAnswer, offset: 200)),
+      ], (_, _) => reply.future);
+      final chat = await pumpPage(tester, const [], runner: runner);
+      await chat.refresh();
+      await tester.pump();
+      expect(
+        runner.summarized.single,
+        'First point. Second point. Third point. A fourth point with the '
+        'details.',
+      );
+      expect(tts.spoken, isEmpty);
+      expect(find.byTooltip('Summarizing…'), findsOneWidget);
+
+      reply.complete(
+        ok('{"schema":1,"summary":"Four points, mostly details.","ms":900}'),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(tts.spoken, ['Four points, mostly details.']);
+      expect(find.byTooltip('Summarizing…'), findsNothing);
+    });
+
+    testWidgets('an older companion falls back to brief with a note', (
+      tester,
+    ) async {
+      await settings.setVoice(
+        settings.voice.copyWith(
+          readAloudByDefault: true,
+          readAloudLength: ReadAloudLength.summary,
+        ),
+      );
+      final runner = SummarizingRunner(
+        [ok(page(history)), ok(page(longAnswer, offset: 200))],
+        (_, _) async => const AgentCommandResult(
+          stdout: '',
+          stderr: 'conductore-hostd: unknown command "summarize"',
+          exitCode: 2,
+        ),
+      );
+      final chat = await pumpPage(tester, const [], runner: runner);
+      await chat.refresh();
+      await tester.pump();
+      await tester.pump();
+      expect(tts.spoken, [
+        'First point. Second point. Third point. More on screen.',
+      ]);
+      expect(find.textContaining('0.7.0 or later'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 6));
+    });
+
+    testWidgets('sending cancels a summary on its way', (tester) async {
+      await settings.setVoice(
+        settings.voice.copyWith(
+          readAloudByDefault: true,
+          readAloudLength: ReadAloudLength.summary,
+        ),
+      );
+      Future<void>? cancelled;
+      final reply = Completer<AgentCommandResult>();
+      final runner = SummarizingRunner(
+        [
+          ok(page(history)),
+          ok(page(longAnswer, offset: 200)),
+          ok('{"ok":true}'),
+          ok(page([], offset: 200)),
+        ],
+        (_, cancel) {
+          cancelled = cancel;
+          return reply.future;
+        },
+      );
+      final chat = await pumpPage(tester, const [], runner: runner);
+      await chat.refresh();
+      await tester.pump();
+      var cancelledNow = false;
+      unawaited(cancelled!.then((_) => cancelledNow = true));
+
+      await tester.enterText(
+        find.byKey(const ValueKey('chat-composer-field')),
+        'next',
+      );
+      await tester.tap(find.byTooltip('Send'));
+      await tester.pump();
+      expect(cancelledNow, isTrue);
+      reply.complete(ok('{"schema":1,"summary":"Too late."}'));
+      await tester.pump();
+      expect(tts.spoken, isEmpty);
+    });
+
+    testWidgets('the header menu switches the length and Tool activity', (
+      tester,
+    ) async {
+      final chat = await pumpPage(tester, [
+        ok(page(history)),
+        ok(
+          page(
+            [
+              assistantLine('a2', [
+                toolUse('t1', 'Bash', {'command': 'make'}),
+                toolUse('t2', 'Bash', {'command': 'make test'}),
+              ]),
+            ],
+            offset: 200,
+            state: 'working',
+          ),
+        ),
+      ]);
+      await chat.refresh();
+      await tester.pump();
+      expect(find.text('Ran 2 commands'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('chat-menu')));
+      await settleMenu(tester);
+      await tester.tap(find.byKey(const ValueKey('chat-menu-tools-all')));
+      await settleMenu(tester);
+      expect(settings.voice.toolActivity, ToolActivity.all);
+      expect(find.text('Ran 2 commands'), findsNothing);
+      expect(find.text('make test'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('chat-menu')));
+      await settleMenu(tester);
+      await tester.tap(find.byKey(const ValueKey('chat-menu-length-full')));
+      await settleMenu(tester);
+      expect(settings.voice.readAloudLength, ReadAloudLength.full);
+    });
+
+    testWidgets('Hidden drops tool rows; approvals and questions stay', (
+      tester,
+    ) async {
+      await settings.setVoice(
+        settings.voice.copyWith(toolActivity: ToolActivity.hidden),
+      );
+      await pumpPage(tester, [
+        ok(
+          page(
+            [
+              userLine('u1', 'clean up'),
+              assistantLine('a1', [
+                toolUse('t1', 'Bash', {'command': 'ls build'}),
+                toolUse('t2', 'Bash', {'command': 'du -sh build'}),
+                toolUse('q1', 'AskUserQuestion', {
+                  'questions': [
+                    {
+                      'question': 'Delete build too?',
+                      'options': [
+                        {'label': 'Yes'},
+                        {'label': 'No'},
+                      ],
+                    },
+                  ],
+                }),
+              ]),
+            ],
+            state: 'needs_permission',
+            pending: [
+              {'id': 'req-1', 'toolName': 'Bash', 'summary': 'rm -rf build'},
+            ],
+          ),
+        ),
+      ]);
+      expect(find.text('ls build'), findsNothing);
+      expect(find.textContaining('Ran 2'), findsNothing);
+      expect(find.text('Allow Bash?'), findsOneWidget);
+      expect(find.text('Delete build too?'), findsOneWidget);
+    });
+  });
+
+  group('speech follows the chat on screen', () {
+    testWidgets('opening another chat on top leaves the old one quiet', (
+      tester,
+    ) async {
+      await settings.setVoice(
+        settings.voice.copyWith(readAloudByDefault: true),
+      );
+      final chat = await pumpPage(tester, [
+        ok(page(history)),
+        ok(
+          page(
+            [
+              assistantLine('a2', [text('Old chat.')]),
+            ],
+            offset: 200,
+            state: 'needs_permission',
+            pending: [
+              {'id': 'req-1', 'toolName': 'Bash', 'summary': 'npm test'},
+            ],
+          ),
+        ),
+        ok(page([], offset: 200)),
+      ]);
+      await chat.refresh();
+      await tester.pump();
+      expect(tts.spoken, ['Claude needs your approval to run npm test.']);
+
+      // Another agent's chat opens on top.
+      final other = ChatViewController(
+        runner: ScriptedAgentCommandRunner([ok(page(history))]),
+        sessionId: 's-2',
+        pollInterval: const Duration(days: 1),
+      );
+      final navigator = tester.state<NavigatorState>(find.byType(Navigator));
+      unawaited(
+        navigator.push(
+          MaterialPageRoute<void>(
+            builder: (_) => ChatViewPage(
+              controller: other,
+              onOpenTerminal: () {},
+              textToSpeech: tts,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tts.stops, 0, reason: 'the sentence playing finishes');
+
+      // The old chat's turn ends underneath: not read over the new one.
+      await chat.refresh();
+      tts.done();
+      await tester.pump();
+      expect(tts.spoken, ['Claude needs your approval to run npm test.']);
+      navigator.pop();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('a reconnect that reloads the thread reads nothing again', (
+      tester,
+    ) async {
+      await settings.setVoice(
+        settings.voice.copyWith(readAloudByDefault: true),
+      );
+      final answered = [
+        ...history,
+        userLine('u2', 'go'),
+        assistantLine('a2', [text('Done once.')]),
+      ];
+      final chat = await pumpPage(tester, [
+        ok(page(history)),
+        ok(page(answered.skip(2).toList(), offset: 200)),
+        const AppFailure('Could not reach dev.'),
+        ok(page(answered, offset: 300, reset: true)),
+      ]);
+      await chat.refresh();
+      await tester.pump();
+      expect(tts.spoken, ['Done once.']);
+      tts.done();
+      await chat.refresh();
+      await tester.pump();
+      expect(chat.error, isNotNull);
+      await chat.refresh();
+      await tester.pump();
+      expect(chat.error, isNull);
+      expect(tts.spoken, ['Done once.']);
     });
   });
 }

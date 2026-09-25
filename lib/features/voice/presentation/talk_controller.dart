@@ -147,6 +147,12 @@ class TalkController extends ChangeNotifier {
   /// What to do once the reader goes quiet.
   VoidCallback? _afterSpeech;
 
+  /// Saying "That session ended" before the loop stops.
+  bool _ending = false;
+
+  /// Spoken when the session the loop talks to ends.
+  static const sessionEnded = 'That session ended.';
+
   TalkPhase get phase => _phase;
   bool get active => _phase != TalkPhase.off;
   TalkTarget get target => _target;
@@ -182,6 +188,7 @@ class TalkController extends ChangeNotifier {
         ? _transcript.trim()
         : null;
     _phase = TalkPhase.off;
+    _ending = false;
     _timer?.cancel();
     _afterSpeech = null;
     _transcript = '';
@@ -205,6 +212,10 @@ class TalkController extends ChangeNotifier {
     _items = items;
     _pending = pending;
     _state = state;
+    if (state == 'ended' && active) {
+      _sessionEnded();
+      return;
+    }
     if (_phase != TalkPhase.waiting) return;
     if (state == 'working' ||
         state == 'needs_permission' ||
@@ -216,17 +227,31 @@ class TalkController extends ChangeNotifier {
       return;
     }
     if (!_sawWork) return;
-    if (state == 'ended') {
-      _afterReading(_end);
-    } else if (state == 'waiting_input') {
+    if (state == 'waiting_input') {
       _afterReading(_listen);
     }
+  }
+
+  /// The agent's session ended: after what is being read, say so once and
+  /// stop, rather than listening to a dead session.
+  void _sessionEnded() {
+    if (_ending) return;
+    _ending = true;
+    _timer?.cancel();
+    _phase = TalkPhase.speaking;
+    _message = sessionEnded;
+    notifyListeners();
+    if (_dictation.isActive) {
+      unawaited(_dictation.cancel());
+    }
+    _readAloud.say(sessionEnded);
+    _afterReading(stop);
   }
 
   void _listen() {
     if (_disposed) return;
     if (_state == 'ended') {
-      stop();
+      _sessionEnded();
       return;
     }
     _timer?.cancel();
@@ -298,6 +323,13 @@ class TalkController extends ChangeNotifier {
       return;
     }
     switch (_target) {
+      case TalkPrompt() when VoiceAnswers.isMore(spoken) && _readAloud.hasMore:
+        // The rest of a brief reply, not a prompt for Claude.
+        _phase = TalkPhase.speaking;
+        _transcript = '';
+        notifyListeners();
+        _readAloud.more();
+        _afterReading(_listen);
       case TalkPrompt():
         _confirm(spoken);
       case TalkApproval(:final request):
@@ -316,9 +348,6 @@ class TalkController extends ChangeNotifier {
         }
     }
   }
-
-  /// The session ended (the agent finished for good).
-  void _end() => stop();
 
   void _onDictationFailed({bool force = false}) {
     if (_phase != TalkPhase.listening) return;

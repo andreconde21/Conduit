@@ -5,6 +5,7 @@ import 'dart:collection';
 
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/chat_view/domain/chat_items.dart';
+import 'package:conduit/features/voice/domain/speech_summary.dart';
 import 'package:conduit/features/voice/domain/speech_text.dart';
 import 'package:conduit/features/voice/domain/text_to_speech.dart';
 import 'package:conduit/features/voice/domain/voice_preferences.dart';
@@ -17,9 +18,17 @@ import 'package:flutter/foundation.dart';
 /// When a turn ends (the agent waits for input or has ended, with no
 /// approval pending), the turn's final answer (the assistant text after
 /// its last tool call, see [SpeechText.finalAnswer]) is spoken, cleaned
-/// for speech and capped (see [SpeechText.cap]). Intermediate text, tool
-/// activity and the working label are never spoken. New approval requests
-/// and AskUserQuestion prompts are announced as they appear.
+/// for speech, as long as [VoicePreferences.readAloudLength] says: the
+/// first sentences ([SpeechText.brief], the rest on [more]), all of it,
+/// or a summary by Claude on the machine ([summarize], falling back to
+/// brief with a one-time [onNotice]). Intermediate text, tool activity
+/// and the working label are never spoken. New approval requests and
+/// AskUserQuestion prompts are announced as they appear, in their short
+/// form.
+///
+/// Speech belongs to its chat: only the controller that last [claim]ed
+/// the speaker reads. The others finish the utterance playing and drop
+/// the rest. When the session ends mid-reply, the same happens.
 ///
 /// The first call only records what is there, so opening a chat never
 /// re-reads its history. A turn that ends while reading is off, or while
@@ -36,9 +45,23 @@ class ReadAloudController extends ChangeNotifier {
     required TextToSpeech tts,
     required this.preferences,
     this.dictationLanguage = _noLanguage,
+    this.summarize,
+    this.onNotice,
     bool enabled = false,
   }) : _tts = tts,
        _enabled = enabled;
+
+  /// Longest utterance handed to the engine at once: about two sentences,
+  /// so a reply that has to stop (the chat changed, the session ended)
+  /// stops soon, at a sentence end.
+  static const utteranceChars = 240;
+
+  /// The controller whose chat is on screen (see [claim]).
+  static ReadAloudController? _speaker;
+
+  /// Utterance ids are unique across controllers: they share one engine
+  /// and its events.
+  static int _counter = 0;
 
   static String _noLanguage() => '';
 
@@ -49,6 +72,15 @@ class ReadAloudController extends ChangeNotifier {
 
   /// The dictation language, spoken in when no speech language is set.
   final String Function() dictationLanguage;
+
+  /// Asks Claude on the chat's machine for a short summary of an answer;
+  /// completing the second argument cancels it. Null reads a brief
+  /// version instead.
+  final Future<SpeechSummaryResult> Function(String text, Future<void> cancel)?
+  summarize;
+
+  /// Shown once per reason (why a summary was not read).
+  final void Function(String note)? onNotice;
 
   bool _enabled;
   bool _suppressed = false;
@@ -66,10 +98,23 @@ class ReadAloudController extends ChangeNotifier {
   String _currentText = '';
   Timer? _watchdog;
 
+  /// The summary being fetched; completing it cancels the request.
+  Completer<void>? _summary;
+
+  /// What "more" reads: the rest of a brief answer, or the whole answer
+  /// behind a summary.
+  String? _more;
+
+  /// Whether this chat holds the speaker (see [claim]).
+  bool _current = true;
+
+  /// The agent state last observed.
+  String? _state;
+  final Set<String> _noticed = {};
+
   /// Another app has the audio for a moment; the queue waits.
   bool _paused = false;
   Timer? _pauseLimit;
-  int _counter = 0;
   StreamSubscription<TtsEvent>? _events;
   bool _disposed = false;
 
@@ -84,10 +129,40 @@ class ReadAloudController extends ChangeNotifier {
     notifyListeners();
   }
 
-  bool get _active => (_enabled || _conversation) && !_suppressed;
+  bool get _active => (_enabled || _conversation) && !_suppressed && _current;
 
-  /// Speaking or about to: the Talk loop waits for this to clear.
-  bool get busy => _currentId != null || _queue.isNotEmpty;
+  /// Speaking or about to (a summary on its way counts): the Talk loop
+  /// waits for this to clear.
+  bool get busy => _currentId != null || _queue.isNotEmpty || summarizing;
+
+  /// A summary is being fetched (nothing is spoken meanwhile).
+  bool get summarizing => _summary != null;
+
+  /// Whether [more] has something to read.
+  bool get hasMore => _more != null;
+
+  /// Whether this chat holds the speaker (see [claim]).
+  bool get current => _current;
+
+  /// Makes this chat the one that speaks (its page is on screen). The
+  /// chat that spoke before lets its current utterance finish and drops
+  /// the rest; it stays quiet until it claims the speaker again.
+  void claim() {
+    final previous = _speaker;
+    _speaker = this;
+    if (previous != null && previous != this) previous._lose();
+    if (!_current) {
+      _current = true;
+      notifyListeners();
+    }
+  }
+
+  void _lose() {
+    if (_disposed) return;
+    _current = false;
+    _release();
+    notifyListeners();
+  }
 
   /// Whether an utterance is playing right now.
   bool get speaking => _currentId != null;
@@ -128,10 +203,11 @@ class ReadAloudController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Stops speaking and drops everything queued. Items already seen stay
-  /// seen.
+  /// Stops speaking, drops everything queued and cancels a summary on its
+  /// way. Items already seen stay seen.
   void stop() {
     final wasSpeaking = _currentId != null || _queue.isNotEmpty;
+    final wasSummarizing = _cancelSummary();
     _queue.clear();
     _currentId = null;
     _paused = false;
@@ -139,8 +215,37 @@ class ReadAloudController extends ChangeNotifier {
     _watchdog?.cancel();
     if (wasSpeaking) {
       unawaited(_tts.stop().catchError((Object _) {}));
-      if (!_disposed) notifyListeners();
     }
+    if ((wasSpeaking || wasSummarizing) && !_disposed) notifyListeners();
+  }
+
+  /// Lets the utterance playing finish (the engine keeps it) and drops the
+  /// rest, including a summary on its way.
+  void _release() {
+    _cancelSummary();
+    _queue.clear();
+    _currentId = null;
+    _paused = false;
+    _pauseLimit?.cancel();
+    _watchdog?.cancel();
+  }
+
+  bool _cancelSummary() {
+    final summary = _summary;
+    if (summary == null) return false;
+    _summary = null;
+    summary.complete();
+    return true;
+  }
+
+  /// Reads what the last brief answer left out (or the whole answer
+  /// behind a summary). False when there is nothing more.
+  bool more() {
+    final rest = _more;
+    if (rest == null || _disposed) return false;
+    _more = null;
+    _enqueue(rest);
+    return true;
   }
 
   /// Feeds the current thread, pending approvals and the agent [state]
@@ -152,12 +257,22 @@ class ReadAloudController extends ChangeNotifier {
     String? state,
   ]) {
     if (_disposed) return;
+    final previousState = _state;
+    _state = state;
     if (!_primed) {
       _primed = true;
       _seenItems.addAll(items.map((item) => item.id));
       _seenRequests.addAll(pending.map((request) => request.id));
       _heard.addAll(items.whereType<ChatAssistantText>().map((i) => i.id));
       return;
+    }
+    // The session ended mid-reply (or mid-summary): finish the utterance
+    // playing, drop the rest, and read nothing more of it.
+    final endedNow = state == 'ended' && previousState != 'ended';
+    final cutShort = endedNow && busy;
+    if (cutShort) {
+      _release();
+      notifyListeners();
     }
     var lastSeen = -1;
     for (var i = items.length - 1; i >= 0; i--) {
@@ -175,7 +290,7 @@ class ReadAloudController extends ChangeNotifier {
       for (final request in pending)
         if (_seenRequests.add(request.id)) request,
     ];
-    final speak = _active;
+    final speak = _active && !cutShort;
     for (final item in fresh) {
       if (!speak) break;
       switch (item) {
@@ -200,13 +315,83 @@ class ReadAloudController extends ChangeNotifier {
       ).where((text) => !_heard.contains(text.id)).toList();
       _heard.addAll(answer.map((text) => text.id));
       if (speak && answer.isNotEmpty) {
-        _enqueue(
-          SpeechText.cap(
-            answer.map((text) => SpeechText.fromMarkdown(text.text)).join(' '),
-          ),
+        _readAnswer(
+          answer.map((text) => SpeechText.fromMarkdown(text.text)).join(' '),
         );
       }
     }
+  }
+
+  void _readAnswer(String speech) {
+    _more = null;
+    switch (preferences().readAloudLength) {
+      case ReadAloudLength.full:
+        _enqueue(speech);
+      case ReadAloudLength.brief:
+        _readBrief(speech);
+      case ReadAloudLength.summary:
+        final summarize = this.summarize;
+        if (summarize == null) {
+          _fallBack(
+            speech,
+            const SpeechSummaryFailed(SpeechSummaryFailed.unsupported),
+          );
+        } else {
+          _fetchSummary(summarize, speech);
+        }
+    }
+  }
+
+  void _readBrief(String speech) {
+    final brief = SpeechText.brief(speech);
+    _more = brief.rest;
+    _enqueue(brief.spoken);
+  }
+
+  void _fetchSummary(
+    Future<SpeechSummaryResult> Function(String, Future<void>) summarize,
+    String speech,
+  ) {
+    _cancelSummary();
+    final request = Completer<void>();
+    _summary = request;
+    notifyListeners();
+    Future<SpeechSummaryResult> reply;
+    try {
+      reply = summarize(speech, request.future);
+    } catch (error) {
+      reply = Future.error(error);
+    }
+    unawaited(
+      reply
+          .then<SpeechSummaryResult>(
+            (result) => result,
+            onError: (Object error) => SpeechSummaryFailed(
+              SpeechSummaryFailed.failed,
+              message: '$error',
+            ),
+          )
+          .then((result) {
+            // Cancelled (the user acted, the chat changed, the session
+            // ended) or replaced by a newer answer: say nothing.
+            if (_summary != request || _disposed) return;
+            _summary = null;
+            switch (result) {
+              case SpeechSummary(:final text):
+                _more = speech;
+                _enqueue(text);
+              case final SpeechSummaryFailed failure:
+                _fallBack(speech, failure);
+            }
+            notifyListeners();
+          }),
+    );
+  }
+
+  void _fallBack(String speech, SpeechSummaryFailed failure) {
+    final note = failure.note;
+    if (note != null && _noticed.add(failure.reason)) onNotice?.call(note);
+    _readBrief(speech);
   }
 
   /// Speaks [text] now (queued behind anything playing), e.g. the Talk
@@ -215,7 +400,7 @@ class ReadAloudController extends ChangeNotifier {
 
   void _enqueue(String? text) {
     if (text == null) return;
-    final chunks = SpeechText.chunk(text);
+    final chunks = SpeechText.chunk(text, max: utteranceChars);
     if (chunks.isEmpty) return;
     _queue.addAll(chunks);
     _listen();
@@ -328,6 +513,7 @@ class ReadAloudController extends ChangeNotifier {
   @override
   void dispose() {
     stop();
+    if (_speaker == this) _speaker = null;
     _disposed = true;
     _watchdog?.cancel();
     _pauseLimit?.cancel();

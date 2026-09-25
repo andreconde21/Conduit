@@ -90,12 +90,42 @@ void main() {
     expect(chunks.first, endsWith('.'));
   });
 
-  test('cap cuts long answers at a sentence and points to the screen', () {
-    expect(SpeechText.cap('Short answer.'), 'Short answer.');
-    final long = List.filled(40, 'This sentence is filler text.').join(' ');
-    final capped = SpeechText.cap(long);
-    expect(capped.length, lessThan(SpeechText.maxAnswer + 40));
-    expect(capped, endsWith('filler text. …the rest is on screen.'));
+  test('sentences split at sentence ends, not at abbreviations', () {
+    expect(
+      SpeechText.sentences('Done. It works, e.g. on 3.5 too! Next? Yes… ok.'),
+      ['Done.', 'It works, e.g. on 3.5 too!', 'Next?', 'Yes… ok.'],
+    );
+  });
+
+  test('brief reads up to three sentences within about 250 characters', () {
+    expect(SpeechText.brief('Short answer.'), (
+      spoken: 'Short answer.',
+      rest: null,
+    ));
+    expect(SpeechText.brief('One. Two. Three.'), (
+      spoken: 'One. Two. Three.',
+      rest: null,
+    ));
+    final four = SpeechText.brief('One. Two. Three. Four is here.');
+    expect(four.spoken, 'One. Two. Three. More on screen.');
+    expect(four.rest, 'Four is here.');
+
+    final long = List.filled(12, 'This sentence is about forty chars long.');
+    final cut = SpeechText.brief(long.join(' '));
+    expect(cut.spoken, endsWith('long. More on screen.'));
+    expect(
+      cut.spoken.length - ' More on screen.'.length,
+      lessThanOrEqualTo(SpeechText.briefChars),
+    );
+    expect(cut.rest, long.skip(3).join(' '));
+  });
+
+  test('brief cuts one very long sentence between words', () {
+    final words = List.filled(80, 'word').join(' ');
+    final cut = SpeechText.brief('$words.');
+    expect(cut.spoken, endsWith('word… More on screen.'));
+    expect(cut.spoken.length, lessThan(SpeechText.briefChars + 20));
+    expect('${cut.spoken.split('…').first} ${cut.rest}', '$words.');
   });
 
   test('finalAnswer is the text after the last tool call', () {

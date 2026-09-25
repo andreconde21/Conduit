@@ -21,3 +21,26 @@ abstract class AgentCommandRunner {
   /// Closes any underlying connection. The runner must not be used after.
   Future<void> close();
 }
+
+/// A runner that can also feed a command's standard input and stop it
+/// while it runs (the SSH and local runners).
+abstract interface class StdinAgentCommandRunner implements AgentCommandRunner {
+  /// Runs [command] with [stdin] as its input (then end of file), so long
+  /// or private text never lands in the command line. Completing [cancel]
+  /// stops the command (the remote process is killed where the host
+  /// allows it) and throws [AgentCommandCancelled].
+  Future<AgentCommandResult> runWithStdin(
+    String command, {
+    required String stdin,
+    required Duration timeout,
+    Future<void>? cancel,
+  });
+}
+
+/// The caller cancelled a [StdinAgentCommandRunner.runWithStdin] call.
+class AgentCommandCancelled implements Exception {
+  const AgentCommandCancelled();
+
+  @override
+  String toString() => 'The command was cancelled.';
+}

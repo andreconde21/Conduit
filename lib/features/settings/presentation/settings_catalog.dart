@@ -243,6 +243,11 @@ const List<SettingsEntry> settingsCatalog = [
   ),
   SettingsEntry(
     SettingsSection.chatVoice,
+    'Tool activity',
+    keywords: ['tools', 'tool calls', 'commands', 'collapse', 'hide'],
+  ),
+  SettingsEntry(
+    SettingsSection.chatVoice,
     'Language',
     keywords: ['dictation', 'speech', 'microphone'],
     availableWhen: _speech,
@@ -263,6 +268,12 @@ const List<SettingsEntry> settingsCatalog = [
     SettingsSection.chatVoice,
     'Read replies aloud by default',
     keywords: ['tts', 'text to speech', 'speak', 'read aloud'],
+    availableWhen: _tts,
+  ),
+  SettingsEntry(
+    SettingsSection.chatVoice,
+    'How much to read',
+    keywords: ['brief', 'full', 'summary', 'read aloud', 'length'],
     availableWhen: _tts,
   ),
   SettingsEntry(

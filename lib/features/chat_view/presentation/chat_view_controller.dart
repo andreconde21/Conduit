@@ -8,6 +8,7 @@ import 'package:conduit/features/agent_attention/domain/agent_command_runner.dar
 import 'package:conduit/features/chat_view/data/conductore_chat_client.dart';
 import 'package:conduit/features/chat_view/domain/chat_items.dart';
 import 'package:conduit/features/chat_view/domain/chat_transcript.dart';
+import 'package:conduit/features/voice/domain/speech_summary.dart';
 import 'package:flutter/foundation.dart';
 
 /// Answers a pending permission request (the agent attention decide flow).
@@ -344,6 +345,18 @@ class ChatViewController extends ChangeNotifier {
       if (!_disposed) notifyListeners();
     }
     unawaited(refresh());
+  }
+
+  /// A short spoken summary of [text] by Claude on this chat's machine,
+  /// through the chat's own connection (see
+  /// [ConductoreChatClient.summarize]).
+  Future<SpeechSummaryResult> summarize(String text, {Future<void>? cancel}) {
+    if (_disposed) {
+      return Future.value(
+        const SpeechSummaryFailed(SpeechSummaryFailed.unreachable),
+      );
+    }
+    return _client.summarize(text, cancel: cancel);
   }
 
   /// Presses Escape in the session (interrupts the current turn).

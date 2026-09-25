@@ -1,6 +1,7 @@
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/chat_view/domain/chat_items.dart';
+import 'package:conduit/features/chat_view/domain/chat_tool_activity.dart';
 import 'package:conduit/features/chat_view/domain/chat_tool_summary.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_injected_items.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_markdown.dart';
@@ -706,6 +707,102 @@ class ChatApprovalCard extends StatelessWidget {
             const Padding(
               padding: EdgeInsets.only(top: 8),
               child: LinearProgressIndicator(),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A run of tool calls as one compact row ("Ran 4 commands, edited 2
+/// files"); a tap shows the individual rows ([children]) under it.
+class ChatToolGroupRow extends StatelessWidget {
+  const ChatToolGroupRow({
+    required this.group,
+    required this.expanded,
+    required this.onToggle,
+    required this.children,
+    super.key,
+  });
+
+  final ChatToolGroup group;
+  final bool expanded;
+  final VoidCallback onToggle;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final failed = group.failed;
+    final small = theme.textTheme.bodySmall;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Material(
+            color: scheme.surfaceContainerLow,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppTheme.radius),
+              side: BorderSide(
+                color: failed > 0 ? scheme.error : scheme.outlineVariant,
+              ),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: onToggle,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.handyman_outlined,
+                      size: 18,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        group.label,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelLarge,
+                      ),
+                    ),
+                    if (failed > 0) ...[
+                      const SizedBox(width: 6),
+                      Text(
+                        '$failed failed',
+                        style: small?.copyWith(color: scheme.error),
+                      ),
+                    ],
+                    if (group.running) ...[
+                      const SizedBox(width: 8),
+                      const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    ],
+                    Icon(
+                      expanded
+                          ? Icons.expand_less_rounded
+                          : Icons.expand_more_rounded,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (expanded)
+            Padding(
+              padding: const EdgeInsets.only(left: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: children,
+              ),
             ),
         ],
       ),
