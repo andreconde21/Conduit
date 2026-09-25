@@ -180,7 +180,8 @@ It is light: no npm dependencies, not a service, and it exits by itself after
 24 hours without a request.
 
 **Install from the app.** Open a machine's Agent hooks screen and tap install.
-The app uploads the companion over SFTP and runs its installer.
+The app uploads the companion over SFTP as one archive, unpacks it with
+`tar`, checks each file's sha256 and runs its installer.
 
 **Install by hand.** Needs Node.js 18 or newer on Linux or macOS.
 
