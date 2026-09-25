@@ -44,8 +44,8 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('the form offers the agent monitor choice and hides the '
-      'companion check without a doctor', (tester) async {
+  testWidgets('the form offers the agent monitor choice and hides Agent '
+      'hooks without a companion setup scope', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
         home: HostFormPage(
@@ -59,30 +59,9 @@ void main() {
     expect(find.text('Agent monitor'), findsOneWidget);
     expect(find.text('Auto'), findsOneWidget);
     expect(find.text('Set up companion'), findsNothing);
+    expect(find.textContaining('Agent hooks'), findsNothing);
   });
 
-  testWidgets('Set up companion runs doctor on the draft and shows the '
-      'report', (tester) async {
-    SavedHost? probed;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: HostFormPage(
-          host: buildHost('h'),
-          companionDoctor: (draft) async {
-            probed = draft;
-            return 'conductore-hostd doctor: OK\n\nhooks: installed';
-          },
-        ),
-      ),
-    );
-    await revealAgentSection(tester);
-    await scrollTo(tester, find.text('Set up companion'));
-    await tester.tap(find.text('Set up companion'));
-    await tester.pumpAndSettle();
-
-    expect(probed?.host, '192.168.1.1');
-    expect(probed?.agentAttentionEnabled, isTrue);
-    expect(find.text('Companion check'), findsOneWidget);
-    expect(find.textContaining('hooks: installed'), findsOneWidget);
-  });
+  // The Agent hooks row that replaced "Set up companion" is covered in
+  // test/features/companion_setup/companion_setup_page_test.dart.
 }

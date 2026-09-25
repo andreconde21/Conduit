@@ -222,19 +222,24 @@ class _CompanionSetupTileState extends State<CompanionSetupTile> {
         final (color, icon) = companionStateVisual(context, status?.state);
         final text =
             status?.state.label ?? (checking ? 'Checking…' : 'Tap to check');
-        return ListTile(
-          key: const ValueKey('companion-setup-tile'),
-          contentPadding: EdgeInsets.zero,
-          leading: Icon(icon, color: color),
-          title: Text('Agent hooks: $text'),
-          subtitle: const Text('Conductore companion for approvals and chat'),
-          trailing: const Icon(Icons.chevron_right_rounded),
-          onTap: () async {
-            final resolved = widget.resolveHost();
-            if (resolved == null) return;
-            setState(() => _checked = resolved);
-            await showCompanionSetup(context, resolved);
-          },
+        // Its own Material: the form's section card is a DecoratedBox,
+        // which would hide the tile's ink.
+        return Material(
+          type: MaterialType.transparency,
+          child: ListTile(
+            key: const ValueKey('companion-setup-tile'),
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(icon, color: color),
+            title: Text('Agent hooks: $text'),
+            subtitle: const Text('Conductore companion for approvals and chat'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () async {
+              final resolved = widget.resolveHost();
+              if (resolved == null) return;
+              setState(() => _checked = resolved);
+              await showCompanionSetup(context, resolved);
+            },
+          ),
         );
       },
     );

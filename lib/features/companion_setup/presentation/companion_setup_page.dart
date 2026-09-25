@@ -383,35 +383,41 @@ class _StatusCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                DecoratedBox(
-                  key: const ValueKey('companion-status-badge'),
-                  decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.16),
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: color.withValues(alpha: 0.6)),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 4,
+                Flexible(
+                  child: DecoratedBox(
+                    key: const ValueKey('companion-status-badge'),
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.16),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: color.withValues(alpha: 0.6)),
                     ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(icon, size: 16, color: color),
-                        const SizedBox(width: 6),
-                        Text(
-                          label,
-                          style: theme.textTheme.labelLarge?.copyWith(
-                            color: color,
-                            fontWeight: FontWeight.w700,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(icon, size: 16, color: color),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              label,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.labelLarge?.copyWith(
+                                color: color,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
-                const Spacer(),
+                const SizedBox(width: 8),
                 if (checking && status != null)
                   const SizedBox.square(
                     dimension: 16,

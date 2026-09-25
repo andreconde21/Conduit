@@ -67,63 +67,75 @@ class CompanionInstallSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final bottomInset = shouldApplyBottomSafeArea(context)
-        ? MediaQuery.viewPaddingOf(context).bottom
-        : 0.0;
     final action = update ? 'Update' : 'Install';
-    return SingleChildScrollView(
-      padding: EdgeInsets.fromLTRB(20, 16, 20, 16 + bottomInset),
+    // SafeArea keeps the buttons clear of three-button navigation.
+    return SafeArea(
+      top: false,
+      bottom: shouldApplyBottomSafeArea(context),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            '$action agent hooks on $hostName?',
-            style: theme.textTheme.titleLarge,
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'This runs the bundled install.sh as your SSH user. It needs '
-            'Node.js 18 or newer on the machine.',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 12),
-          for (final line in companionInstallChanges(version))
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+          Flexible(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Padding(
-                    padding: EdgeInsets.only(top: 2),
-                    child: Icon(Icons.check_rounded, size: 18),
+                  Text(
+                    '$action agent hooks on $hostName?',
+                    style: theme.textTheme.titleLarge,
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(child: Text(line)),
+                  const SizedBox(height: 6),
+                  Text(
+                    'This runs the bundled install.sh as your SSH user. It '
+                    'needs Node.js 18 or newer on the machine.',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  for (final line in companionInstallChanges(version))
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Padding(
+                            padding: EdgeInsets.only(top: 2),
+                            child: Icon(Icons.check_rounded, size: 18),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(child: Text(line)),
+                        ],
+                      ),
+                    ),
                 ],
               ),
             ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => Navigator.of(context).pop(false),
-                  child: const Text('Cancel'),
+          ),
+          // Pinned below the list so the choice is always on screen.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.of(context).pop(false),
+                    child: const Text('Cancel'),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: FilledButton.icon(
-                  key: const ValueKey('companion-install-confirm'),
-                  onPressed: () => Navigator.of(context).pop(true),
-                  icon: const Icon(Icons.download_rounded),
-                  label: Text(action),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton.icon(
+                    key: const ValueKey('companion-install-confirm'),
+                    onPressed: () => Navigator.of(context).pop(true),
+                    icon: const Icon(Icons.download_rounded),
+                    label: Text(action),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
