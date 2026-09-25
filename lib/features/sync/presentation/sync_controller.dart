@@ -160,6 +160,19 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
   List<SyncDeviceView> get devices => _devices;
   bool get syncing => _running != null;
 
+  /// Saved machines that can be the hub (not local shells).
+  List<SavedHost> get machines =>
+      _hosts.hosts.where((host) => !host.isLocal).toList(growable: false);
+
+  /// The hub's saved machine on this device.
+  SavedHost? get hubHost {
+    final id = _config?.hubHostId;
+    return id == null ? null : _findHost(id);
+  }
+
+  /// A listenable for the pages: this controller and the machine list.
+  Listenable get changes => Listenable.merge([this, _hosts]);
+
   /// Completes once the saved setup has been read.
   Future<void> get loaded => _loaded.future;
 

@@ -36,6 +36,7 @@ import 'package:conduit/features/sftp/domain/file_export.dart';
 import 'package:conduit/features/sftp/domain/sftp_bookmarks_repository.dart';
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
 import 'package:conduit/features/sftp/presentation/sftp_browser_page.dart';
+import 'package:conduit/features/sync/presentation/sync_scope.dart';
 import 'package:conduit/features/terminal/domain/host_key_prompt.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:conduit/features/terminal/domain/ssh_terminal_repository.dart';
@@ -989,6 +990,8 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
           controller: widget.themeController,
           backupService: widget.backupService,
         );
+      case HomeSettingsChoice.sync:
+        await showSyncPage(context);
       case HomeSettingsChoice.trustedKeys:
         await _openTrustedKeys();
       case HomeSettingsChoice.agentHooks:

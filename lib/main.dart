@@ -46,6 +46,10 @@ import 'package:conduit/features/share_target/presentation/share_target_controll
 import 'package:conduit/features/share_target/presentation/share_target_host.dart';
 import 'package:conduit/features/share_target/presentation/share_target_scope.dart';
 import 'package:conduit/features/sync/data/app_local_sync_store.dart';
+import 'package:conduit/features/sync/data/ssh_sync_hub.dart';
+import 'package:conduit/features/sync/data/sync_state_store.dart';
+import 'package:conduit/features/sync/presentation/sync_controller.dart';
+import 'package:conduit/features/sync/presentation/sync_scope.dart';
 import 'package:conduit/features/terminal/data/connectivity_plus_network.dart';
 import 'package:conduit/features/terminal/data/dart_ssh_terminal_repository.dart';
 import 'package:conduit/features/terminal/data/mosh_terminal_repository.dart';
@@ -217,29 +221,55 @@ void main() {
     hostKeyVerifier: hostKeyVerifier,
     localStore: localSyncStore,
   );
+  // Settings › Sync: this device's data, end-to-end encrypted, through
+  // one saved machine (the hub) over the same SSH/SFTP stack.
+  final syncController = SyncController(
+    state: const SecureSyncStateStore(secureStorage),
+    local: localSyncStore,
+    hubFactory: (host, deviceId) => SshSyncHub(
+      host: host,
+      runner: SshAgentCommandRunner(hostKeyVerifier, host),
+      sftp: sftpRepository,
+      deviceId: deviceId,
+    ),
+    hosts: hostsController,
+    hostKeys: hostKeyVerifier,
+    changeSources: [
+      hostsController,
+      themeController,
+      recentDirectories,
+      sessionRestore,
+    ],
+    platform: defaultTargetPlatform.name,
+    defaultDeviceName: defaultSyncDeviceName(),
+  );
+  unawaited(themeLoaded.then((_) => syncController.start()));
   unawaited(shareTarget.start());
 
   runApp(
-    CompanionSetupScope(
-      controller: companionSetup,
-      agentAttention: agentAttention,
-      child: ConduitApp(
-        themeController: themeController,
-        lockController: lockController,
-        hostsController: hostsController,
-        terminalRepository: terminalRepository,
-        workspaceController: workspaceController,
-        localShellController: localShellController,
-        hostKeyVerifier: hostKeyVerifier,
-        promptCoordinator: promptCoordinator,
-        sftpRepository: sftpRepository,
-        sftpBookmarksRepository: sftpBookmarksRepository,
+    SyncScope(
+      controller: syncController,
+      child: CompanionSetupScope(
+        controller: companionSetup,
         agentAttention: agentAttention,
-        backupService: backupService,
-        fileExport: fileExport,
-        connectFlow: connectFlow,
-        shareTarget: shareTarget,
-        sessionRestore: sessionRestore,
+        child: ConduitApp(
+          themeController: themeController,
+          lockController: lockController,
+          hostsController: hostsController,
+          terminalRepository: terminalRepository,
+          workspaceController: workspaceController,
+          localShellController: localShellController,
+          hostKeyVerifier: hostKeyVerifier,
+          promptCoordinator: promptCoordinator,
+          sftpRepository: sftpRepository,
+          sftpBookmarksRepository: sftpBookmarksRepository,
+          agentAttention: agentAttention,
+          backupService: backupService,
+          fileExport: fileExport,
+          connectFlow: connectFlow,
+          shareTarget: shareTarget,
+          sessionRestore: sessionRestore,
+        ),
       ),
     ),
   );
