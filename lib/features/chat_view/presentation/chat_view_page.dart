@@ -6,9 +6,11 @@ import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/chat_view/data/conductore_chat_client.dart';
 import 'package:conduit/features/chat_view/domain/chat_items.dart';
+import 'package:conduit/features/chat_view/domain/chat_working.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_controller.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_composer.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_thread_items.dart';
+import 'package:conduit/features/chat_view/presentation/widgets/chat_working_indicator.dart';
 import 'package:conduit/features/terminal/presentation/widgets/prompt_composer_sheet.dart';
 import 'package:conduit/features/voice/data/platform_text_to_speech.dart';
 import 'package:conduit/features/voice/domain/text_to_speech.dart';
@@ -82,6 +84,14 @@ class _ChatViewPageState extends State<ChatViewPage>
   bool _showJump = false;
   Timer? _clock;
   ReadAloudController? _readAloud;
+
+  /// When the working indicator appeared, for turns whose prompt has no
+  /// timestamp.
+  DateTime? _workingShownAt;
+
+  ChatWorking? get _working => _chat.loading || _chat.unsupported != null
+      ? null
+      : ChatWorking.of(_chat.agent, _chat.items);
 
   ChatViewController get _chat => widget.controller;
 
@@ -293,6 +303,12 @@ class _ChatViewPageState extends State<ChatViewPage>
       listenable: _chat,
       builder: (context, _) {
         final activity = _chat.activity;
+        final working = _working;
+        if (working == null) {
+          _workingShownAt = null;
+        } else {
+          _workingShownAt ??= DateTime.now();
+        }
         final elapsed = _elapsed(_chat.startedAt);
         final subtitle = [
           activity?.label ?? 'Connecting…',
@@ -306,19 +322,23 @@ class _ChatViewPageState extends State<ChatViewPage>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(_chat.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-                Text(
-                  subtitle,
-                  key: const ValueKey('chat-header-status'),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: switch (activity) {
-                      ChatActivity.needsApproval ||
-                      ChatActivity.waiting => theme.colorScheme.error,
-                      ChatActivity.thinking ||
-                      ChatActivity.working => theme.colorScheme.primary,
-                      _ => theme.colorScheme.onSurfaceVariant,
-                    },
+                PulseWhile(
+                  key: const ValueKey('chat-header-pulse'),
+                  active: working != null,
+                  child: Text(
+                    subtitle,
+                    key: const ValueKey('chat-header-status'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: switch (activity) {
+                        ChatActivity.needsApproval ||
+                        ChatActivity.waiting => theme.colorScheme.error,
+                        ChatActivity.thinking ||
+                        ChatActivity.working => theme.colorScheme.primary,
+                        _ => theme.colorScheme.onSurfaceVariant,
+                      },
+                    ),
                   ),
                 ),
               ],
@@ -419,7 +439,14 @@ class _ChatViewPageState extends State<ChatViewPage>
     final waiting = _chat.agent?.state == 'waiting_input';
     // Newest first: the list is reversed so it opens at the latest message
     // and stays there as messages arrive.
+    final working = _working;
     final rows = <Widget>[
+      if (working != null)
+        ChatWorkingIndicator(
+          key: const ValueKey('chat-working-indicator'),
+          working: working,
+          since: working.since ?? _workingShownAt ?? DateTime.now(),
+        ),
       for (final request in pending.reversed)
         ChatApprovalCard(
           key: ValueKey('approval-${request.id}'),
