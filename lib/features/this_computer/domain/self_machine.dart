@@ -64,7 +64,38 @@ String normalizeMachineAddress(String address) {
     value = value.substring(0, value.length - 1);
   }
   final ip = InternetAddress.tryParse(value);
-  return ip?.address.toLowerCase() ?? value;
+  if (ip == null) return value;
+  return ip.type == InternetAddressType.IPv6
+      ? _canonicalIpv6(ip.rawAddress)
+      : ip.address;
+}
+
+/// [raw] (16 bytes) as RFC 5952 writes it: lower-case groups without
+/// leading zeros, the longest run of zero groups as `::`.
+String _canonicalIpv6(List<int> raw) {
+  final groups = [for (var i = 0; i < 16; i += 2) (raw[i] << 8) | raw[i + 1]];
+  var bestStart = -1;
+  var bestLength = 1;
+  for (var i = 0; i < groups.length;) {
+    if (groups[i] != 0) {
+      i += 1;
+      continue;
+    }
+    var end = i;
+    while (end < groups.length && groups[end] == 0) {
+      end += 1;
+    }
+    if (end - i > bestLength) {
+      bestStart = i;
+      bestLength = end - i;
+    }
+    i = end;
+  }
+  String hex(Iterable<int> part) =>
+      part.map((group) => group.toRadixString(16)).join(':');
+  if (bestStart < 0) return hex(groups);
+  return '${hex(groups.take(bestStart))}::'
+      '${hex(groups.skip(bestStart + bestLength))}';
 }
 
 /// The fingerprint the app stores for a host key (see the SSH client's
@@ -77,8 +108,11 @@ String? hostKeyFingerprint(String publicKeyLine) {
   try {
     final blob = base64.decode(parts[1]);
     if (blob.isEmpty) return null;
-    final digest = md5.convert(blob).bytes;
-    return 'MD5:${digest.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join(':')}';
+    final hex = [
+      for (final byte in md5.convert(blob).bytes)
+        byte.toRadixString(16).padLeft(2, '0'),
+    ];
+    return 'MD5:${hex.join(':')}';
   } on FormatException {
     return null;
   }
@@ -105,9 +139,8 @@ SelfMachineMatch? findSelfMachine(
   }
   final keysByEndpoint = <String, List<String>>{};
   for (final record in trustedKeys) {
-    (keysByEndpoint['${normalizeMachineAddress(record.host)}:${record.port}'] ??=
-            [])
-        .add(record.fingerprint.toLowerCase());
+    final endpoint = '${normalizeMachineAddress(record.host)}:${record.port}';
+    (keysByEndpoint[endpoint] ??= []).add(record.fingerprint.toLowerCase());
   }
   SelfMachineMatch? byAddress;
   for (final host in hosts) {
