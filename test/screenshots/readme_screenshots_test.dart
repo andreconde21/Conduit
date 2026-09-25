@@ -398,6 +398,7 @@ void main() {
     bool thisComputer = false,
     bool withFlow = false,
     DesktopShellController? shell,
+    bool? shellMode,
     AgentAttentionController? attention,
     void Function(TerminalWorkspaceController workspace)? onWorkspace,
   }) async {
@@ -509,6 +510,7 @@ void main() {
           connectFlow: homeFlow,
           previewRefreshInterval: const Duration(days: 1),
           desktopShell: shell,
+          shellMode: shellMode,
         ),
         systemBars: !desktop,
       ),
@@ -1105,7 +1107,9 @@ void main() {
   testWidgets('16 desktop home', (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.linux;
     try {
-      await pumpHome(tester, desktop: true);
+      // The README's shots from before the desktop shell (22 to 24 show
+      // the shell); kept until the README moves to them.
+      await pumpHome(tester, desktop: true, shellMode: false);
       await saveShot(tester, '16-desktop-home', pixelRatio: 1);
       await tearDownPage(tester);
     } finally {
@@ -1125,7 +1129,7 @@ void main() {
 
   testWidgets('17 desktop settings', (tester) async {
     await asDesktop(() async {
-      await pumpHome(tester, desktop: true);
+      await pumpHome(tester, desktop: true, shellMode: false);
       await tester.tap(find.byTooltip('Settings'));
       await pumpFrames(tester, 8);
       await saveShot(tester, '17-desktop-settings', pixelRatio: 1);
@@ -1159,7 +1163,12 @@ void main() {
 
   testWidgets('20 desktop this computer', (tester) async {
     await asDesktop(() async {
-      await pumpHome(tester, desktop: true, thisComputer: true);
+      await pumpHome(
+        tester,
+        desktop: true,
+        thisComputer: true,
+        shellMode: false,
+      );
       await tester.tap(find.byKey(const ValueKey('machine-name')));
       await pumpFrames(tester, 8);
       await saveShot(tester, '20-desktop-this-computer', pixelRatio: 1);
@@ -1169,7 +1178,7 @@ void main() {
 
   testWidgets('21 desktop connect dialog', (tester) async {
     await asDesktop(() async {
-      await pumpHome(tester, desktop: true, withFlow: true);
+      await pumpHome(tester, desktop: true, withFlow: true, shellMode: false);
       final context = tester.element(find.byType(HostsPage));
       unawaited(homeFlow!.connect(context, workstation, forcePicker: true));
       await tester.runAsync(pumpEventQueue);
