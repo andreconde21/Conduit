@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
@@ -60,6 +61,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   registerLocalShellLicenses();
+  registerMultiplexerLogoLicenses();
   unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
 
   const secureStorage = FlutterSecureStorage();
