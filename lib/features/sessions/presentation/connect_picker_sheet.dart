@@ -34,6 +34,7 @@ Future<ConnectPickerResult?> showConnectPicker({
   ConnectPreferences preferences = const ConnectPreferences(),
   Set<String> activeTargetKeys = const {},
   ConnectPickerTab initialTab = ConnectPickerTab.tmux,
+  List<String> recentDirectories = const [],
 }) {
   return showModalBottomSheet<ConnectPickerResult>(
     context: context,
@@ -52,6 +53,7 @@ Future<ConnectPickerResult?> showConnectPicker({
           preferences: preferences,
           activeTargetKeys: activeTargetKeys,
           initialTab: initialTab,
+          recentDirectories: recentDirectories,
           scrollController: scrollController,
           onPicked: (result) => Navigator.of(context).pop(result),
         ),
@@ -68,6 +70,7 @@ class ConnectPickerSheet extends StatefulWidget {
     this.preferences = const ConnectPreferences(),
     this.activeTargetKeys = const {},
     this.initialTab = ConnectPickerTab.tmux,
+    this.recentDirectories = const [],
     this.scrollController,
     super.key,
   });
@@ -81,6 +84,10 @@ class ConnectPickerSheet extends StatefulWidget {
   /// an "Active" badge.
   final Set<String> activeTargetKeys;
   final ConnectPickerTab initialTab;
+
+  /// The host's recent working directories, most recent first; shown in
+  /// the Recent tab as "Recent dirs", each opening a shell there.
+  final List<String> recentDirectories;
   final ScrollController? scrollController;
 
   @override
@@ -413,13 +420,15 @@ class _ConnectPickerSheetState extends State<ConnectPickerSheet> {
 
   List<Widget> _buildRecent() {
     final recents = widget.preferences.recents;
-    if (recents.isEmpty) {
+    final directories = widget.recentDirectories;
+    if (recents.isEmpty && directories.isEmpty) {
       return const [
         _Message(
           icon: Icons.history_rounded,
           message:
               'Nothing picked for this machine yet. Choices from the Tmux '
-              'and Herdr tabs show up here.',
+              'and Herdr tabs show up here, and so do the directories you '
+              'work in.',
         ),
       ];
     }
@@ -434,10 +443,33 @@ class _ConnectPickerSheetState extends State<ConnectPickerSheet> {
                   ? 'Herdr workspace ${target.name}'
                   : 'Herdr tab ${target.tabId}',
             ConnectTargetKind.shell => 'Plain shell',
+            ConnectTargetKind.directory => target.name,
           },
           active: widget.activeTargetKeys.contains(target.key),
           onTap: () => _pick(target),
         ),
+      if (directories.isNotEmpty) ...[
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+          child: Text(
+            'RECENT DIRS',
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              letterSpacing: 1.1,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+        for (final directory in directories)
+          _TargetTile(
+            title: ConnectTarget.directory(directory).title,
+            subtitle: directory,
+            active: widget.activeTargetKeys.contains(
+              ConnectTarget.directory(directory).key,
+            ),
+            onTap: () => _pick(ConnectTarget.directory(directory)),
+          ),
+      ],
     ];
   }
 

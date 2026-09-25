@@ -5,6 +5,7 @@ import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
+import 'package:conduit/features/agent_attention/data/remote_tool_command.dart';
 import 'package:conduit/features/agent_attention/data/ssh_agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
@@ -12,6 +13,7 @@ import 'package:conduit/features/diff_view/data/ssh_git_diff_source.dart';
 import 'package:conduit/features/diff_view/presentation/diff_view.dart';
 import 'package:conduit/features/diff_view/presentation/diff_view_controller.dart';
 import 'package:conduit/features/diff_view/presentation/diff_view_tab.dart';
+import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/live_preview/data/secure_live_preview_port_store.dart';
 import 'package:conduit/features/live_preview/data/ssh_port_forwarder.dart';
 import 'package:conduit/features/live_preview/domain/live_preview_port_store.dart';
@@ -20,6 +22,7 @@ import 'package:conduit/features/live_preview/presentation/live_preview_port_dia
 import 'package:conduit/features/live_preview/presentation/live_preview_tab.dart';
 import 'package:conduit/features/live_preview/presentation/live_preview_view.dart';
 import 'package:conduit/features/prompt_menus/presentation/prompt_menu_strip.dart';
+import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
 import 'package:conduit/features/sessions/presentation/session_grid_page.dart';
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
@@ -33,6 +36,7 @@ import 'package:conduit/features/terminal/data/platform_prompt_image_source.dart
 import 'package:conduit/features/terminal/data/prompt_image_preparer.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:conduit/features/terminal/domain/prompt_image.dart';
+import 'package:conduit/features/terminal/domain/recent_directories.dart';
 import 'package:conduit/features/terminal/domain/security_key_interaction.dart';
 import 'package:conduit/features/terminal/domain/terminal_link_detector.dart';
 import 'package:conduit/features/terminal/presentation/gestures/terminal_gesture_layer.dart';
@@ -46,6 +50,7 @@ import 'package:conduit/features/terminal/presentation/widgets/empty_terminal_st
 import 'package:conduit/features/terminal/presentation/widgets/floating_toolbar.dart';
 import 'package:conduit/features/terminal/presentation/widgets/image_crop_page.dart';
 import 'package:conduit/features/terminal/presentation/widgets/prompt_composer_sheet.dart';
+import 'package:conduit/features/terminal/presentation/widgets/recent_directories_sheet.dart';
 import 'package:conduit/features/terminal/presentation/widgets/session_tools_menu.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_header.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_link_sheet.dart';
@@ -494,6 +499,94 @@ class _TerminalPageState extends State<TerminalPage> {
         return paths.single;
       },
     );
+  }
+
+  /// "cd to…" from the Tmux+ menu or the Herdr navigator: the machine's
+  /// recent directories, acted on in the way that fits the session.
+  Future<void> _openRecentDirectories(TerminalSessionController session) async {
+    final directories = widget.connectFlow?.recentDirectories;
+    if (directories == null) {
+      return;
+    }
+    final host = session.host;
+    final hostId = baseHostId(host.id);
+    final list = await directories.load(hostId);
+    if (!mounted) {
+      return;
+    }
+    final runnerFactory = widget.connectFlow?.runnerFactory;
+    final inHerdr =
+        ConnectTarget.fromSessionHostId(host.id)?.kind ==
+        ConnectTargetKind.herdr;
+    final canRunCommands =
+        runnerFactory != null &&
+        !host.isLocal &&
+        host.authMethod != SshAuthMethod.hardwareKey;
+    final actions = <RecentDirectoryAction>[
+      if (inHerdr && canRunCommands) RecentDirectoryAction.herdrTab,
+      if (host.startTmuxOnConnect) RecentDirectoryAction.tmuxWindow,
+      RecentDirectoryAction.cd,
+    ];
+    final pick = await showRecentDirectoriesSheet(
+      context: context,
+      hostName: host.name,
+      directories: list,
+      actions: actions,
+      currentDirectory: session.workingDirectory,
+    );
+    if (pick == null || !mounted) {
+      _focusNode.requestFocus();
+      return;
+    }
+    unawaited(directories.record(hostId, pick.directory));
+    switch (pick.action) {
+      case RecentDirectoryAction.cd:
+        session.sendText(cdCommand(pick.directory));
+        _sendEnterSoon(session);
+      case RecentDirectoryAction.tmuxWindow:
+        session.sendPrefix(host.tmuxPrefixKey);
+        session.sendText(':');
+        session.sendText(tmuxNewWindowCommand(pick.directory));
+        _sendEnterSoon(session);
+      case RecentDirectoryAction.herdrTab:
+        final runner = runnerFactory!(host);
+        try {
+          final result = await runner.run(
+            remoteToolCommand('herdr', herdrNewTabArguments(pick.directory)),
+            timeout: const Duration(seconds: 10),
+          );
+          if (result.exitCode != 0 && mounted) {
+            final detail = result.stderr.trim().split('\n').first;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  'Herdr could not open a tab there'
+                  '${detail.isEmpty ? '' : ': $detail'}',
+                ),
+              ),
+            );
+          }
+        } catch (error) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Herdr could not open a tab: $error')),
+            );
+          }
+        } finally {
+          unawaited(runner.close());
+        }
+    }
+    if (mounted) {
+      _focusNode.requestFocus();
+    }
+  }
+
+  /// Enter as its own write, like the compose bar: TUIs treat a line that
+  /// arrives with its CR in one read as a paste.
+  void _sendEnterSoon(TerminalSessionController session) {
+    Future<void>.delayed(TerminalSessionController.composedEnterDelay, () {
+      session.sendKey(TerminalKey.enter);
+    });
   }
 
   Future<void> _openAgentAttention(AgentAttentionController attention) async {
@@ -984,6 +1077,12 @@ class _TerminalPageState extends State<TerminalPage> {
                           _focusNode.requestFocus();
                         },
                         onRemoteMouseTrackingActivated: _maybeShowTouchModeHint,
+                        onOpenRecentDirectories:
+                            widget.connectFlow?.recentDirectories == null
+                            ? null
+                            : () => unawaited(
+                                _openRecentDirectories(activeSession),
+                              ),
                         onEnterTmuxScrollMode: () {
                           setState(() => _tmuxScrollMode = true);
                           _focusNode.requestFocus();

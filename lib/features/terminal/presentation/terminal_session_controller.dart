@@ -8,6 +8,7 @@ import 'package:conduit/features/terminal/domain/network_connectivity.dart';
 import 'package:conduit/features/terminal/domain/osc52_clipboard.dart';
 import 'package:conduit/features/terminal/domain/predictive_echo.dart';
 import 'package:conduit/features/terminal/domain/predictive_terminal_session.dart';
+import 'package:conduit/features/terminal/domain/recent_directories.dart';
 import 'package:conduit/features/terminal/domain/roaming_terminal_session.dart';
 import 'package:conduit/features/terminal/domain/security_key_interaction.dart';
 import 'package:conduit/features/terminal/domain/ssh_terminal_repository.dart';
@@ -75,6 +76,8 @@ class TerminalSessionController extends ChangeNotifier {
   int? _lastIosEnterOutputMs;
   String _terminalTitle = '';
   final _remoteClipboardWrites = StreamController<String>.broadcast();
+  final _workingDirectoryReports = StreamController<String>.broadcast();
+  String? _workingDirectory;
 
   static const _iosDuplicateEnterWindow = Duration(milliseconds: 80);
   static const _gracefulMoshCloseTimeout = Duration(milliseconds: 1500);
@@ -93,6 +96,13 @@ class TerminalSessionController extends ChangeNotifier {
   /// [osc52MaxBytes]; read requests are never answered. Whether it reaches
   /// the phone clipboard is the listener's decision (a user setting).
   Stream<String> get remoteClipboardWrites => _remoteClipboardWrites.stream;
+  /// The shell's working directory as last reported with OSC 7 (bash with
+  /// vte.sh, zsh on most distros, fish), null until one arrives.
+  String? get workingDirectory => _workingDirectory;
+
+  /// Each change of [workingDirectory].
+  Stream<String> get workingDirectoryReports =>
+      _workingDirectoryReports.stream;
   bool get isConnected => _status == TerminalConnectionStatus.connected;
   bool get predictiveEchoEnabled => _predictiveEchoEnabled;
   TerminalEnterSequence get enterSequence => _enterSequence;
@@ -527,6 +537,12 @@ class TerminalSessionController extends ChangeNotifier {
         if (text != null) {
           _remoteClipboardWrites.add(text);
         }
+      case '7':
+        final directory = parseOsc7Directory(args);
+        if (directory != null && directory != _workingDirectory) {
+          _workingDirectory = directory;
+          _workingDirectoryReports.add(directory);
+        }
     }
   }
 
@@ -702,6 +718,7 @@ class TerminalSessionController extends ChangeNotifier {
     keyboard.dispose();
     _terminalPaintNotifier.dispose();
     unawaited(_remoteClipboardWrites.close());
+    unawaited(_workingDirectoryReports.close());
     super.dispose();
   }
 }

@@ -85,6 +85,16 @@ Dart implementation of the protocol, and the terminal is
   notifications on Android and one-tap focus of an agent's pane.
 - Saved global and per-machine snippets from the key row, with hidden snippets
   for passwords or secrets and optional per-machine run-on-connect snippets.
+- Recent directories per machine (last 20): collected from the shell's OSC 7
+  reports (bash with `vte.sh`, fish, most zsh setups), from tmux's
+  `#{pane_current_path}` when a tmux session detaches or disconnects, and from
+  the companion's agents (`conductore-hostd status` `cwd`). The connect
+  picker's Recent tab lists them as "Recent dirs" (opens a shell there), and
+  "cd to…" in the Tmux+ menu and the Herdr navigator types `cd`, opens a new
+  tmux window, or a new Herdr tab (`herdr tab create --cwd`) in one.
+- Tappable links: tap an http(s) link in the output to open or copy it; long
+  press for Open in browser, Open in in-app preview (localhost links), Copy
+  link or Copy text.
 - Remote clipboard (OSC 52): text a program on the host copies (vim, Neovim,
   Claude Code, tmux) lands on the phone clipboard with a "Copied from <host>"
   note. Capped at 1 MB; the host can never read the phone clipboard. Turn it

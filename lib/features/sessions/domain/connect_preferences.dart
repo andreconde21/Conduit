@@ -19,13 +19,16 @@ class ConnectPreferences {
   static const maxRecents = 8;
 
   /// Records a chosen target as the latest and pushes it to the top of the
-  /// recents. A plain shell is not worth remembering as a recent.
+  /// recents. A plain shell is not worth remembering as a recent, and
+  /// directories have their own "Recent dirs" list.
   ConnectPreferences withChoice(
     ConnectTarget target, {
     required bool remember,
   }) {
     final updated = [
-      if (target.kind != ConnectTargetKind.shell) target,
+      if (target.kind != ConnectTargetKind.shell &&
+          target.kind != ConnectTargetKind.directory)
+        target,
       for (final recent in recents)
         if (recent.key != target.key) recent,
     ];
