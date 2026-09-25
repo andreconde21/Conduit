@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
-import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/sessions/domain/connect_preferences.dart';
 import 'package:conduit/features/sessions/presentation/connect_picker_sheet.dart';
