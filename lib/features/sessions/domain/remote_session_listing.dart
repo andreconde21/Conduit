@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:conduit/features/agent_attention/data/herdr_attention_provider.dart';
+import 'package:conduit/features/agent_attention/data/remote_tool_command.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 
 /// One tmux session as reported by `tmux list-sessions`.
@@ -64,6 +65,33 @@ class HerdrTabInfo {
       Object.hash(id, workspaceId, label, number, agentStatus, focused);
 }
 
+/// One named Herdr session as reported by `herdr session list --json`.
+class HerdrSessionInfo {
+  const HerdrSessionInfo({
+    required this.name,
+    this.isDefault = false,
+    this.running = false,
+  });
+
+  final String name;
+  final bool isDefault;
+  final bool running;
+
+  /// The `--session` argument for this session: empty for the default one,
+  /// so its targets keep the plain `herdr` commands.
+  String get cliName => isDefault ? '' : name;
+
+  @override
+  bool operator ==(Object other) =>
+      other is HerdrSessionInfo &&
+      other.name == name &&
+      other.isDefault == isDefault &&
+      other.running == running;
+
+  @override
+  int get hashCode => Object.hash(name, isDefault, running);
+}
+
 /// One Herdr workspace as reported by `herdr workspace list`.
 class HerdrWorkspaceInfo {
   const HerdrWorkspaceInfo({
@@ -75,6 +103,8 @@ class HerdrWorkspaceInfo {
     this.tabCount = 1,
     this.activeTabId = '',
     this.tabs = const [],
+    this.session = '',
+    this.sessionLabel = '',
   });
 
   final String id;
@@ -89,7 +119,28 @@ class HerdrWorkspaceInfo {
   final String activeTabId;
   final List<HerdrTabInfo> tabs;
 
-  HerdrWorkspaceInfo withTabs(List<HerdrTabInfo> tabs) => HerdrWorkspaceInfo(
+  /// The `--session` name of the Herdr server this workspace lives in;
+  /// empty for the default session.
+  final String session;
+
+  /// The session's display name when the host runs several Herdr sessions
+  /// (so rows read "session ‧ workspace"); empty when there is only one.
+  final String sessionLabel;
+
+  /// "session ‧ workspace" when several sessions are listed, else the label.
+  String get displayLabel =>
+      sessionLabel.isEmpty ? label : '$sessionLabel ‧ $label';
+
+  HerdrWorkspaceInfo withTabs(List<HerdrTabInfo> tabs) => _copy(tabs: tabs);
+
+  HerdrWorkspaceInfo inSession(String session, {String sessionLabel = ''}) =>
+      _copy(session: session, sessionLabel: sessionLabel);
+
+  HerdrWorkspaceInfo _copy({
+    List<HerdrTabInfo>? tabs,
+    String? session,
+    String? sessionLabel,
+  }) => HerdrWorkspaceInfo(
     id: id,
     label: label,
     number: number,
@@ -97,7 +148,9 @@ class HerdrWorkspaceInfo {
     focused: focused,
     tabCount: tabCount,
     activeTabId: activeTabId,
-    tabs: tabs,
+    tabs: tabs ?? this.tabs,
+    session: session ?? this.session,
+    sessionLabel: sessionLabel ?? this.sessionLabel,
   );
 
   @override
@@ -109,7 +162,9 @@ class HerdrWorkspaceInfo {
       other.agentStatus == agentStatus &&
       other.focused == focused &&
       other.tabCount == tabCount &&
-      other.activeTabId == activeTabId;
+      other.activeTabId == activeTabId &&
+      other.session == session &&
+      other.sessionLabel == sessionLabel;
 
   @override
   int get hashCode => Object.hash(
@@ -120,6 +175,8 @@ class HerdrWorkspaceInfo {
     focused,
     tabCount,
     activeTabId,
+    session,
+    sessionLabel,
   );
 }
 
@@ -182,6 +239,51 @@ abstract final class RemoteSessionListing {
   static final herdrTabListCommand = HerdrAttentionProvider.remoteCommand(
     'tab list',
   );
+
+  /// `herdr session list --json`: the named persistent sessions (Herdr
+  /// 0.9.1 prints `{"sessions": [{"name", "default", "running", ...}]}`).
+  static final herdrSessionListCommand = HerdrAttentionProvider.remoteCommand(
+    'session list --json',
+  );
+
+  /// [herdrWorkspaceListCommand] for a named session (empty = default).
+  static String herdrWorkspaceListFor(String session) => session.isEmpty
+      ? herdrWorkspaceListCommand
+      : HerdrAttentionProvider.remoteCommand(
+          '--session ${shellQuoteArgument(session)} workspace list',
+        );
+
+  /// [herdrTabListCommand] for a named session (empty = default).
+  static String herdrTabListFor(String session) => session.isEmpty
+      ? herdrTabListCommand
+      : HerdrAttentionProvider.remoteCommand(
+          '--session ${shellQuoteArgument(session)} tab list',
+        );
+
+  /// Parses `herdr session list --json`. Returns null when the output is not
+  /// a session list (an older Herdr without the command, or an error), so
+  /// the caller falls back to the default session alone.
+  static List<HerdrSessionInfo>? parseHerdrSessions(String raw) {
+    Object? decoded;
+    try {
+      decoded = jsonDecode(raw.trim());
+    } catch (_) {
+      return null;
+    }
+    final items = decoded is Map ? decoded['sessions'] : null;
+    if (items is! List) {
+      return null;
+    }
+    return [
+      for (final item in items)
+        if (item is Map && item['name'] is String)
+          HerdrSessionInfo(
+            name: item['name'] as String,
+            isDefault: item['default'] == true,
+            running: item['running'] == true,
+          ),
+    ];
+  }
 
   static RemoteListing<TmuxSessionInfo> interpretTmux(
     AgentCommandResult result,
