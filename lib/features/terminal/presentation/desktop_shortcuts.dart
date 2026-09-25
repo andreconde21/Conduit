@@ -230,6 +230,11 @@ List<DesktopShortcutHelp> desktopShortcutHelp() => [
       DesktopAction.toggleFullscreen => _mac ? 'Ctrl+Cmd+F  or  F11' : 'F11',
       _ => desktopShortcutKeys(action),
     }),
+  // Bound by the multiplexer tab strip (Herdr / tmux sessions only).
+  const DesktopShortcutHelp(
+    'Previous / next Herdr tab or tmux window',
+    'Ctrl+PgUp / Ctrl+PgDn',
+  ),
   DesktopShortcutHelp('Zoom with the mouse', '$_mod + wheel, or pinch'),
   DesktopShortcutHelp('Quick switcher', quickSwitcherKeys),
   DesktopShortcutHelp('Copy', _mac ? 'Cmd+C' : 'Ctrl+Shift+C'),
