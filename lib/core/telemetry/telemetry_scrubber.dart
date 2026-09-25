@@ -54,10 +54,16 @@ class TelemetryScrubber {
     r'(?:%[\w.]+)?(?![\w:])',
   );
   static final _port = RegExp(
-    r'\b(port\s*[=:]\s*)\d{1,5}',
+    r'(\bport\s*[=:]\s*|(?<![\w-])(?:-p|--port)[\s=]*)\d{1,5}\b',
     caseSensitive: false,
   );
-  static final _placeholderPort = RegExp(r'(<(?:ip|host|redacted)>):\d{1,5}\b');
+  static final _placeholderPort = RegExp(
+    r'(<(?:ip|host|redacted|user@host)>):\d{1,5}\b',
+  );
+  // MD5 fingerprints, MAC addresses.
+  static final _colonHex = RegExp(
+    r'(?<![\w:])(?:[0-9A-Fa-f]{2}:){5,}[0-9A-Fa-f]{2}(?![\w:])',
+  );
   static final _hex = RegExp(r'\b[0-9A-Fa-f]{16,}\b');
   static final _token = RegExp(r'[A-Za-z0-9+/_\-]{20,}={0,2}');
   static final _dottedName = RegExp(
@@ -87,16 +93,17 @@ class TelemetryScrubber {
     var out = text
         .replaceAll(_pem, '<key>')
         .replaceAll(_sshKey, '<key>')
-        .replaceAll(_url, '<url>');
+        .replaceAll(_url, '<url>')
+        .replaceAll(_userAtHost, '<user@host>')
+        .replaceAll(_uncPath, '<path>')
+        .replaceAll(_windowsPath, '<path>')
+        .replaceAll(_unixPath, '<path>');
     for (final term in terms) {
       out = out.replaceAll(term, '<redacted>');
     }
     out = out
         .replaceAll(_quoted, '"<text>"')
-        .replaceAll(_userAtHost, '<user@host>')
-        .replaceAll(_uncPath, '<path>')
-        .replaceAll(_windowsPath, '<path>')
-        .replaceAll(_unixPath, '<path>')
+        .replaceAll(_colonHex, '<hex>')
         .replaceAll(_ipv4, '<ip>')
         .replaceAllMapped(
           _ipv6,

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:conduit/core/telemetry/telemetry_events.dart';
 import 'package:conduit/core/telemetry/telemetry_scrubber.dart';
+import 'package:flutter/foundation.dart';
 import 'package:sentry/sentry.dart';
 
 /// What a crash report says about the app itself (never about the user).
@@ -43,9 +44,12 @@ abstract class CrashReporter {
 /// pointed at GlitchTip, with [scrubSentryEvent] and [scrubBreadcrumb] as
 /// the last step before anything is sent.
 class SentryCrashReporter implements CrashReporter {
-  SentryCrashReporter(this.scrubber);
+  SentryCrashReporter(this.scrubber, {@visibleForTesting this.transport});
 
   final TelemetryScrubber scrubber;
+
+  /// Replaces the HTTP transport (tests read the envelopes instead).
+  final Transport? transport;
   bool _open = false;
 
   @override
@@ -67,6 +71,7 @@ class SentryCrashReporter implements CrashReporter {
         ..sendClientReports = false
         ..tracesSampleRate = null
         ..debug = false
+        ..transport = transport ?? options.transport
         ..beforeSend = ((event, hint) =>
             scrubSentryEvent(event, scrubber, tags: context.tags))
         ..beforeBreadcrumb = ((breadcrumb, hint) =>
@@ -232,7 +237,10 @@ SentryStackFrame _scrubFrame(SentryStackFrame frame, TelemetryScrubber s) {
   return SentryStackFrame(
     absPath: code ? frame.absPath : '<path>',
     fileName: code ? frame.fileName : '<path>',
-    function: frame.function == null ? null : s.scrub(frame.function!),
+    // Function names of the app's code are code; elsewhere, scrubbed.
+    function: code || frame.function == null
+        ? frame.function
+        : s.scrub(frame.function!),
     module: frame.module,
     lineNo: frame.lineNo,
     colNo: frame.colNo,
