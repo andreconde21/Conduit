@@ -268,7 +268,7 @@ test('CLI: conductore-hostd usage prints the report', async () => {
   })
   const ok = await run(['--days', '3'])
   assert.equal(ok.code, 0)
-  assert.equal(ok.json.version, '0.6.0')
+  assert.equal(ok.json.version, '0.7.0')
   assert.equal(ok.json.claude.today.output, 42)
   assert.ok(fs.existsSync(path.join(chome, 'usage-cache.json')))
   const bad = await run(['--days', 'x'])

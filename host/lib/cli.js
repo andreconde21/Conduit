@@ -20,6 +20,7 @@ const statuslineMod = lazy('./statusline')
 const spoolMod = lazy('./spool')
 const portsMod = lazy('./ports')
 const usageMod = lazy('./usage')
+const summarizeMod = lazy('./summarize')
 
 const USAGE = `usage: conductore-hostd <command>
 
@@ -42,6 +43,9 @@ const USAGE = `usage: conductore-hostd <command>
                                   Claude Code / Codex limits, context per
                                   session, tokens and estimated cost per
                                   day, project and model (incremental scan)
+  summarize [--max-words 45] [--timeout-ms 20000]
+                                  a spoken one- or two-sentence summary of
+                                  the reply on stdin (claude -p, no tools)
   statusline [--chain '<cmd>']    legacy Node statusLine command (install
                                   now registers bin/conductore-statusline)
   install | uninstall             register / remove the Claude Code hooks
@@ -309,6 +313,43 @@ async function usageCmd (args) {
   }
 }
 
+// Always exits 0 with one JSON line: {summary} or {error, message}.
+async function summarizeCmd (args) {
+  const sm = summarizeMod()
+  const { flags } = parseFlags(args)
+  const opts = {}
+  for (const [flag, key, min, max] of [['max-words', 'maxWords', 5, 200], ['timeout-ms', 'timeoutMs', 1000, 120000]]) {
+    const n = optNumber(flags, flag)
+    if (n === undefined) continue
+    if (Number.isNaN(n) || n < min || n > max) return out({ schema: sm.SCHEMA, error: 'failed', message: `--${flag} must be between ${min} and ${max}` })
+    opts[key] = n
+  }
+  const timeoutMs = opts.timeoutMs || sm.DEFAULT_TIMEOUT_MS
+  // Background work: never compete with the agents (claude inherits it).
+  try { os.setPriority(0, 10) } catch {}
+  let child = null
+  const onSignal = () => {
+    if (child) sm.killGroup(child, 'SIGKILL')
+    process.exit(1)
+  }
+  for (const sig of ['SIGHUP', 'SIGINT', 'SIGTERM']) process.once(sig, onSignal)
+  try {
+    paths.ensureDirs()
+    const { text } = await sm.readInput(process.stdin, timeoutMs)
+    return out(await sm.summarize({
+      ...opts,
+      input: text,
+      timeoutMs,
+      lockFile: path.join(paths.homeDir(), 'summarize.lock'),
+      onChild: c => { child = c }
+    }))
+  } catch (err) {
+    return out({ schema: sm.SCHEMA, error: 'failed', message: String(err.message).slice(0, 200) })
+  } finally {
+    for (const sig of ['SIGHUP', 'SIGINT', 'SIGTERM']) process.removeListener(sig, onSignal)
+  }
+}
+
 async function portsCmd (args) {
   const { flags } = parseFlags(args)
   const since = optNumber(flags, 'since')
@@ -535,6 +576,7 @@ async function main (argv) {
     case 'interrupt': return interrupt(args)
     case 'ports': return portsCmd(args)
     case 'usage': return usageCmd(args)
+    case 'summarize': return summarizeCmd(args)
     case 'statusline': return statuslineCmd(args)
     case 'install': return install()
     case 'uninstall': return uninstall()

@@ -1,5 +1,11 @@
 # Changelog — host companion
 
+## 0.7.0 (2026-09-25)
+
+- feat: `summarize [--max-words 45] [--timeout-ms 20000]`: a one- or two-sentence spoken version of the reply on stdin (64 KB max) for the phone's "Claude summary" read-aloud mode, as one JSON line (`summary`, `ms`, `model`, or `error`: claude-missing, not-logged-in, timeout, busy, failed; exit 0). Replies under 40 words come back as they are (`passthrough: true`) without calling Claude.
+- It runs `claude -p --tools "" --safe-mode --no-session-persistence --output-format json --model haiku` with a fixed system prompt and the reply on stdin between random delimiters: no tools, no hooks (never seen as an agent), no transcript. Thinking is off (`MAX_THINKING_TOKENS=0`): about 3 s per call instead of 5–55 s. Nice 10, its own process group killed on timeout, one call per user at a time, the text never logged or stored. A CLI one-shot: no daemon change, nothing at idle.
+- The phone's other commands are unchanged; older phones never call `summarize`.
+
 ## 0.6.0 (2026-09-25)
 
 - feat: `usage [--days 7] [--since <iso>]`: usage at a glance, computed on the host from local files. Claude's 5-hour and 7-day limits (newest statusline reports, remembered after the sessions end), context per live session, and tokens with an estimated cost per local day, project and model from the Claude Code transcripts (`~/.claude/projects/**/*.jsonl`, each message counted once); Codex CLI tokens and rate limits from `~/.codex/sessions` when present (`codex.present: false` otherwise). Costs come from one dated price table (`lib/pricing.js`) and are labelled an estimate (API-equivalent on subscription plans).
