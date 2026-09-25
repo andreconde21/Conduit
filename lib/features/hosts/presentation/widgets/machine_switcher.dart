@@ -31,16 +31,16 @@ enum MachineMenuChoice {
   };
 }
 
-/// Compact header card for the machine the home page is showing: tap the
-/// name to switch machines, the button to open a terminal, the menu for the
-/// machine's actions (edit, files, connect to…, delete) and adding another.
-class MachineSwitcher extends StatelessWidget {
-  const MachineSwitcher({
+/// Compact chip for the machine the home page is showing, in the top
+/// bar: tap the name to switch machines (or add one), the menu for the
+/// machine's actions (connect to…, files, edit, agent hooks, duplicate,
+/// copy address, delete, add machine).
+class MachineChip extends StatelessWidget {
+  const MachineChip({
     required this.host,
     required this.sessionCount,
     required this.hostCount,
     required this.onSwitch,
-    required this.onOpen,
     required this.onMenu,
     this.otherAttentionCount = 0,
     super.key,
@@ -59,9 +59,6 @@ class MachineSwitcher extends StatelessWidget {
   final int otherAttentionCount;
 
   final VoidCallback onSwitch;
-
-  /// Opens the terminal: resumes open sessions or connects.
-  final VoidCallback onOpen;
   final ValueChanged<MachineMenuChoice> onMenu;
 
   @override
@@ -69,139 +66,106 @@ class MachineSwitcher extends StatelessWidget {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final live = sessionCount > 0;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 0, 18, 14),
-      child: Material(
-        color: colorScheme.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: BorderSide(
-            color: live
-                ? colorScheme.primary.withValues(alpha: 0.5)
-                : colorScheme.outlineVariant,
-          ),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(4, 4, 2, 4),
-          child: Row(
-            children: [
-              Expanded(
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: onSwitch,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
-                    child: Row(
-                      children: [
-                        Badge(
-                          isLabelVisible: otherAttentionCount > 0,
-                          label: Text('$otherAttentionCount'),
-                          child: _MachineAvatar(live: live),
+    return Material(
+      color: colorScheme.surface.withValues(alpha: 0.6),
+      shape: StadiumBorder(side: BorderSide(color: colorScheme.outlineVariant)),
+      clipBehavior: Clip.antiAlias,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(
+            child: InkWell(
+              onTap: onSwitch,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 7, 4, 7),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Badge(
+                      isLabelVisible: otherAttentionCount > 0,
+                      label: Text('$otherAttentionCount'),
+                      child: Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          color: live
+                              ? const Color(0xFF22C55E)
+                              : colorScheme.onSurfaceVariant,
+                          shape: BoxShape.circle,
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Flexible(
-                                    child: Text(
-                                      host.name,
-                                      key: const ValueKey('machine-name'),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: theme.textTheme.titleMedium
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.w800,
-                                            height: 1.1,
-                                          ),
-                                    ),
-                                  ),
-                                  Icon(
-                                    hostCount > 1
-                                        ? Icons.unfold_more_rounded
-                                        : Icons.expand_more_rounded,
-                                    size: 18,
-                                    color: colorScheme.onSurfaceVariant,
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                live
-                                    ? '${host.endpoint} · '
-                                          '$sessionCount open'
-                                    : host.endpoint,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontFamily: 'monospace',
-                                  color: colorScheme.onSurfaceVariant,
-                                  fontSize: 11.5,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
-                  ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        host.name,
+                        key: const ValueKey('machine-name'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    Icon(
+                      hostCount > 1
+                          ? Icons.unfold_more_rounded
+                          : Icons.expand_more_rounded,
+                      size: 18,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(width: 4),
-              FilledButton.tonal(
-                style: FilledButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
-                ),
-                onPressed: onOpen,
-                child: Text(live ? 'Open' : 'Connect'),
-              ),
-              PopupMenuButton<MachineMenuChoice>(
-                tooltip: 'Machine actions',
-                icon: const Icon(Icons.more_vert_rounded),
-                onSelected: onMenu,
-                itemBuilder: (context) => const [
-                  PopupMenuItem(
-                    value: MachineMenuChoice.connectTo,
-                    child: _MenuRow(Icons.call_split_rounded, 'Connect to…'),
-                  ),
-                  PopupMenuItem(
-                    value: MachineMenuChoice.files,
-                    child: _MenuRow(Icons.folder_open_rounded, 'Files'),
-                  ),
-                  PopupMenuItem(
-                    value: MachineMenuChoice.edit,
-                    child: _MenuRow(Icons.edit_outlined, 'Edit'),
-                  ),
-                  PopupMenuItem(
-                    value: MachineMenuChoice.agentHooks,
-                    child: _MenuRow(Icons.webhook_rounded, 'Agent hooks'),
-                  ),
-                  PopupMenuItem(
-                    value: MachineMenuChoice.duplicate,
-                    child: _MenuRow(Icons.copy_all_rounded, 'Duplicate'),
-                  ),
-                  PopupMenuItem(
-                    value: MachineMenuChoice.copyAddress,
-                    child: _MenuRow(Icons.content_copy_rounded, 'Copy address'),
-                  ),
-                  PopupMenuItem(
-                    value: MachineMenuChoice.delete,
-                    child: _MenuRow(Icons.delete_outline_rounded, 'Delete'),
-                  ),
-                  PopupMenuDivider(),
-                  PopupMenuItem(
-                    value: MachineMenuChoice.add,
-                    child: _MenuRow(Icons.add_rounded, 'Add machine'),
-                  ),
-                ],
-              ),
-            ],
+            ),
           ),
-        ),
+          SizedBox(
+            width: 36,
+            height: 36,
+            child: PopupMenuButton<MachineMenuChoice>(
+              tooltip: 'Machine actions',
+              padding: EdgeInsets.zero,
+              iconSize: 20,
+              icon: const Icon(Icons.more_vert_rounded),
+              onSelected: onMenu,
+              itemBuilder: (context) => const [
+                PopupMenuItem(
+                  value: MachineMenuChoice.connectTo,
+                  child: _MenuRow(Icons.call_split_rounded, 'Connect to…'),
+                ),
+                PopupMenuItem(
+                  value: MachineMenuChoice.files,
+                  child: _MenuRow(Icons.folder_open_rounded, 'Files'),
+                ),
+                PopupMenuItem(
+                  value: MachineMenuChoice.edit,
+                  child: _MenuRow(Icons.edit_outlined, 'Edit'),
+                ),
+                PopupMenuItem(
+                  value: MachineMenuChoice.agentHooks,
+                  child: _MenuRow(Icons.webhook_rounded, 'Agent hooks'),
+                ),
+                PopupMenuItem(
+                  value: MachineMenuChoice.duplicate,
+                  child: _MenuRow(Icons.copy_all_rounded, 'Duplicate'),
+                ),
+                PopupMenuItem(
+                  value: MachineMenuChoice.copyAddress,
+                  child: _MenuRow(Icons.content_copy_rounded, 'Copy address'),
+                ),
+                PopupMenuItem(
+                  value: MachineMenuChoice.delete,
+                  child: _MenuRow(Icons.delete_outline_rounded, 'Delete'),
+                ),
+                PopupMenuDivider(),
+                PopupMenuItem(
+                  value: MachineMenuChoice.add,
+                  child: _MenuRow(Icons.add_rounded, 'Add machine'),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -217,47 +181,6 @@ class _MenuRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [Icon(icon, size: 18), const SizedBox(width: 10), Text(label)],
-    );
-  }
-}
-
-class _MachineAvatar extends StatelessWidget {
-  const _MachineAvatar({required this.live});
-
-  final bool live;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final color = live ? colorScheme.primary : colorScheme.onSurfaceVariant;
-    return Container(
-      width: 36,
-      height: 36,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Icon(Icons.dns_rounded, size: 19, color: color),
-          if (live)
-            Positioned(
-              right: -3,
-              bottom: -3,
-              child: Container(
-                width: 9,
-                height: 9,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF22C55E),
-                  shape: BoxShape.circle,
-                  border: Border.all(color: colorScheme.surface, width: 1.5),
-                ),
-              ),
-            ),
-        ],
-      ),
     );
   }
 }

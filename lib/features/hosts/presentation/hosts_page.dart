@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/presentation/theme_sheet.dart';
+import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
@@ -13,10 +14,9 @@ import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/home_board_controller.dart';
 import 'package:conduit/features/hosts/presentation/host_form_page.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
-import 'package:conduit/features/hosts/presentation/widgets/herdr_board.dart';
 import 'package:conduit/features/hosts/presentation/widgets/home_chrome.dart';
+import 'package:conduit/features/hosts/presentation/widgets/home_session_grid.dart';
 import 'package:conduit/features/hosts/presentation/widgets/host_card.dart';
-import 'package:conduit/features/hosts/presentation/widgets/host_sessions_strip.dart';
 import 'package:conduit/features/hosts/presentation/widgets/machine_switcher.dart';
 import 'package:conduit/features/hosts/presentation/widgets/message_state.dart';
 import 'package:conduit/features/local_shell/domain/local_shell_instance.dart';
@@ -26,6 +26,8 @@ import 'package:conduit/features/local_shell/presentation/local_shell_setup_page
 import 'package:conduit/features/local_shell/presentation/widgets/local_shell_section.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
+import 'package:conduit/features/sessions/presentation/session_grid_page.dart'
+    show summarizeAgentState;
 import 'package:conduit/features/sftp/domain/file_export.dart';
 import 'package:conduit/features/sftp/domain/sftp_bookmarks_repository.dart';
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
@@ -43,13 +45,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
 
-/// The home page: one machine at a time, showing what is happening on it.
-///
-/// A machine switcher at the top picks the machine (the last connected one
-/// by default) and carries its actions; below it a live board lists the
-/// machine's Herdr workspaces and agent panes, then the app's open sessions
-/// on that machine as preview tiles. The local shell and counters sit in a
-/// "More" area at the bottom.
+/// The home page, Moshi-style: a slim bar (lock, machine chip, settings),
+/// then a two-column grid of large live previews of every open session,
+/// followed by the selected machine's Herdr workspaces that are not open in
+/// the app yet (or one notice saying why they cannot be listed). The local
+/// shell and counters sit in a collapsed "More" area at the bottom.
 class HostsPage extends StatefulWidget {
   const HostsPage({
     required this.hostsController,
@@ -67,7 +67,7 @@ class HostsPage extends StatefulWidget {
     required this.fileExport,
     this.connectFlow,
     this.homeBoard,
-    this.previewRefreshInterval = const Duration(seconds: 3),
+    this.previewRefreshInterval = const Duration(seconds: 2),
     this.paneRefocusDelay = const Duration(seconds: 4),
     super.key,
   });
@@ -112,7 +112,12 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
   bool _appResumed = true;
   bool _routeVisible = true;
   bool? _moreExpanded;
+  bool _largeTiles = false;
   String? _selectedHostId;
+
+  /// `host:port` of every trusted host key: machines reached before list
+  /// their Herdr workspaces without asking.
+  Set<String> _trustedEndpoints = const {};
   HomeBoardController? _ownedBoard;
   Timer? _previewTimer;
   Timer? _refocusTimer;
@@ -139,6 +144,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
       _handlePromptChanged();
       _syncSelection();
       _syncVisibility();
+      unawaited(_loadTrustedEndpoints());
     });
     widget.promptCoordinator.addListener(_handlePromptChanged);
   }
@@ -181,8 +187,12 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     final visible = _appResumed && _routeVisible;
     _board?.setVisible(visible);
     if (visible) {
+      // Back from the terminal a first connection may have trusted a key.
+      unawaited(_loadTrustedEndpoints());
       _previewTimer ??= Timer.periodic(widget.previewRefreshInterval, (_) {
-        if (mounted && _selectedSessions().isNotEmpty) setState(() {});
+        if (mounted && widget.workspaceController.hasSessions) {
+          setState(() {});
+        }
       });
     } else {
       _previewTimer?.cancel();
@@ -223,18 +233,31 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     if (host == null && _selectedHostId != null) {
       _selectedHostId = null;
     }
-    _board?.selectHost(host);
+    _board?.selectHost(
+      host,
+      connectedBefore: host != null && _connectedBefore(host),
+    );
+  }
+
+  bool _connectedBefore(SavedHost host) =>
+      _trustedEndpoints.contains('${host.host.trim()}:${host.port}') ||
+      _sessionsFor(host).isNotEmpty;
+
+  Future<void> _loadTrustedEndpoints() async {
+    try {
+      final records = await widget.hostKeyVerifier.loadTrustedKeys();
+      if (!mounted) return;
+      _trustedEndpoints = {for (final record in records) record.key};
+      _syncSelection();
+    } catch (_) {
+      // Unreadable key store: never-connected machines just wait for a tap.
+    }
   }
 
   List<TerminalSessionController> _sessionsFor(SavedHost host) => [
     for (final session in widget.workspaceController.sessions)
       if (baseHostId(session.host.id) == host.id) session,
   ];
-
-  List<TerminalSessionController> _selectedSessions() {
-    final host = _selectedHost;
-    return host == null ? const [] : _sessionsFor(host);
-  }
 
   void _handlePromptChanged() {
     if (_showingHostKeyPrompt || !mounted) return;
@@ -270,6 +293,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final palette = widget.themeController.palette;
+    final board = _board;
     return Scaffold(
       body: ConduitBackdrop(
         palette: palette,
@@ -283,26 +307,28 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
                 widget.hostsController,
                 widget.workspaceController,
                 widget.themeController,
+                widget.agentAttention,
+                ?board,
               ]),
-              builder: (context, _) => CustomScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                slivers: [
-                  SliverToBoxAdapter(
-                    child: HomeTopBar(
-                      onAppearance: () => showThemeSheet(
-                        context: context,
-                        controller: widget.themeController,
-                        backupService: widget.backupService,
+              builder: (context, _) {
+                final host = _selectedHost;
+                return CustomScrollView(
+                  key: const ValueKey('home-scroll'),
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  slivers: [
+                    SliverToBoxAdapter(
+                      child: HomeTopBar(
+                        onLock: _lock,
+                        onSettings: () => _openSettings(host),
+                        machine: host == null ? null : _machineChip(host),
                       ),
-                      onTrustedKeys: _openTrustedKeys,
-                      onLock: _lock,
                     ),
-                  ),
-                  ..._buildMain(context),
-                  SliverToBoxAdapter(child: _buildMore(context)),
-                  const SliverToBoxAdapter(child: SizedBox(height: 32)),
-                ],
-              ),
+                    ..._buildMain(context, host),
+                    SliverToBoxAdapter(child: _buildMore(context)),
+                    const SliverToBoxAdapter(child: SizedBox(height: 24)),
+                  ],
+                );
+              },
             ),
           ),
         ),
@@ -310,7 +336,18 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     );
   }
 
-  List<Widget> _buildMain(BuildContext context) {
+  Widget _machineChip(SavedHost host) {
+    return MachineChip(
+      host: host,
+      sessionCount: _sessionsFor(host).length,
+      hostCount: widget.hostsController.hosts.length,
+      otherAttentionCount: _otherAttentionCount(host),
+      onSwitch: _switchMachine,
+      onMenu: (choice) => _handleMenu(choice, host),
+    );
+  }
+
+  List<Widget> _buildMain(BuildContext context, SavedHost? host) {
     final controller = widget.hostsController;
     if (controller.isLoading && controller.hosts.isEmpty) {
       return const [
@@ -335,7 +372,6 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
         ),
       ];
     }
-    final host = _selectedHost;
     if (host == null) {
       return [
         SliverPadding(
@@ -359,61 +395,235 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
       ];
     }
 
-    final sessions = _sessionsFor(host);
+    final palette = widget.themeController.palette;
     final brightness = Theme.of(context).brightness;
+    final fontFamily = widget.themeController.terminalFont.fontFamily;
+    final width = MediaQuery.sizeOf(context).width;
+    final metrics = HomeGridMetrics.of(width, large: _largeTiles);
+    final sessions = widget.workspaceController.sessions;
+    final active = widget.workspaceController.activeSession;
     final board = _board;
+    final boardState = board?.state;
+    final boardWorkspaces = boardState?.workspaces ?? const [];
+    final hostSessions = _sessionsFor(host);
+    final attached = _attachedWorkspaceIds(hostSessions);
+    final dormant = [
+      for (final workspace in boardWorkspaces)
+        if (!attached.contains(workspace.id)) workspace,
+    ];
+    final notice = boardState == null
+        ? null
+        : HomeBoardNotice.of(
+            boardState,
+            requestReason: board!.requestReason,
+            hasOpenHerdrSession: hostSessions.any(
+              (session) =>
+                  ConnectTarget.fromSessionHostId(session.host.id)?.kind ==
+                  ConnectTargetKind.herdr,
+            ),
+          );
+    const gutter = HomeGridMetrics.horizontalPadding;
+
     return [
       SliverToBoxAdapter(
-        child: ListenableBuilder(
-          listenable: widget.agentAttention,
-          builder: (context, _) => MachineSwitcher(
-            host: host,
-            sessionCount: sessions.length,
-            hostCount: widget.hostsController.hosts.length,
-            otherAttentionCount: _otherAttentionCount(host),
-            onSwitch: _switchMachine,
-            onOpen: () => _openMachine(host),
-            onMenu: (choice) => _handleMenu(choice, host),
+        child: _SectionHeader(
+          label: 'SESSIONS',
+          detail: sessions.isEmpty ? 'none open' : '${sessions.length} open',
+          trailing: IconButton(
+            tooltip: _largeTiles ? 'Two columns' : 'Large tiles',
+            icon: Icon(
+              _largeTiles
+                  ? Icons.grid_view_rounded
+                  : Icons.view_agenda_outlined,
+            ),
+            onPressed: () => setState(() => _largeTiles = !_largeTiles),
           ),
         ),
       ),
-      if (board != null)
-        SliverToBoxAdapter(
-          child: ListenableBuilder(
-            listenable: board,
-            builder: (context, _) => HerdrBoard(
-              state: board.state,
-              attachedWorkspaceIds: _attachedWorkspaceIds(sessions),
-              requestReason: board.requestReason,
-              onOpenPane: (workspace, pane) => _openPane(host, workspace, pane),
-              onOpenWorkspace: (workspace) => _openPane(host, workspace, null),
-              onRefresh: () => unawaited(board.refresh()),
-              onRequestLoad: board.requestLoad,
-              onStartHerdr: () =>
-                  _openTarget(host, const ConnectTarget.herdr(workspaceId: '')),
-              onOpenShell: () => _openTarget(host, const ConnectTarget.shell()),
+      SliverPadding(
+        padding: const EdgeInsets.fromLTRB(gutter, 4, gutter, 8),
+        sliver: SliverGrid(
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: metrics.columns,
+            mainAxisSpacing: 18,
+            crossAxisSpacing: HomeGridMetrics.spacing,
+            mainAxisExtent: metrics.sessionExtent,
+          ),
+          delegate: SliverChildBuilderDelegate((context, index) {
+            if (index == sessions.length) {
+              return HomeAddTile(
+                palette: palette,
+                brightness: brightness,
+                label: sessions.isEmpty ? 'Connect' : 'New session',
+                onTap: () => _connect(host, forcePicker: true),
+              );
+            }
+            final session = sessions[index];
+            final sameMachine = baseHostId(session.host.id) == host.id;
+            return HomeSessionTile(
+              key: ValueKey('home-session-${session.host.id}'),
+              session: session,
+              info: HomeSessionInfo.of(
+                session,
+                workspaces: sameMachine ? boardWorkspaces : const [],
+                agentState: summarizeAgentState(
+                  widget.agentAttention.statusFor(session.host.id),
+                  session.host.id,
+                ),
+              ),
+              palette: palette,
+              brightness: brightness,
+              fontFamily: fontFamily,
+              selected: session == active,
+              onTap: () {
+                widget.workspaceController.activate(session);
+                unawaited(_openTerminalWorkspace());
+              },
+              onLongPress: () => _showSessionActions(session),
+            );
+          }, childCount: sessions.length + 1),
+        ),
+      ),
+      if (notice != null)
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(gutter, 4, gutter, 8),
+          sliver: SliverToBoxAdapter(
+            child: HomeBoardNoticeTile(
+              notice: notice,
+              palette: palette,
+              brightness: brightness,
+              onAction: notice.action == null
+                  ? null
+                  : () => _handleNoticeAction(host, notice.action!),
             ),
           ),
         ),
-      SliverToBoxAdapter(
-        child: ListenableBuilder(
-          listenable: widget.agentAttention,
-          builder: (context, _) => HostSessionsStrip(
-            sessions: sessions,
-            activeSession: widget.workspaceController.activeSession,
-            palette: widget.themeController.palette,
-            brightness: brightness,
-            agentAttention: widget.agentAttention,
-            onOpen: (session) {
-              widget.workspaceController.activate(session);
-              unawaited(_openTerminalWorkspace());
-            },
-            onActions: _showSessionActions,
-            onNewSession: () => _connect(host, forcePicker: true),
+      if (dormant.isNotEmpty) ...[
+        SliverToBoxAdapter(
+          child: _SectionHeader(
+            label: 'HERDR',
+            detail: dormant.length == 1
+                ? '1 workspace not open'
+                : '${dormant.length} workspaces not open',
+          ),
+        ),
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(gutter, 4, gutter, 8),
+          sliver: SliverGrid(
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: metrics.columns,
+              mainAxisSpacing: HomeGridMetrics.spacing,
+              crossAxisSpacing: HomeGridMetrics.spacing,
+              mainAxisExtent: metrics.dormantExtent,
+            ),
+            delegate: SliverChildListDelegate([
+              for (final workspace in dormant)
+                DormantWorkspaceTile(
+                  key: ValueKey('dormant-${workspace.id}'),
+                  workspace: workspace,
+                  palette: palette,
+                  brightness: brightness,
+                  onTap: () => _openPane(host, workspace, null),
+                  onLongPress: workspace.panes.isEmpty
+                      ? null
+                      : () => _showWorkspacePanes(host, workspace),
+                ),
+            ]),
+          ),
+        ),
+      ],
+    ];
+  }
+
+  void _handleNoticeAction(SavedHost host, HomeBoardNoticeAction action) {
+    final board = _board;
+    switch (action) {
+      case HomeBoardNoticeAction.request:
+        board?.requestLoad();
+      case HomeBoardNoticeAction.retry:
+        if (board != null) unawaited(board.refresh());
+      case HomeBoardNoticeAction.startHerdr:
+        unawaited(
+          _openTarget(host, const ConnectTarget.herdr(workspaceId: '')),
+        );
+      case HomeBoardNoticeAction.openShell:
+        unawaited(_openTarget(host, const ConnectTarget.shell()));
+    }
+  }
+
+  /// Lists a dormant workspace's agent panes; tapping one opens the
+  /// workspace focused on that pane.
+  Future<void> _showWorkspacePanes(
+    SavedHost host,
+    HomeBoardWorkspace workspace,
+  ) async {
+    final pane = await showModalBottomSheet<HomeBoardPane>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (context) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * 0.7,
+          ),
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              ListTile(
+                leading: const Icon(herdrIcon, color: herdrGreen),
+                title: Text(
+                  workspace.label,
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+                subtitle: const Text('Open the workspace at an agent'),
+              ),
+              const Divider(height: 1),
+              for (final pane in workspace.panes)
+                ListTile(
+                  key: ValueKey('pane-${pane.agent.pane ?? pane.agent.id}'),
+                  title: Text(
+                    pane.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: Text(
+                    [
+                      if (pane.tabLabel.isNotEmpty) pane.tabLabel,
+                      pane.agent.kind,
+                    ].join(' › '),
+                  ),
+                  trailing: AgentStateChip(state: pane.agent.state),
+                  onTap: () => Navigator.of(context).pop(pane),
+                ),
+            ],
           ),
         ),
       ),
-    ];
+    );
+    if (pane == null || !mounted) return;
+    await _openPane(host, workspace, pane);
+  }
+
+  Future<void> _openSettings(SavedHost? host) async {
+    final choice = await showHomeSettingsSheet(
+      context,
+      machineName: host?.name,
+    );
+    if (!mounted || choice == null) return;
+    switch (choice) {
+      case HomeSettingsChoice.appearance:
+        await showThemeSheet(
+          context: context,
+          controller: widget.themeController,
+          backupService: widget.backupService,
+        );
+      case HomeSettingsChoice.trustedKeys:
+        await _openTrustedKeys();
+      case HomeSettingsChoice.agentHooks:
+        if (host != null) await showCompanionSetup(context, host);
+      case HomeSettingsChoice.lock:
+        await _lock();
+    }
   }
 
   static Set<String> _attachedWorkspaceIds(
@@ -554,20 +764,6 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     await _handleHostAction(action, host);
   }
 
-  /// Resumes the machine's open sessions, or connects when there are none.
-  Future<void> _openMachine(SavedHost host) async {
-    final sessions = _sessionsFor(host);
-    if (sessions.isEmpty) {
-      await _connect(host);
-      return;
-    }
-    final active = widget.workspaceController.activeSession;
-    if (active == null || !sessions.contains(active)) {
-      widget.workspaceController.activate(sessions.first);
-    }
-    await _openTerminalWorkspace();
-  }
-
   /// Opens (or activates) the Herdr session for [workspace] and focuses
   /// [pane] in it (or the whole workspace when [pane] is null).
   Future<void> _openPane(
@@ -673,6 +869,11 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
               onTap: () => Navigator.of(context).pop(_SessionAction.reconnect),
             ),
             ListTile(
+              leading: const Icon(Icons.drive_file_rename_outline_rounded),
+              title: const Text('Rename'),
+              onTap: () => Navigator.of(context).pop(_SessionAction.rename),
+            ),
+            ListTile(
               leading: const Icon(Icons.close_rounded),
               title: const Text('Close session'),
               onTap: () => Navigator.of(context).pop(_SessionAction.close),
@@ -685,11 +886,25 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
       case _SessionAction.reconnect:
         await session.disconnect();
         await session.connect();
+      case _SessionAction.rename:
+        await _renameSession(session);
       case _SessionAction.close:
         await widget.workspaceController.close(session);
       case null:
         break;
     }
+  }
+
+  Future<void> _renameSession(TerminalSessionController session) async {
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => _RenameDialog(
+        initial: session.customTitle ?? session.title,
+        fallback: session.host.name,
+      ),
+    );
+    if (name == null || !mounted) return;
+    setState(() => session.rename(name));
   }
 
   /// A deep link (notification, widget, agent sheet) opened a session.
@@ -950,7 +1165,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
   }
 }
 
-enum _SessionAction { reconnect, close }
+enum _SessionAction { reconnect, rename, close }
 
 class _MachineSectionHeader extends StatelessWidget {
   const _MachineSectionHeader();
@@ -975,6 +1190,102 @@ class _MachineSectionHeader extends StatelessWidget {
             color: colorScheme.onSurfaceVariant,
             height: 1.25,
           ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({required this.label, this.detail, this.trailing});
+
+  final String label;
+  final String? detail;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        HomeGridMetrics.horizontalPadding + 2,
+        trailing == null ? 14 : 6,
+        6,
+        trailing == null ? 4 : 0,
+      ),
+      child: Row(
+        children: [
+          Text(
+            label,
+            style: theme.textTheme.titleSmall?.copyWith(
+              color: muted,
+              fontWeight: FontWeight.w500,
+              letterSpacing: 1.2,
+            ),
+          ),
+          if (detail != null) ...[
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                detail!,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(color: muted),
+              ),
+            ),
+          ] else
+            const Spacer(),
+          ?trailing,
+        ],
+      ),
+    );
+  }
+}
+
+class _RenameDialog extends StatefulWidget {
+  const _RenameDialog({required this.initial, required this.fallback});
+
+  final String initial;
+  final String fallback;
+
+  @override
+  State<_RenameDialog> createState() => _RenameDialogState();
+}
+
+class _RenameDialogState extends State<_RenameDialog> {
+  late final TextEditingController _text = TextEditingController(
+    text: widget.initial,
+  );
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Rename session'),
+      content: TextField(
+        controller: _text,
+        autofocus: true,
+        decoration: InputDecoration(hintText: widget.fallback),
+        onSubmitted: (value) => Navigator.of(context).pop(value),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(''),
+          child: const Text('Reset'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(_text.text),
+          child: const Text('Rename'),
         ),
       ],
     );
