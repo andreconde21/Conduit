@@ -1,180 +1,211 @@
-# Conduit: Terminal, SSH, Mosh & SFTP
+# Conductore
 
-[![Latest release](https://img.shields.io/github/v/release/gwitko/Conduit)](https://github.com/gwitko/Conduit/releases/latest)
+Drive Claude Code, Herdr and tmux sessions on your own machines from your phone, over SSH or Mosh, with no relay server and no account.
+
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 ![Flutter](https://img.shields.io/badge/Flutter-3.44.1-02569B?logo=flutter)
-![Platforms](https://img.shields.io/badge/platforms-Android%20%7C%20iOS-2ea44f)
-[![App Store](https://img.shields.io/badge/App%20Store-Conduit-0D96F6?logo=appstore&logoColor=white)](https://apps.apple.com/app/id6780054869)
-[![Google Play](https://img.shields.io/badge/Google%20Play-Conduit-3DDC84?logo=googleplay&logoColor=white)](https://play.google.com/store/apps/details?id=com.gwitko.conduit&pcampaignid=web_share)
-[![F-Droid](https://img.shields.io/f-droid/v/com.gwitko.conduit?label=F-Droid&logo=fdroid)](https://f-droid.org/packages/com.gwitko.conduit/)
-[![Obtainium](https://img.shields.io/badge/Obtainium-GitHub%20releases-6f42c1)](https://apps.obtainium.imranr.dev/redirect.html?r=obtainium://add/https://github.com/gwitko/Conduit)
-[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20Conduit-ff5f5f?logo=kofi&logoColor=white)](https://ko-fi.com/gwitko)
-[![Stars](https://img.shields.io/github/stars/gwitko/Conduit)](https://github.com/gwitko/Conduit/stargazers)
+[![Latest release](https://img.shields.io/github/v/release/andreconde21/Conduit?include_prereleases&label=release)](../../releases)
 
-> [!CAUTION]
-> Android is on track to become a locked-down platform. [Help keep it open](https://keepandroidopen.org).
+Conductore is an Android app (iOS is not built yet). It is a fork of
+[Conduit](https://github.com/gwitko/Conduit) by gwitko.
 
-Conduit's own source code is Apache-2.0. Android builds that include the local
-shell also redistribute third-party binaries under their own licenses; see
-[Acknowledgements](#acknowledgements) and
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+## Why
 
-Conduit is for reaching real machines from your phone without signing into
-anything. Hosts, keys, and trusted fingerprints stay on the device - no account,
-no cloud sync, no subscription. Open a normal SSH shell, or a Mosh session that
-rides out Wi-Fi drops and cellular handoffs instead of dying with them. Sessions
-live in tabs, with on-screen modifier, arrow, and function keys for the things a
-phone keyboard doesn't have. Per-host tmux integration can attach or create a
-session on connect, choose the start directory, and expose tmux prefix, action,
-and scrollback controls from the key row.
-
-On Android arm64, Conduit can also run an optional local Arch Linux shell
-through `proot`. It downloads an Arch Linux ARM image on first use and opens it
-like any other terminal tab. The Full Android build can also mount shared phone
-storage inside the shell at `/mnt/android`.
-
-There's an SFTP browser for moving files around, host-key trust you manage
-yourself, an optional device-auth app lock, and a stack of built-in terminal
-themes (Catppuccin, Tokyo Night, Gruvbox, Nord, etc.). E-ink device support is
-coming! You can also export and import local backups of app settings, saved
-machines, and trusted host keys, either without secrets or encrypted with a
-backup password.
-
-Mosh runs on [dart_mosh](https://github.com/gwitko/dart_mosh), a clean-room
-Dart implementation of the protocol, and the terminal is
-[conduit_vt](https://github.com/gwitko/conduit_vt), a fork of xterm.dart.
+- **Your machines, your keys.** Hosts, keys and trusted fingerprints stay on
+  the phone. No account, no cloud sync, no subscription.
+- **No relay.** The phone connects straight to your machines over SSH or Mosh,
+  usually through Tailscale. Nothing sits in the middle and nothing on the host
+  listens on a new port.
+- **Agents first.** The app is built around watching and steering coding agents
+  (Claude Code) inside Herdr and tmux, not around a generic terminal.
 
 ## Features
 
-- SSH terminal sessions with saved machine profiles, tag and search filters,
-  sorting by last connected, name, or date added, and tabbed workspaces.
-- Mosh sessions for roaming across Wi-Fi drops and network changes.
-- Per-host tmux integration with auto attach/create, start directories, prefix
-  key selection, action shortcuts, and scrollback mode.
-- SFTP browser for navigating, downloading, uploading, renaming, and deleting files.
-- OpenSSH private key, password, hardware security key, and external
-  (server-driven) authentication.
-- Import private keys from a file or generate an `ed25519` key on device, with
-  optional passphrase encryption and one-tap public-key copy and export.
-- OpenSSH FIDO security-key auth for `ed25519-sk` and `ecdsa-sk` credentials,
-  tested with YubiKey and designed for CTAP-compatible keys.
-- Android hardware-key auth over USB or NFC; iOS hardware-key auth over NFC.
-  Register multiple hardware keys per host and Conduit tries each until one matches.
-- Optional per-host SSH agent forwarding for private-key and hardware-key auth,
-  so a remote host can use your key to reach further hosts; forwarded hardware
-  keys still require a touch for every onward signature.
-- Trusted host key management with explicit fingerprint review.
-- Import and export backups for app settings, saved machines, ordering, and
-  trusted host keys, with options to omit secrets or encrypt credentials with a
-  password.
-- Customizable on-screen key row with modifiers, arrows, function keys, key
-  repeat, latching modifiers, and your own text snippets and control-key combos.
-- Touch-mode indicator in the key row that shows whether taps select text, are
-  forwarded as mouse clicks, or scroll tmux history, with a quick toggle for
-  mouse tap forwarding.
-- Chat mode: the Chat key opens a line composer, expandable into a full
-  multiline editor for prompting Claude Code and other agents, with drafts per
-  session, voice dictation via the system keyboard, and safe bracketed-paste
-  delivery into TUIs, with insert-only or insert-and-send. The image button
-  attaches a photo from the gallery, the camera, or the clipboard, with an
-  optional crop: it is uploaded over SFTP to the host's share inbox and its
-  path is inserted into the prompt, which Claude Code reads as an image.
-- Optional Agent Attention dashboard: opt a machine in to poll
-  [Herdr](https://herdr.dev)'s JSON CLI while connected and see which coding
-  agents are working, need input, or finished, with edge-triggered local
-  notifications on Android and one-tap focus of an agent's pane.
-- Herdr navigation: in a Herdr session, swipe one finger for the next or
-  previous tab, two fingers left/right for the neighbouring pane, two fingers
-  up/down for the next or previous workspace, and pinch to zoom the focused
-  pane or restore it. For scrollback, rest two fingers for a moment and then
-  drag (or start Scrollback from the toolbar). Every mapping is a setting
-  under Appearance > Gestures. The Herdr navigator adds tab 1-9 buttons and
-  new tab, workspaces, jump, zoom, kill pane and detach. Notifications, the
-  home board and the agent sheet open an agent at its exact workspace, tab and
-  pane, and each app tab keeps its own Herdr workspace when you switch. Herdr
-  keys follow the machine's own `~/.config/herdr/config.toml` (read-only),
-  falling back to Herdr's defaults when it cannot be read.
-- Saved global and per-machine snippets from the key row, with hidden snippets
-  for passwords or secrets and optional per-machine run-on-connect snippets.
-- Recent directories per machine (last 20): collected from the shell's OSC 7
-  reports (bash with `vte.sh`, fish, most zsh setups), from tmux's
-  `#{pane_current_path}` when a tmux session detaches or disconnects, and from
-  the companion's agents (`conductore-hostd status` `cwd`). The connect
-  picker's Recent tab lists them as "Recent dirs" (opens a shell there), and
-  "cd to…" in the Tmux+ menu and the Herdr navigator types `cd`, opens a new
-  tmux window, or a new Herdr tab (`herdr tab create --cwd`) in one.
-- Tappable links: tap an http(s) link in the output to open or copy it; long
-  press for Open in browser, Open in in-app preview (localhost links), Copy
-  link or Copy text.
-- Remote clipboard (OSC 52): text a program on the host copies (vim, Neovim,
-  Claude Code, tmux) lands on the phone clipboard with a "Copied from <host>"
-  note. Capped at 1 MB; the host can never read the phone clipboard. Turn it
-  off under Appearance. Inside tmux, forward copies with
-  `set -g set-clipboard on` in `~/.tmux.conf` (tmux 3.3+ may also need
-  `set -g allow-passthrough on` for programs that wrap OSC 52 themselves).
-- Optional device-auth app lock for protecting saved machines and credentials.
-- Built-in terminal themes, font sizing, palette choices, and appearance controls.
-- On-device **local Arch Linux shell** (Android, arm64) with `pacman`, running
-  unprivileged via `proot` - no root, no server. Uses Termux-packaged tooling.
-- Full Android build: mount shared phone storage in the local shell at
-  `/mnt/android`; the Google Play build omits the restricted all-files
-  permission.
-- Local-first storage: no account, no cloud sync, no subscription.
+### Agents
 
-## Acknowledgements
+- **Chat View** for Claude Code sessions: read the conversation as chat and
+  reply from a composer, instead of reading the raw TUI.
+- **Inbox** of every agent across your machines, with permission requests you
+  answer with Allow, Deny or Always, and a Usage tab (context and plan limits).
+- **Notifications with actions**: approve or deny a permission prompt, or jump
+  to the agent's exact pane, straight from the notification.
+- **Home screen widget and Quick Settings tile** showing agents that need you.
+- Agent attention dashboard that polls Herdr and shows which agents are
+  working, waiting, or finished.
 
-The local shell uses Android builds of open-source tools maintained and packaged
-by the [Termux](https://termux.dev) project:
+Most of this needs the [host companion](#host-companion) on the machine.
 
-- **[proot](https://github.com/termux/proot)** - the userspace
-  `chroot`/`ptrace` engine used for the unprivileged Linux userland.
-- The **Arch Linux ARM** root filesystem, distributed via Termux's
-  **[proot-distro](https://github.com/termux/proot-distro)**. Arch Linux ARM
-  itself is maintained by the [Arch Linux ARM](https://archlinuxarm.org) project.
-- `busybox`, GNU `tar`, `xz`/`liblzma`, `libtalloc`, and the `libandroid-*`
-  shims.
+### Herdr and tmux
 
-If the local shell is useful to you, consider supporting
-[Termux](https://github.com/sponsors/termux),
-[GNU/FSF](https://www.fsf.org/about/ways-to-donate), or
-[Arch Linux ARM](https://archlinuxarm.org/about/donate).
+- **Live session grid** on the home screen with previews of each session,
+  Mosh/SSH badges, and tiles for your other Herdr workspaces.
+- **Navigator** with tab 1-9, pane switching, quick splits, new tab, jump,
+  zoom, kill pane and detach.
+- **Gestures**: swipe for tabs, two fingers for panes and workspaces, pinch to
+  zoom a pane or change the font size. Every mapping is configurable.
+- **Deep links** from notifications, the home grid and the inbox open an agent
+  at its workspace, tab and pane.
+- **The host's own keybindings**: Herdr keys are read from the machine's
+  `~/.config/herdr/config.toml`, falling back to Herdr's defaults.
+- **Configurable multiplexer prefix**, including Ctrl+Space.
+- Per-host tmux auto attach/create, start directory and scrollback mode.
 
-Conduit redistributes these components under their own licenses and provides a
-corresponding source offer for GPL/LGPL components. The component list, license
-texts, upstream source archives, exact package checksums, and pinned source
-recipe snapshot are in
-**[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)**. GPL/LGPL source-offer
-details live in
-**[third_party/source-offer](third_party/source-offer)**.
+### Terminal
 
-Conduit's own source code is licensed [Apache-2.0](LICENSE). Bundled
-third-party binaries and downloaded rootfs packages are not relicensed by
-Conduit. Mosh runs on
-[dart_mosh](https://github.com/gwitko/dart_mosh) and the terminal is
-[conduit_vt](https://github.com/gwitko/conduit_vt), a fork of xterm.dart.
+- **Compact pill toolbar** with modifiers, arrows, function keys, snippets and
+  your own key combos. Its layout is configurable.
+- **Chat mode composer**: a line or multiline prompt editor with per-session
+  drafts, voice dictation, and images from the gallery, camera or clipboard.
+  Images are uploaded over SFTP and their path is inserted into the prompt.
+- **Menu buttons** for common Claude Code prompts and commands.
+- **OSC 52 clipboard**: text copied by vim, Neovim, Claude Code or tmux on the
+  host lands on the phone clipboard. The host can never read the phone
+  clipboard.
+- **Tappable links and paths**, with an in-app preview for localhost links.
+- **Recent directories** per machine, from OSC 7, tmux and the companion, to
+  open a shell, tmux window or Herdr tab in one.
+- **SFTP browser** with bookmarks, a file viewer and editor, uploads and
+  downloads.
+- **Git diff view** of a repository's working tree.
+- **Live preview** of a dev server running on the host.
+- **Share to agent**: share text, links or images from any Android app into a
+  session.
+- Touch mode indicator: taps select text, click, or scroll history.
 
-## Contributors
+### Connectivity
 
-Conduit is improved by community contributions. See [CONTRIBUTORS.md](CONTRIBUTORS.md)
-for acknowledgements.
+- SSH with password, OpenSSH private keys (import, or generate `ed25519` on
+  the phone) and server-driven auth.
+- Mosh through [dart_mosh](https://github.com/gwitko/dart_mosh), a clean-room
+  Dart implementation that survives Wi-Fi drops and network changes.
+- Hardware security keys (`ed25519-sk`, `ecdsa-sk`) over USB or NFC, several
+  per host.
+- Optional per-host SSH agent forwarding.
+- Host key trust you review and manage yourself.
+- Works over Tailscale like any other network: point a host at its tailnet
+  name or IP.
+- Encrypted or secret-free backups of settings, machines and trusted keys, and
+  an optional device-auth app lock.
 
-## Screenshots
+### Look
 
-<p align="center">
-  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/01-terminal-nvim.png" width="200">
-  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/02-theme.png" width="200">
-  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/03-appearance.png" width="200">
-  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/04-sftp.png" width="200">
-</p>
-<p align="center">
-  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/05-machines.png" width="200">
-  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/06-terminal-btop.png" width="200">
-  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/07-terminal-claude-code.png" width="200">
-  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/08-terminal-codex.png" width="200">
-</p>
-<p align="center">
-  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/09-terminal-unimatrix.png" width="200">
-  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/10-new-machine.png" width="200">
-  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/11-hardware-key.png" width="200">
-  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/12-mosh-settings.png" width="200">
-</p>
+- Built-in terminal themes (Catppuccin, Tokyo Night, Gruvbox, Nord and more),
+  font sizing and palette choices.
+- **In progress:** Omarchy themes and fonts, theme sync from the PC, and
+  Everforest as the default theme.
+
+## Install
+
+Android only for now, arm64 devices.
+
+1. Download the `arm64-v8a` APK and its `SHA256SUMS` file from
+   [Releases](../../releases). Current builds are prereleases.
+2. Check the checksum:
+
+   ```sh
+   sha256sum -c SHA256SUMS-*.txt --ignore-missing
+   ```
+
+3. Open the APK on the phone and allow installing from that source.
+
+Every release is signed with the same key, so a new APK installs over the
+previous one and keeps your machines and settings.
+
+## Host companion
+
+The companion is a small Node.js daemon plus a Claude Code hook client that
+runs on the machine where your agents run. It turns Claude Code hook events
+into a live view of every agent (working, waiting for input, waiting for
+permission, ended) and lets the phone answer permission prompts. The phone
+talks to it only through SSH exec commands. It opens no ports and needs no
+relay.
+
+<!-- TODO: fill in the measured footprint (RSS, CPU, disk) once numbers are in. -->
+It is light: no npm dependencies, not a service, and it exits by itself after
+24 hours without a request.
+
+**Install from the app.** Open a machine's Agent hooks screen and tap install.
+The app uploads the companion over SFTP and runs its installer.
+
+**Install by hand.** Needs Node.js 18 or newer on Linux or macOS.
+
+```sh
+git clone https://github.com/andreconde21/Conduit && cd Conduit/host && ./install.sh
+conductore-hostd doctor
+```
+
+**Uninstall** from the same app screen, or:
+
+```sh
+host/install.sh --uninstall
+```
+
+What it changes on the host:
+
+- It adds hook handlers to `~/.claude/settings.json` and keeps a backup. Your
+  existing hooks stay untouched, and running it again changes nothing.
+- It wraps your Claude Code status line instead of replacing it: your command
+  still runs and its output is unchanged. Uninstalling puts it back.
+- It installs `conductore-hostd` and `conductore-hook` into `~/.local/bin` and
+  keeps its state in `~/.conductore`.
+
+Details, the command reference and the JSON contract are in
+[host/README.md](host/README.md).
+
+## Building from source
+
+Requirements: Flutter 3.44.1 and JDK 17.
+
+```sh
+flutter pub get
+flutter run
+flutter test --concurrency=2
+```
+
+Release APKs are built with the script below. It builds from a clean tree and
+refuses an APK whose compiled app code is stale. Pass the previous release APK
+to also check that the app code changed.
+
+```sh
+tools/build-release.sh [previous-release.apk]
+```
+
+Release builds do not include the local Arch Linux shell's native binaries.
+
+## Credits
+
+- Based on [Conduit](https://github.com/gwitko/Conduit) by
+  [gwitko](https://github.com/gwitko). The terminal is
+  [conduit_vt](https://github.com/gwitko/conduit_vt), a fork of xterm.dart, and
+  Mosh is [dart_mosh](https://github.com/gwitko/dart_mosh).
+- Includes contributions by [DrMulungu](https://github.com/DrMulungu) salvaged
+  from upstream pull requests
+  [#143](https://github.com/gwitko/Conduit/pull/143) to
+  [#148](https://github.com/gwitko/Conduit/pull/148) and
+  [#150](https://github.com/gwitko/Conduit/pull/150): the Herdr key, SFTP
+  bookmarks, the file viewer and editor, tappable paths, touch mode, the prompt
+  composer and the agent attention dashboard.
+- Inspired by [Moshi](https://getmoshi.app). No Moshi code was copied.
+- Other Conduit contributors are listed in [CONTRIBUTORS.md](CONTRIBUTORS.md).
+
+## License
+
+Conductore's own source code is licensed [Apache-2.0](LICENSE), as is
+Conduit's.
+
+Bundled third-party components keep their own licenses:
+
+- **PDFium** (`libpdfium.so`, bundled through the `pdfrx` package) is under
+  Apache-2.0 and BSD-3-Clause-style terms.
+- **Atkinson Mono Nerd Font** is under the SIL Open Font License 1.1, see
+  [assets/fonts/LICENSE-AtkynsonMono.txt](assets/fonts/LICENSE-AtkynsonMono.txt).
+- Dart package licenses are shown in the app's license screen.
+
+The source also contains Conduit's optional on-device Arch Linux shell. Its
+native binaries (proot, busybox, GNU tar and others, packaged by
+[Termux](https://termux.dev)) are not part of Conductore release builds. If you
+build them yourself with `tools/build-local-shell-binaries.sh`, they come under
+their own GPL, LGPL and permissive licenses. The component list, license texts
+and GPL/LGPL source offer are in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and
+[third_party/source-offer](third_party/source-offer).
