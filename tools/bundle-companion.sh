@@ -34,6 +34,7 @@ manifest() {
 if [ "${1:-}" = "--check" ]; then
   status=0
   for f in $(files); do
+    [ -x "$DEST/$f" ] && { echo "executable (App Store rejects it): assets/companion/$f" >&2; status=1; }
     cmp -s "$SRC/$f" "$DEST/$f" || { echo "stale: assets/companion/$f" >&2; status=1; }
   done
   manifest | cmp -s - "$DEST/manifest.json" || { echo "stale: assets/companion/manifest.json" >&2; status=1; }
@@ -46,6 +47,10 @@ mkdir -p "$DEST"
 for f in $(files); do
   mkdir -p "$DEST/$(dirname "$f")"
   cp "$SRC/$f" "$DEST/$f"
+  # Plain files only: App Store Connect rejects any executable file inside
+  # an iOS app as unsigned code. install.sh (run with sh) restores +x on
+  # the host.
+  chmod 644 "$DEST/$f"
 done
 manifest > "$DEST/manifest.json"
 echo "bundled $(files | wc -l | tr -d ' ') files into assets/companion (version $(sed -n 's/.*"version": "\(.*\)".*/\1/p' "$DEST/manifest.json"))"

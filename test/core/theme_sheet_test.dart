@@ -375,16 +375,23 @@ void main() {
     AppErrorLog.instance.recordError(StateError('boom'), null);
     addTearDown(AppErrorLog.instance.clear);
     await tester.pump();
-    // Let the entry settle into view before tapping: on slower machines the
-    // scroll from ensureVisible is still animating and the tap misses.
-    final entry = find.text('Recent errors (1)');
-    await tester.scrollUntilVisible(
-      entry,
-      80,
-      scrollable: find.byType(Scrollable).last,
-    );
+    await tester.ensureVisible(find.text('Recent errors (1)'));
     await tester.pumpAndSettle();
-    await tester.tap(entry);
+    // The sheet's list can reach past the screen's bottom edge: keep
+    // dragging until the button is on screen, not just in the list.
+    final screenBottom =
+        tester.view.physicalSize.height / tester.view.devicePixelRatio;
+    for (
+      var i = 0;
+      i < 10 &&
+          tester.getCenter(find.text('Recent errors (1)')).dy >
+              screenBottom - 24;
+      i += 1
+    ) {
+      await tester.drag(find.byType(ListView).first, const Offset(0, -200));
+      await tester.pumpAndSettle();
+    }
+    await tester.tap(find.text('Recent errors (1)'));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('recent-errors')), findsOneWidget);
     expect(find.text('Bad state: boom'), findsOneWidget);

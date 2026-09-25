@@ -12,6 +12,7 @@ import 'package:conduit/features/backup/presentation/backup_sheet.dart';
 import 'package:conduit/features/home_widget/data/platform_agent_status_widget_channel.dart';
 import 'package:conduit/features/home_widget/presentation/quick_settings_tile_controls.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/session_navigation/presentation/session_view_widgets.dart';
 import 'package:conduit/features/snippets/presentation/snippet_editor.dart';
 import 'package:conduit/features/terminal/presentation/gestures/terminal_gestures_settings.dart';
 import 'package:conduit/features/voice/presentation/speech_settings_controls.dart';
@@ -488,6 +489,7 @@ class _TerminalAppearanceControls extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 14),
+        const SessionViewSettingsTile(),
         Container(
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
           decoration: BoxDecoration(

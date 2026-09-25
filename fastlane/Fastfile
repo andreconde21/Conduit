@@ -147,8 +147,9 @@ platform :ios do
         export_method: "app-store",
         export_team_id: team_id,
         export_options: { signingStyle: "automatic", teamID: team_id },
+        # gym reuses xcargs for -exportArchive too; passing the auth flags
+        # again as export_xcargs makes xcodebuild reject them as duplicates.
         xcargs: "#{auth} #{identity} CODE_SIGN_STYLE=Automatic",
-        export_xcargs: auth,
         output_directory: output_dir,
         output_name: "Conductore.ipa"
       )

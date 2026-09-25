@@ -107,7 +107,8 @@ void main() {
     expect(find.byType(TerminalHeader), findsNothing);
   });
 
-  testWidgets('swiping down on the row opens the session grid', (tester) async {
+  testWidgets('swiping down on the row opens the switcher, which leads to '
+      'the session grid', (tester) async {
     await pumpTerminal(tester);
     final row = tester.getRect(find.byType(TerminalHeader));
 
@@ -121,6 +122,9 @@ void main() {
     await gesture.up();
     await tester.pumpAndSettle();
 
+    expect(find.byKey(const ValueKey('quick-switcher')), findsOneWidget);
+    await tester.tap(find.byTooltip('Session grid'));
+    await tester.pumpAndSettle();
     expect(find.byType(SessionGridPage), findsOneWidget);
   });
 
