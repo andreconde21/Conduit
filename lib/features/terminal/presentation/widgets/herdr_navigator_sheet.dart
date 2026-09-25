@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/app_theme.dart';
@@ -203,7 +204,7 @@ class _HerdrNavigatorSheetState extends State<HerdrNavigatorSheet> {
         const SizedBox(height: 12),
         Row(
           children: [
-            Icon(Icons.view_quilt_rounded, color: _palette.accent),
+            const MultiplexerIcon(MultiplexerKind.herdr, size: 24),
             const SizedBox(width: 10),
             Expanded(child: Text('Herdr', style: theme.textTheme.titleLarge)),
             if (_loading)

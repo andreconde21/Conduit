@@ -1,16 +1,12 @@
 import 'dart:async';
 
+import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/hosts/domain/multiplexer_prefix_key.dart';
 import 'package:conduit/features/terminal/domain/tmux_navigator.dart';
 import 'package:flutter/material.dart';
-
-/// Placeholder tmux mark for the pill and the navigator header, the same
-/// icon the home grid uses for tmux sessions. A shared multiplexer logo
-/// widget can replace it.
-const tmuxPlaceholderIcon = Icons.terminal_rounded;
 
 /// How the navigator shows a [TmuxQuickAction], and the tmux default key
 /// (after the prefix) typed when the CLI cannot do it.
@@ -215,7 +211,7 @@ class _TmuxNavigatorSheetState extends State<TmuxNavigatorSheet> {
           const SizedBox(height: 12),
           Row(
             children: [
-              Icon(tmuxPlaceholderIcon, color: _palette.accent),
+              const MultiplexerIcon(MultiplexerKind.tmux, size: 24),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
