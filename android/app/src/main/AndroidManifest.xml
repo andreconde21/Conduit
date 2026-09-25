@@ -108,5 +108,10 @@
         <intent>
             <action android:name="android.speech.RecognitionService"/>
         </intent>
+        <!-- Lets TextToSpeech bind the system engine (Chat View "Read
+             replies aloud") under Android 11+ package visibility rules. -->
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE"/>
+        </intent>
     </queries>
 </manifest>
