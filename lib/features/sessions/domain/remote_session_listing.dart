@@ -261,9 +261,13 @@ class RemoteListingNotRunning<T> extends RemoteListing<T> {
 }
 
 class RemoteListingFailed<T> extends RemoteListing<T> {
-  const RemoteListingFailed(this.message);
+  const RemoteListingFailed(this.message, {this.error});
 
   final String message;
+
+  /// What was thrown, when the command could not run at all (the machine
+  /// was not reached); null when it ran and failed.
+  final Object? error;
 }
 
 /// Commands and parsers for the connect picker's tmux and Herdr listings.

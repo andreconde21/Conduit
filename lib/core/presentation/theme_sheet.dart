@@ -177,9 +177,7 @@ class SettingsSegmentCard<T extends Object> extends StatelessWidget {
               children: [
                 Icon(icon, size: 20),
                 const SizedBox(width: 10),
-                Expanded(
-                  child: Text(title, style: theme.textTheme.titleSmall),
-                ),
+                Expanded(child: Text(title, style: theme.textTheme.titleSmall)),
               ],
             ),
             const SizedBox(height: 6),

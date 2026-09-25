@@ -11,6 +11,7 @@ import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/core/theme/theme_preferences_repository.dart';
 import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
 import 'package:conduit/features/agent_attention/data/herdr_attention_provider.dart';
+import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
@@ -18,9 +19,15 @@ import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart'
 import 'package:conduit/features/backup/data/app_backup_service.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_controller.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_page.dart';
+import 'package:conduit/features/chat_view/presentation/chat_view_presenter.dart';
 import 'package:conduit/features/companion_setup/data/companion_bundle.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_controller.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_page.dart';
+import 'package:conduit/features/desktop_shell/data/desktop_shell_store.dart';
+import 'package:conduit/features/desktop_shell/domain/shell_layout.dart';
+import 'package:conduit/features/desktop_shell/domain/sidebar_prefs.dart';
+import 'package:conduit/features/desktop_shell/presentation/desktop_home.dart';
+import 'package:conduit/features/desktop_shell/presentation/desktop_shell_controller.dart';
 import 'package:conduit/features/hosts/domain/home_preferences.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/home_board_controller.dart';
@@ -46,6 +53,9 @@ import 'package:conduit/features/terminal/presentation/terminal_page.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:conduit/features/this_computer/domain/this_computer_settings.dart';
+import 'package:conduit/features/usage/data/usage_preferences.dart';
+import 'package:conduit/features/usage/presentation/usage_controller.dart';
+import 'package:conduit/features/usage/presentation/usage_widgets.dart';
 import 'package:conduit/features/voice/presentation/dictation_controller.dart';
 import 'package:conduit/features/voice/presentation/voice_settings_scope.dart';
 import 'package:flutter/foundation.dart';
@@ -59,6 +69,7 @@ import '../features/hosts/home_board_fakes.dart';
 import '../features/sync/fake_sync_hub.dart';
 import '../features/sync/sync_test_support.dart';
 import '../features/terminal/herdr/fake_herdr_runner.dart';
+import '../features/usage/usage_fakes.dart';
 import '../features/voice/fake_speech_recognizer.dart';
 import '../features/voice/fake_tts.dart';
 import '../support/test_doubles.dart';
@@ -364,6 +375,55 @@ Future<SyncController> demoSyncDevice(
   return sync;
 }
 
+Widget _withUsage(UsageController? usage, Widget page) =>
+    usage == null ? page : UsageScope(controller: usage, child: page);
+
+/// Usage on the workstation: the 5-hour limit at 62 %, the week at 31 %,
+/// today's tokens and cost.
+UsageController demoUsage() {
+  final now = DateTime.now();
+  String day(int back) {
+    final d = now.subtract(Duration(days: back));
+    return '${d.year}-${'${d.month}'.padLeft(2, '0')}-'
+        '${'${d.day}'.padLeft(2, '0')}';
+  }
+
+  final runner = FakeUsageRunner(
+    () => FakeUsageRunner.ok(
+      usageReplyJson(
+        machine: 'workstation',
+        today: day(0),
+        from: day(6),
+        limits: [
+          {
+            'label': '5h',
+            'usedPct': 62,
+            'resetsAt': now
+                .add(const Duration(hours: 2, minutes: 14))
+                .millisecondsSinceEpoch,
+          },
+          {
+            'label': '7d',
+            'usedPct': 31,
+            'resetsAt': now.add(const Duration(days: 3)).millisecondsSinceEpoch,
+          },
+        ],
+        rows: [
+          usageRow(day(0), output: 1840000, costUsd: 6.4),
+          usageRow(day(1), project: 'todo-web', output: 920000, costUsd: 3.1),
+        ],
+      ),
+    ),
+  );
+  final controller = UsageController(
+    source: FakeUsageSource([workstation], {'workstation': runner}),
+    preferences: MemoryUsagePreferencesStore(),
+    observeLifecycle: false,
+  );
+  addTearDown(controller.dispose);
+  return controller;
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   WakelockPlusPlatformInterface.instance = _NoopWakelock();
@@ -390,6 +450,11 @@ void main() {
     bool desktop = false,
     bool thisComputer = false,
     bool withFlow = false,
+    DesktopShellController? shell,
+    bool? shellMode,
+    AgentAttentionController? attention,
+    void Function(TerminalWorkspaceController workspace)? onWorkspace,
+    UsageController? usage,
   }) async {
     if (desktop) {
       useDesktopView(tester);
@@ -415,12 +480,14 @@ void main() {
     );
     final workspace = TerminalWorkspaceController(DemoTerminalRepository());
     addTearDown(workspace.dispose);
-    final agentAttention = AgentAttentionController(
-      workspace: workspace,
-      runnerFactory: (_) =>
-          ScriptedAgentCommandRunner([StateError('no polling')]),
-      provider: const HerdrAttentionProvider(),
-    );
+    final agentAttention =
+        attention ??
+        AgentAttentionController(
+          workspace: workspace,
+          runnerFactory: (_) =>
+              ScriptedAgentCommandRunner([StateError('no polling')]),
+          provider: const HerdrAttentionProvider(),
+        );
     addTearDown(agentAttention.dispose);
     final runners = {
       'workstation': HerdrFakeRunner(
@@ -469,32 +536,38 @@ void main() {
       ).apply(workstation),
       claudeWorkingScreen(),
     );
+    onWorkspace?.call(workspace);
 
     final verifier = NoopVerifier();
     await tester.pumpWidget(
       shotApp(
-        home: HostsPage(
-          hostsController: hostsController,
-          lockController: AppLockController(AlwaysAuthenticates()),
-          terminalRepository: NoNetworkTerminalRepository(),
-          workspaceController: workspace,
-          localShellController: LocalShellController(),
-          themeController: theme,
-          hostKeyVerifier: verifier,
-          promptCoordinator: HostKeyPromptCoordinator(),
-          sftpRepository: NoNetworkSftpRepository(),
-          sftpBookmarksRepository: InMemorySftpBookmarks(),
-          agentAttention: agentAttention,
-          backupService: AppBackupService(
+        home: _withUsage(
+          usage,
+          HostsPage(
             hostsController: hostsController,
+            lockController: AppLockController(AlwaysAuthenticates()),
+            terminalRepository: NoNetworkTerminalRepository(),
+            workspaceController: workspace,
+            localShellController: LocalShellController(),
             themeController: theme,
             hostKeyVerifier: verifier,
+            promptCoordinator: HostKeyPromptCoordinator(),
+            sftpRepository: NoNetworkSftpRepository(),
+            sftpBookmarksRepository: InMemorySftpBookmarks(),
+            agentAttention: agentAttention,
+            backupService: AppBackupService(
+              hostsController: hostsController,
+              themeController: theme,
+              hostKeyVerifier: verifier,
+            ),
+            fileExport: RecordingFileExport(),
+            homeBoards: boards,
+            homePreferences: InMemoryHomePreferencesRepository(),
+            connectFlow: homeFlow,
+            previewRefreshInterval: const Duration(days: 1),
+            desktopShell: shell,
+            shellMode: shellMode,
           ),
-          fileExport: RecordingFileExport(),
-          homeBoards: boards,
-          homePreferences: InMemoryHomePreferencesRepository(),
-          connectFlow: homeFlow,
-          previewRefreshInterval: const Duration(days: 1),
         ),
         systemBars: !desktop,
       ),
@@ -1091,7 +1164,9 @@ void main() {
   testWidgets('16 desktop home', (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.linux;
     try {
-      await pumpHome(tester, desktop: true);
+      // The README's shots from before the desktop shell (22 to 24 show
+      // the shell); kept until the README moves to them.
+      await pumpHome(tester, desktop: true, shellMode: false);
       await saveShot(tester, '16-desktop-home', pixelRatio: 1);
       await tearDownPage(tester);
     } finally {
@@ -1111,7 +1186,7 @@ void main() {
 
   testWidgets('17 desktop settings', (tester) async {
     await asDesktop(() async {
-      await pumpHome(tester, desktop: true);
+      await pumpHome(tester, desktop: true, shellMode: false);
       await tester.tap(find.byTooltip('Settings'));
       await pumpFrames(tester, 8);
       await saveShot(tester, '17-desktop-settings', pixelRatio: 1);
@@ -1145,7 +1220,12 @@ void main() {
 
   testWidgets('20 desktop this computer', (tester) async {
     await asDesktop(() async {
-      await pumpHome(tester, desktop: true, thisComputer: true);
+      await pumpHome(
+        tester,
+        desktop: true,
+        thisComputer: true,
+        shellMode: false,
+      );
       await tester.tap(find.byKey(const ValueKey('machine-name')));
       await pumpFrames(tester, 8);
       await saveShot(tester, '20-desktop-this-computer', pixelRatio: 1);
@@ -1155,7 +1235,7 @@ void main() {
 
   testWidgets('21 desktop connect dialog', (tester) async {
     await asDesktop(() async {
-      await pumpHome(tester, desktop: true, withFlow: true);
+      await pumpHome(tester, desktop: true, withFlow: true, shellMode: false);
       final context = tester.element(find.byType(HostsPage));
       unawaited(homeFlow!.connect(context, workstation, forcePicker: true));
       await tester.runAsync(pumpEventQueue);
@@ -1169,6 +1249,162 @@ void main() {
       await tester.runAsync(pumpEventQueue);
       await pumpFrames(tester, 8);
       await saveShot(tester, '21-desktop-connect-dialog', pixelRatio: 1);
+      await tearDownPage(tester);
+    });
+  });
+
+  /// The desktop shell on Linux: sidebar, tabs, splits and dashboard.
+  Future<DesktopShellController> pumpShellHome(
+    WidgetTester tester, {
+    AgentAttentionController? attention,
+    void Function(TerminalWorkspaceController workspace)? onWorkspace,
+    UsageController? usage,
+  }) async {
+    final shell = DesktopShellController(store: InMemoryDesktopShellStore());
+    addTearDown(shell.dispose);
+    await pumpHome(
+      tester,
+      desktop: true,
+      thisComputer: true,
+      withFlow: true,
+      shell: shell,
+      attention: attention,
+      onWorkspace: onWorkspace,
+      usage: usage,
+    );
+    await tester.runAsync(pumpEventQueue);
+    await pumpFrames(tester, 6);
+    return shell;
+  }
+
+  testWidgets('22 desktop shell dashboard', (tester) async {
+    await asDesktop(() async {
+      final shell = await pumpShellHome(tester, usage: demoUsage());
+      shell.updatePrefs(
+        (prefs) => prefs.setExpanded('m/workstation/h/w1', true),
+      );
+      shell.showHome = true;
+      await pumpFrames(tester, 6);
+      await saveShot(tester, '22-desktop-shell-dashboard', pixelRatio: 1);
+      await tearDownPage(tester);
+    });
+  });
+
+  testWidgets('23 desktop shell split', (tester) async {
+    await asDesktop(() async {
+      final shell = await pumpShellHome(tester);
+      final views = {
+        'session:workstation#herdr:w1',
+        'session:workstation#herdr:w2',
+      };
+      shell.editLayout(
+        views,
+        (layout) => layout.split(
+          layout.focusedPane.id,
+          ShellEdge.right,
+          'session:workstation#herdr:w1',
+          fallbackView: 'session:workstation#herdr:w2',
+        ),
+      );
+      await pumpFrames(tester, 6);
+      await saveShot(tester, '23-desktop-shell-split', pixelRatio: 1);
+      await tearDownPage(tester);
+    });
+  });
+
+  testWidgets('24 desktop shell chat split', (tester) async {
+    await asDesktop(() async {
+      final shell = await pumpShellHome(tester);
+      // A group, a pin and a couple of unread rows in the sidebar.
+      shell.updatePrefs(
+        (prefs) => prefs
+            .addGroup(
+              const SidebarGroup(
+                id: 'clients',
+                name: 'Clients',
+                machineIds: ['build-box'],
+              ),
+            )
+            .togglePin('m/workstation/h/w3'),
+      );
+      shell
+        ..markUnread('m/workstation/h/w2')
+        ..markUnread('m/build-box/t/ci');
+      final thread = [
+        stamped(
+          userLine('u1', 'Add a due date to todos and cover it with tests'),
+          const Duration(minutes: 12),
+        ),
+        assistantLine('a1', [
+          text(
+            "I'll add an optional **`dueDate`** to the todo schema, then "
+            'validate it as an ISO date and sort overdue todos first.',
+          ),
+          toolUse('t1', 'Bash', {
+            'command': 'npm test -- due-date',
+            'description': 'Run the due date tests',
+          }),
+        ]),
+      ];
+      final controller = ChatViewController(
+        runner: ScriptedAgentCommandRunner([
+          ok(
+            livePage(
+              thread,
+              state: 'needs_permission',
+              started: const Duration(minutes: 12),
+              pending: [
+                {
+                  'id': 'req-1',
+                  'toolName': 'Bash',
+                  'summary': 'npm test -- due-date',
+                  'toolInput': {
+                    'command': 'npm test -- due-date',
+                    'description': 'Run the due date tests',
+                  },
+                },
+              ],
+            ),
+          ),
+        ]),
+        sessionId: 's-api',
+        fallbackName: 'todo-api',
+        decide: (_, _) async {},
+        pollInterval: const Duration(days: 1),
+      );
+      final home = tester.state<DesktopHomeState>(find.byType(DesktopHome));
+      final api = const ConnectTarget.herdr(
+        workspaceId: 'w1',
+        label: 'api',
+      ).apply(workstation);
+      home.embedding.host!.presentChat(
+        ChatViewRequest(
+          host: api,
+          agent: const AgentInfo(
+            id: 's-api',
+            name: 'todo-api',
+            state: AgentAttentionState.needsInput,
+            kind: 'claude',
+          ),
+          controller: controller,
+          onOpenTerminal: () {},
+          onDispose: () {},
+        ),
+      );
+      await pumpFrames(tester);
+      final views = home.embedding.host!.viewIds.toSet();
+      shell.editLayout(
+        views,
+        (layout) => layout
+            .showIn(layout.focusedPane.id, 'session:${api.id}')
+            .split(
+              layout.focusedPane.id,
+              ShellEdge.right,
+              'chat:${api.id}:s-api',
+            ),
+      );
+      await pumpFrames(tester, 8);
+      await saveShot(tester, '24-desktop-shell-chat-split', pixelRatio: 1);
       await tearDownPage(tester);
     });
   });

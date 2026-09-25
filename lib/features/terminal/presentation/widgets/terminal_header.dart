@@ -68,10 +68,29 @@ class TerminalHeader extends StatelessWidget {
     this.onSessionLongPress,
     this.multiplexerTabsFor,
     this.onOpenMultiplexerTabs,
+    this.tabs,
+    this.backIcon = Icons.chevron_left_rounded,
+    this.backTooltip = 'Machines',
+    this.leavesWhenEmpty = true,
+    this.extraActions = const [],
     super.key,
   });
 
+  /// Buttons before the overflow menu (the desktop shell's panel toggles).
+  final List<Widget> extraActions;
+
   static const height = 40.0;
+
+  /// Replaces the session and file tabs (the desktop shell's own strip).
+  final Widget? tabs;
+
+  /// The back button's icon and tooltip (the desktop shell: Home).
+  final IconData backIcon;
+  final String backTooltip;
+
+  /// Whether closing the last session from the menu leaves the page (a
+  /// pushed route); the desktop shell stays and shows its dashboard.
+  final bool leavesWhenEmpty;
 
   final TerminalWorkspaceController workspace;
   final TerminalSessionController? activeSession;
@@ -164,28 +183,34 @@ class TerminalHeader extends StatelessWidget {
         child: Row(
           children: [
             _RowButton(
-              tooltip: 'Machines',
+              key: const ValueKey('terminal-header-back'),
+              tooltip: backTooltip,
               color: foreground,
-              icon: const Icon(Icons.chevron_left_rounded, size: 26),
+              icon: Icon(
+                backIcon,
+                size: backIcon == Icons.chevron_left_rounded ? 26 : 20,
+              ),
               onPressed: onBack,
             ),
             Expanded(
-              child: SessionTabs(
-                workspace: workspace,
-                activeSession: session,
-                palette: palette,
-                brightness: brightness,
-                onChanged: onTabsChanged,
-                fileTabs: fileTabs,
-                activeFileTab: activeFileTab,
-                onFileTabSelected: onFileTabSelected,
-                onFileTabClosed: onFileTabClosed,
-                onSessionActivated: onSessionActivated,
-                onSessionLongPress: onSessionLongPress,
-                multiplexerTabsFor: multiplexerTabsFor,
-                onOpenMultiplexerTabs: onOpenMultiplexerTabs,
-                touchScrolls: !swipeSessions,
-              ),
+              child:
+                  tabs ??
+                  SessionTabs(
+                    workspace: workspace,
+                    activeSession: session,
+                    palette: palette,
+                    brightness: brightness,
+                    onChanged: onTabsChanged,
+                    fileTabs: fileTabs,
+                    activeFileTab: activeFileTab,
+                    onFileTabSelected: onFileTabSelected,
+                    onFileTabClosed: onFileTabClosed,
+                    onSessionActivated: onSessionActivated,
+                    onSessionLongPress: onSessionLongPress,
+                    multiplexerTabsFor: multiplexerTabsFor,
+                    onOpenMultiplexerTabs: onOpenMultiplexerTabs,
+                    touchScrolls: !swipeSessions,
+                  ),
             ),
             if (onOpenSessionGrid != null)
               _RowButton(
@@ -206,6 +231,7 @@ class TerminalHeader extends StatelessWidget {
                 ),
                 onPressed: onOpenAgentAttention!,
               ),
+            ...extraActions,
             _OverflowMenu(
               session: session,
               color: foreground,
@@ -221,7 +247,7 @@ class TerminalHeader extends StatelessWidget {
                   : () async {
                       await workspace.close(session);
                       onTabsChanged();
-                      if (!context.mounted) return;
+                      if (!context.mounted || !leavesWhenEmpty) return;
                       if (!workspace.hasSessions && fileTabs.isEmpty) {
                         Navigator.of(context).pop();
                       }

@@ -26,6 +26,7 @@ class TerminalKeyboardBar extends StatelessWidget {
     this.composeActive = false,
     this.onToggleCompose,
     this.onChatButton,
+    this.onDictate,
     required this.onEnterTmuxScrollMode,
     required this.onExitTmuxScrollMode,
     required this.tmuxPrefixKey,
@@ -54,6 +55,10 @@ class TerminalKeyboardBar extends StatelessWidget {
   /// session). A long-press then toggles the composer. Null: the tap
   /// toggles the composer.
   final VoidCallback? onChatButton;
+
+  /// Opens the chat line with dictation running (the pill's Dictate
+  /// button and the swipe-up palette). Null without voice input.
+  final VoidCallback? onDictate;
   final VoidCallback onEnterTmuxScrollMode;
   final VoidCallback onExitTmuxScrollMode;
 

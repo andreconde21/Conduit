@@ -1,3 +1,4 @@
+import 'package:conduit/core/connection_problem.dart';
 import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
@@ -180,6 +181,61 @@ void main() {
       expect(access.title, 'Could not check the companion');
       expect(access.problem, contains('connection reset'));
       expect(access.canSetUp, isFalse);
+    });
+  });
+
+  group('an unreachable machine', () {
+    testWidgets('says the machine was not reached, not the companion', (
+      tester,
+    ) async {
+      final (attention, _) = await start(tester, {
+        'conductore-hostd version': const ConnectionFailure(
+          'Could not reach Host h.',
+          'SocketException: No route to host (OS Error: No route to host, '
+              'errno = 113)',
+          kind: ConnectionProblemKind.unreachable,
+        ),
+      });
+
+      final access = await check(tester, attention);
+
+      expect(access.ready, isFalse);
+      expect(access.title, "Can't reach Host h");
+      expect(
+        access.problem,
+        "Your device couldn't connect to 192.168.1.1. Check your network.",
+      );
+      expect(access.detail, contains('No route to host'));
+      expect(access.canSetUp, isFalse);
+    });
+
+    testWidgets('the dialog keeps the technical reason behind Details', (
+      tester,
+    ) async {
+      const access = ChatViewAccess.blocked(
+        title: "Can't reach Host h",
+        problem: 'Check your network.',
+        detail: 'SocketException: errno = 113',
+        canSetUp: false,
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => TextButton(
+              onPressed: () =>
+                  showChatViewUnavailable(context, host: host, access: access),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      expect(find.text("Can't reach Host h"), findsOneWidget);
+      expect(find.textContaining('errno = 113'), findsNothing);
+      await tester.tap(find.text('Details'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('errno = 113'), findsOneWidget);
     });
   });
 

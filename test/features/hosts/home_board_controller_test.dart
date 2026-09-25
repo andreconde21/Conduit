@@ -1,4 +1,5 @@
 import 'package:conduit/core/app_failure.dart';
+import 'package:conduit/core/connection_problem.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/home_board_controller.dart';
@@ -108,6 +109,37 @@ void main() {
       ..workspaceStderr = 'sh: herdr: not found';
     await board.refresh();
     expect(board.state.phase, HomeBoardPhase.notInstalled);
+  });
+
+  test('an unreachable machine is told apart from a failed listing', () async {
+    board
+      ..setVisible(true)
+      ..selectHost(connected('a').copyWith(host: 'dev.tail574592.ts.net'));
+    await pumpEventQueue();
+
+    runner.error = const ConnectionFailure(
+      'Could not reach Host a.',
+      "SocketException: Failed host lookup: 'dev.tail574592.ts.net'",
+      kind: ConnectionProblemKind.unreachable,
+    );
+    await board.refresh();
+    final problem = board.state.problem!;
+    expect(board.state.phase, HomeBoardPhase.failed);
+    expect(problem.kind, ConnectionProblemKind.unreachable);
+    expect(problem.title, "Can't reach Host a");
+    expect(problem.message, contains('Tailscale'));
+    expect(problem.detail, contains('Failed host lookup'));
+
+    // A command failing on a reached machine keeps the listing wording.
+    runner.error = const AppFailure('The command timed out.');
+    await board.refresh();
+    expect(board.state.phase, HomeBoardPhase.failed);
+    expect(board.state.problem, isNull);
+
+    runner.error = null;
+    await board.refresh();
+    expect(board.state.phase, HomeBoardPhase.ready);
+    expect(board.state.problem, isNull);
   });
 
   test('a failed poll keeps the last board and reconnects next time', () async {
@@ -322,6 +354,17 @@ void main() {
           TmuxWindowInfo(index: 0, name: 'zsh', active: true),
           TmuxWindowInfo(index: 3, name: 'vim'),
         ],
+      );
+      // tmux's window_activity, for the desktop sidebar's unread markers.
+      expect(
+        HomeTmuxCommands.parseWindows(
+          '2\tlogs\t1\t0\t1790229600\n',
+        ).single.activity,
+        DateTime.fromMillisecondsSinceEpoch(1790229600000, isUtc: true),
+      );
+      expect(
+        HomeTmuxCommands.listWindows('main'),
+        contains('#{window_activity}'),
       );
     });
   });

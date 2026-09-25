@@ -1,3 +1,4 @@
+import 'package:conduit/core/connection_problem.dart';
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/app_theme.dart';
@@ -1143,6 +1144,7 @@ class HomeBoardNotice {
     required this.icon,
     required this.title,
     required this.message,
+    this.detail,
     this.actionLabel,
     this.action,
     this.busy = false,
@@ -1151,6 +1153,9 @@ class HomeBoardNotice {
   final IconData icon;
   final String title;
   final String message;
+
+  /// The technical reason, shown behind "Details".
+  final String? detail;
   final String? actionLabel;
   final HomeBoardNoticeAction? action;
 
@@ -1228,6 +1233,27 @@ class HomeBoardNotice {
           action: HomeBoardNoticeAction.startHerdr,
         );
       case HomeBoardPhase.failed:
+        final problem = state.problem;
+        if (problem != null) {
+          // The machine was not reached (or refused the sign-in): say so
+          // instead of blaming the listing.
+          final stale =
+              state.workspaces.isNotEmpty || state.tmuxSessions.isNotEmpty;
+          return HomeBoardNotice(
+            icon: stale
+                ? Icons.history_rounded
+                : problem.kind == ConnectionProblemKind.unreachable
+                ? Icons.cloud_off_rounded
+                : Icons.lock_outline_rounded,
+            title: problem.title,
+            message: stale
+                ? 'Showing the last list. ${problem.message}'
+                : problem.message,
+            detail: problem.detail,
+            actionLabel: 'Retry',
+            action: HomeBoardNoticeAction.retry,
+          );
+        }
         final reason = state.message ?? 'The machine did not answer.';
         final herdrOnly = state.hasTmux;
         if (herdrOnly && state.tmuxSessions.isNotEmpty) {
@@ -1275,7 +1301,7 @@ class HomeBoardNotice {
 }
 
 /// Full-width compact card for a [HomeBoardNotice].
-class HomeBoardNoticeTile extends StatelessWidget {
+class HomeBoardNoticeTile extends StatefulWidget {
   const HomeBoardNoticeTile({
     required this.notice,
     required this.palette,
@@ -1290,10 +1316,22 @@ class HomeBoardNoticeTile extends StatelessWidget {
   final VoidCallback? onAction;
 
   @override
+  State<HomeBoardNoticeTile> createState() => _HomeBoardNoticeTileState();
+}
+
+class _HomeBoardNoticeTileState extends State<HomeBoardNoticeTile> {
+  bool _showDetail = false;
+
+  @override
   Widget build(BuildContext context) {
+    final notice = widget.notice;
+    final palette = widget.palette;
+    final brightness = widget.brightness;
+    final onAction = widget.onAction;
     final foreground = palette.foregroundFor(brightness);
     final muted = palette.mutedForegroundFor(brightness);
     final label = notice.actionLabel;
+    final detail = notice.detail;
     return Container(
       key: const ValueKey('home-board-notice'),
       padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
@@ -1336,10 +1374,39 @@ class HomeBoardNoticeTile extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   notice.message,
-                  maxLines: 3,
+                  maxLines: 4,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(color: muted, fontSize: 12, height: 1.25),
                 ),
+                if (detail != null) ...[
+                  const SizedBox(height: 2),
+                  InkWell(
+                    key: const ValueKey('home-board-notice-details'),
+                    onTap: () => setState(() => _showDetail = !_showDetail),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: Text(
+                        _showDetail ? 'Hide details' : 'Details',
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.primary,
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (_showDetail)
+                    SelectableText(
+                      detail,
+                      key: const ValueKey('home-board-notice-detail-text'),
+                      style: TextStyle(
+                        color: muted,
+                        fontSize: 11,
+                        height: 1.25,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                ],
               ],
             ),
           ),

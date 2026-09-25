@@ -308,6 +308,18 @@ class SettingsSectionBody extends StatelessWidget {
     ),
     _gap,
     if (PlatformFeatures.dictation || PlatformFeatures.textToSpeech) ...[
+      const SettingsHeading('Where to find voice'),
+      const SettingsNote(
+        'Dictate: tap the mic next to any chat field (the terminal chat '
+        'line from the pill\'s Chat button, the prompt composer, Chat '
+        'View). Add a Dictate button to the pill (long-press the pill), '
+        'or swipe up on the pill and pick Dictate.\n'
+        'Talk: the speaking-head button in Chat View\'s composer runs a '
+        'hands-free conversation with Claude.\n'
+        'A crossed-out mic means this phone has no speech recognizer yet; '
+        'tap it to see how to get one.',
+      ),
+      _gap,
       const SettingsHeading('Dictation and read aloud'),
       SpeechSettingsControls(controller: theme),
     ] else

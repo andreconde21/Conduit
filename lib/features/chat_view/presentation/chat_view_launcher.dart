@@ -1,13 +1,17 @@
 import 'dart:async';
 
 import 'package:conduit/core/app_failure.dart';
+import 'package:conduit/core/connection_problem.dart';
 import 'package:conduit/core/presentation/adaptive_modal.dart';
+import 'package:conduit/core/presentation/connection_details.dart';
+import 'package:conduit/core/presentation/terminal_route.dart';
 import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/chat_view/data/conductore_chat_client.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_controller.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_page.dart';
+import 'package:conduit/features/chat_view/presentation/chat_view_presenter.dart';
 import 'package:conduit/features/companion_setup/data/companion_probe.dart';
 import 'package:conduit/features/companion_setup/domain/companion_status.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_controller.dart';
@@ -221,12 +225,14 @@ class ChatViewAccess {
   const ChatViewAccess.ready({required this.agents, required this.monitored})
     : title = null,
       problem = null,
+      detail = null,
       canSetUp = false,
       companionMissing = false;
 
   const ChatViewAccess.blocked({
     required String this.title,
     required String this.problem,
+    this.detail,
     this.canSetUp = true,
     this.companionMissing = false,
   }) : agents = const [],
@@ -242,6 +248,19 @@ class ChatViewAccess {
   /// Dialog title and text naming exactly what failed, when blocked.
   final String? title;
   final String? problem;
+
+  /// The technical reason behind [problem], shown behind "Details".
+  final String? detail;
+
+  /// The machine could not be reached or refused the sign-in: [problem]
+  /// already says what to check.
+  factory ChatViewAccess.connection(ConnectionProblem problem) =>
+      ChatViewAccess.blocked(
+        title: problem.title,
+        problem: problem.message,
+        detail: problem.detail,
+        canSetUp: false,
+      );
 
   /// Whether the Agent hooks screen can fix it.
   final bool canSetUp;
@@ -301,6 +320,13 @@ Future<ChatViewAccess> checkChatViewAccess({
       monitored: false,
     );
   } catch (error) {
+    final unreached = connectionProblemFor(
+      error,
+      machine: host.name,
+      address: host.host,
+      retryLabel: null,
+    );
+    if (unreached != null) return ChatViewAccess.connection(unreached);
     final detail = error is AppFailure ? error.userMessage : '$error';
     return ChatViewAccess.blocked(
       title: 'Could not list Claude sessions',
@@ -321,6 +347,16 @@ String _version(CompanionStatus status) {
 
 ChatViewAccess _blockedBy(CompanionStatus status, SavedHost host) {
   final name = host.name;
+  final failure = status.connectionFailure;
+  final unreached = failure == null
+      ? null
+      : connectionProblemFor(
+          failure,
+          machine: name,
+          address: host.host,
+          retryLabel: null,
+        );
+  if (unreached != null) return ChatViewAccess.connection(unreached);
   return switch (status.state) {
     CompanionState.notInstalled => ChatViewAccess.blocked(
       companionMissing: true,
@@ -354,7 +390,8 @@ ChatViewAccess _blockedBy(CompanionStatus status, SavedHost host) {
   };
 }
 
-/// Opens the chat view for [agent] on [host] as a full-screen route.
+/// Opens the chat view for [agent] on [host] as a full-screen route, or
+/// through the nearest [ChatViewPresenter] (the desktop shell's tabs).
 /// [onOpenTerminal] runs after the route is popped by its Terminal button
 /// (the caller shows that session's TUI).
 Future<void> openChatView({
@@ -402,8 +439,38 @@ Future<void> openChatView({
     decide: decide,
     agentChanges: changes,
   );
+  // The desktop shell shows the chat as a tab in its panes.
+  final presenter = ChatViewPresenter.maybeOf(context);
+  if (presenter != null) {
+    final companion = CompanionSetupScope.maybeOf(context);
+    final presented = presenter.present(
+      ChatViewRequest(
+        host: host,
+        agent: agent,
+        controller: controller,
+        onOpenTerminal: onOpenTerminal,
+        onDispose: changes.dispose,
+        dictation: dictation,
+        initialDraft: initialDraft,
+        imageAttacher: imageAttacher,
+        pasteImages: pasteImages,
+        onSetUpCompanion: companion == null || !context.mounted
+            ? null
+            : () => showCompanionSetup(context, host),
+        onEnableMonitoring: attention.monitoringEnabled(host)
+            ? null
+            : () => attention.enableMonitoring(host),
+      ),
+    );
+    if (presented) return;
+  }
   var toTerminal = false;
-  await Navigator.of(context).push(
+  final navigator = Navigator.of(context);
+  // Opened over a terminal page (its Chat button, a session that opens in
+  // Chat View): back leaves that page too, straight home. The Terminal
+  // button is how to switch modes.
+  final over = topRouteOf(navigator);
+  await navigator.push(
     MaterialPageRoute<void>(
       builder: (routeContext) => ChatViewPage(
         controller: controller,
@@ -429,6 +496,13 @@ Future<void> openChatView({
   changes.dispose();
   if (toTerminal) {
     onOpenTerminal();
+  } else if (over != null &&
+      isTerminalRoute(over) &&
+      over.isCurrent &&
+      navigator.mounted) {
+    // Like back on the terminal page: sessions stay open in the workspace,
+    // and a PopScope there still gets its say.
+    await navigator.maybePop();
   }
 }
 
@@ -441,6 +515,7 @@ Future<void> showChatViewUnavailable(
   ChatViewAccess? access,
 }) {
   final title = access?.title ?? 'Chat view needs the companion';
+  final detail = access?.detail;
   final message =
       access?.problem ??
       'Chat view reads the session through the Conductore companion on '
@@ -452,7 +527,17 @@ Future<void> showChatViewUnavailable(
     context: context,
     builder: (dialogContext) => AlertDialog(
       title: Text(title),
-      content: SelectableText(message),
+      content: detail == null
+          ? SelectableText(message)
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SelectableText(message),
+                const SizedBox(height: 4),
+                ConnectionDetails(detail: detail),
+              ],
+            ),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(dialogContext).pop(),

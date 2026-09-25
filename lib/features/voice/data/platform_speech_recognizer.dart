@@ -35,6 +35,9 @@ class PlatformSpeechRecognizer implements SpeechRecognizer {
   });
 
   @override
+  Future<bool> openSettings() => _bool('openSettings');
+
+  @override
   Future<void> stop() => _call('stop');
 
   @override

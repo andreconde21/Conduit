@@ -3,6 +3,7 @@
 import 'dart:async';
 
 import 'package:conduit/core/app_failure.dart';
+import 'package:conduit/core/connection_problem.dart';
 import 'package:conduit/features/agent_attention/data/herdr_attention_provider.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention_provider.dart';
@@ -112,6 +113,7 @@ class TmuxWindowInfo {
     required this.name,
     this.panes = 1,
     this.active = false,
+    this.activity,
   });
 
   final int index;
@@ -119,16 +121,20 @@ class TmuxWindowInfo {
   final int panes;
   final bool active;
 
+  /// tmux's `window_activity`: when the window last had output.
+  final DateTime? activity;
+
   @override
   bool operator ==(Object other) =>
       other is TmuxWindowInfo &&
       other.index == index &&
       other.name == name &&
       other.panes == panes &&
-      other.active == active;
+      other.active == active &&
+      other.activity == activity;
 
   @override
-  int get hashCode => Object.hash(index, name, panes, active);
+  int get hashCode => Object.hash(index, name, panes, active, activity);
 }
 
 /// tmux commands the home page runs besides the session listing.
@@ -140,11 +146,12 @@ abstract final class HomeTmuxCommands {
         window.isEmpty ? '=$session' : '=$session:$window',
       );
 
-  /// One tab-separated line per window: index, name, pane count, active.
+  /// One tab-separated line per window: index, name, pane count, active,
+  /// last activity (epoch seconds).
   static String listWindows(String session) =>
       'tmux list-windows -t ${_target(session)} -F '
       '"\$(printf \'#{window_index}\\t#{window_name}\\t#{window_panes}'
-      '\\t#{window_active}\')"';
+      '\\t#{window_active}\\t#{window_activity}\')"';
 
   /// Makes [index] the session's current window, so the next attach
   /// shows it.
@@ -165,6 +172,15 @@ abstract final class HomeTmuxCommands {
           name: fields[1].trim(),
           panes: fields.length > 2 ? int.tryParse(fields[2].trim()) ?? 1 : 1,
           active: fields.length > 3 && fields[3].trim() == '1',
+          activity: switch (fields.length > 4
+              ? int.tryParse(fields[4].trim())
+              : null) {
+            final seconds? => DateTime.fromMillisecondsSinceEpoch(
+              seconds * 1000,
+              isUtc: true,
+            ),
+            null => null,
+          },
         ),
       );
     }
@@ -181,6 +197,7 @@ class HomeBoardState {
     this.tmux = HomeTmuxStatus.unknown,
     this.tmuxSessions = const [],
     this.message,
+    this.problem,
     this.updatedAt,
     this.refreshing = false,
   });
@@ -199,6 +216,11 @@ class HomeBoardState {
   /// Error or availability text for [HomeBoardPhase.failed],
   /// [HomeBoardPhase.notInstalled] and [HomeBoardPhase.notRunning].
   final String? message;
+
+  /// For [HomeBoardPhase.failed]: what went wrong connecting (the machine
+  /// is unreachable, sign-in failed), or null when the machine answered
+  /// and a command failed ([message] says how).
+  final ConnectionProblem? problem;
   final DateTime? updatedAt;
 
   /// A fetch is running while older data is on screen.
@@ -223,6 +245,7 @@ class HomeBoardState {
     HomeTmuxStatus? tmux,
     List<TmuxSessionInfo>? tmuxSessions,
     String? message,
+    ConnectionProblem? problem,
     bool clearMessage = false,
     DateTime? updatedAt,
     bool? refreshing,
@@ -233,6 +256,7 @@ class HomeBoardState {
       tmux: tmux ?? this.tmux,
       tmuxSessions: tmuxSessions ?? this.tmuxSessions,
       message: clearMessage ? null : message ?? this.message,
+      problem: clearMessage ? null : problem ?? this.problem,
       updatedAt: updatedAt ?? this.updatedAt,
       refreshing: refreshing ?? this.refreshing,
     );
@@ -573,6 +597,11 @@ class HomeBoardController extends ChangeNotifier {
         tmux: _state.tmux,
         tmuxSessions: _state.tmuxSessions,
         message: error is AppFailure ? error.toString() : '$error',
+        problem: connectionProblemFor(
+          error,
+          machine: host.name,
+          address: host.host,
+        ),
         updatedAt: _state.updatedAt,
       );
       // A broken channel reconnects on the next poll.
@@ -687,7 +716,8 @@ class HomeBoardController extends ChangeNotifier {
     }
   }
 
-  /// Groups [agents] under their [workspaces], resolving tab labels.
+  /// Groups [agents] under their [workspaces], resolving tab labels, and
+  /// gives each workspace its [tabs].
   /// Agents whose workspace is not listed are dropped; workspace order is
   /// Herdr's; panes are ordered by tab number, then pane id.
   static List<HomeBoardWorkspace> buildBoard(
@@ -699,7 +729,15 @@ class HomeBoardController extends ChangeNotifier {
     return [
       for (final workspace in workspaces)
         HomeBoardWorkspace(
-          workspace: workspace,
+          // The workspace's tabs in Herdr's order, for the desktop sidebar.
+          workspace: workspace.tabs.isNotEmpty
+              ? workspace
+              : workspace.withTabs(
+                  [
+                    for (final tab in tabs)
+                      if (tab.workspaceId == workspace.id) tab,
+                  ]..sort((a, b) => (a.number ?? 0).compareTo(b.number ?? 0)),
+                ),
           panes:
               [
                 for (final agent in agents)

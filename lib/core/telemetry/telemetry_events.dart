@@ -3,6 +3,8 @@
 /// from user data.
 library;
 
+import 'package:conduit/core/connection_problem.dart';
+
 /// Top-level screens, sent as `app://conductore/<name>` page views.
 enum TelemetryScreen { home, terminal, chat, settings, files }
 
@@ -76,34 +78,10 @@ class TelemetryEvent {
 
 /// The coarse class of a failed connection, from the error and its
 /// causes. Only the class is sent, never the text it was read from.
-TelemetryFailure classifyConnectFailure(Object error) {
-  final text = error.toString().toLowerCase();
-  if (text.contains('host key') || text.contains('hostkey')) {
-    return TelemetryFailure.hostkey;
-  }
-  const auth = [
-    'auth',
-    'credential',
-    'password',
-    'permission denied',
-    'passphrase',
-    'private key',
-    'hardware key',
-    'security key',
-  ];
-  if (auth.any(text.contains)) return TelemetryFailure.auth;
-  const unreachable = [
-    'socketexception',
-    'timed out',
-    'timeout',
-    'connection refused',
-    'host lookup',
-    'unreachable',
-    'no route',
-    'network',
-    'connection reset',
-    'could not connect',
-  ];
-  if (unreachable.any(text.contains)) return TelemetryFailure.unreachable;
-  return TelemetryFailure.other;
-}
+TelemetryFailure classifyConnectFailure(Object error) =>
+    switch (classifyConnectionError(error)) {
+      ConnectionProblemKind.unreachable => TelemetryFailure.unreachable,
+      ConnectionProblemKind.authentication => TelemetryFailure.auth,
+      ConnectionProblemKind.hostKey => TelemetryFailure.hostkey,
+      ConnectionProblemKind.commandFailed => TelemetryFailure.other,
+    };

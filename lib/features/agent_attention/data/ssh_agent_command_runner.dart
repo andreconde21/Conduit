@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:conduit/core/app_failure.dart';
+import 'package:conduit/core/connection_problem.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/terminal/data/ssh_client_factory.dart';
@@ -45,9 +46,12 @@ class SshAgentCommandRunner implements StdinAgentCommandRunner {
       throw const AppFailure('The command timed out.');
     } catch (error) {
       await _dropClient();
-      throw AppFailure(
+      // Authentication and the handshake happen on the first command, so
+      // this is where a dropped or rejected connection shows up.
+      throw ConnectionFailure(
         'Running a command on ${_host.name} failed.',
         describeSshConnectionError(error),
+        kind: classifyConnectionError(error),
       );
     }
   }
@@ -62,9 +66,10 @@ class SshAgentCommandRunner implements StdinAgentCommandRunner {
       ).connect(_host));
     } catch (error) {
       _client = null;
-      throw AppFailure(
+      throw ConnectionFailure(
         'Could not reach ${_host.name}.',
         describeSshConnectionError(error),
+        kind: classifyConnectionError(error),
       );
     }
   }
@@ -82,9 +87,10 @@ class SshAgentCommandRunner implements StdinAgentCommandRunner {
       session = await client.execute(command);
     } catch (error) {
       await _dropClient();
-      throw AppFailure(
+      throw ConnectionFailure(
         'Running a command on ${_host.name} failed.',
         describeSshConnectionError(error),
+        kind: classifyConnectionError(error),
       );
     }
     final stdout = BytesBuilder(copy: false);
@@ -131,8 +137,10 @@ class SshAgentCommandRunner implements StdinAgentCommandRunner {
     }
   }
 
-  /// Stops [session]'s process: a signal where the server supports it,
-  /// and closing the channel (which ends its input and output) anyway.
+  /// Lets go of [session]: a TERM signal (OpenSSH ignores it without a
+  /// PTY) and closing the channel. The remote process may run on until
+  /// its own time limit; callers must ignore its reply, not rely on it
+  /// dying.
   static void _abort(SSHSession session) {
     try {
       session.kill(SSHSignal.TERM);

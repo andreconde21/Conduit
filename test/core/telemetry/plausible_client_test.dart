@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:conduit/core/connection_problem.dart';
 import 'package:conduit/core/telemetry/plausible_client.dart';
 import 'package:conduit/core/telemetry/telemetry_events.dart';
 import 'package:fake_async/fake_async.dart';
@@ -179,26 +180,27 @@ void main() {
   });
 
   test('connection failures map to coarse classes', () {
+    // The same classifier as the on-screen "Can't reach" messages.
     expect(
-      classifyConnectFailure(
-        Exception('Could not connect to x:22. (SocketException: timed out)'),
-      ),
+      classifyConnectFailure(const SocketException('Connection timed out')),
       TelemetryFailure.unreachable,
     );
     expect(
       classifyConnectFailure(
-        Exception(
-          'Could not connect to x:22. (SSH server rejected the '
-          'configured credentials.)',
+        const ConnectionFailure(
+          'Could not connect.',
+          'rejected',
+          kind: ConnectionProblemKind.authentication,
         ),
       ),
       TelemetryFailure.auth,
     );
     expect(
       classifyConnectFailure(
-        Exception(
-          'SSHHostkeyError: Hostkey verification '
-          'failed',
+        const ConnectionFailure(
+          'Could not connect.',
+          'hostkey',
+          kind: ConnectionProblemKind.hostKey,
         ),
       ),
       TelemetryFailure.hostkey,

@@ -94,6 +94,7 @@ class CompanionProbeResults {
     this.node,
     this.claude,
     this.connectionError,
+    this.connectionFailure,
   });
 
   final AgentCommandResult? version;
@@ -104,6 +105,10 @@ class CompanionProbeResults {
 
   /// Set when the host could not be reached at all.
   final String? connectionError;
+
+  /// What was thrown then, for classifying it (see
+  /// `classifyConnectionError`).
+  final Object? connectionFailure;
 }
 
 /// Everything the Agent hooks screen knows about one machine.
@@ -113,6 +118,7 @@ class CompanionStatus {
     required this.checkedAt,
     this.message,
     this.errorDetail,
+    this.connectionFailure,
     this.installedVersion,
     this.installedProtocol,
     this.nodeVersion,
@@ -134,6 +140,10 @@ class CompanionStatus {
 
   /// stderr or error text for [CompanionState.error] (and failed installs).
   final String? errorDetail;
+
+  /// What was thrown when the machine could not be reached; null when it
+  /// answered.
+  final Object? connectionFailure;
 
   final String? installedVersion;
   final int? installedProtocol;
@@ -258,6 +268,7 @@ CompanionStatus classifyCompanionStatus(
     CompanionState state,
     String message, {
     String? errorDetail,
+    Object? connectionFailure,
     String? installedVersion,
     int? installedProtocol,
     List<CompanionDoctorCheck> checks = const [],
@@ -272,6 +283,7 @@ CompanionStatus classifyCompanionStatus(
     checkedAt: now,
     message: message,
     errorDetail: errorDetail,
+    connectionFailure: connectionFailure,
     installedVersion: installedVersion,
     installedProtocol: installedProtocol,
     nodeVersion: nodeVersion,
@@ -290,6 +302,7 @@ CompanionStatus classifyCompanionStatus(
       CompanionState.error,
       'Could not reach the machine.',
       errorDetail: probe.connectionError,
+      connectionFailure: probe.connectionFailure,
     );
   }
   final version = probe.version;

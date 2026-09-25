@@ -26,6 +26,9 @@ class LivePreviewTab extends TerminalFileTab {
   Listenable? get listenable => controller;
 
   @override
+  String get viewKind => 'preview';
+
+  @override
   bool matches(TerminalFileTab other) =>
       other is LivePreviewTab && other.host.id == host.id;
 

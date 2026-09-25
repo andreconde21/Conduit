@@ -29,12 +29,25 @@ class TerminalFileTab {
   /// Notifies when [title] may have changed; null for a static title.
   Listenable? get listenable => null;
 
+  /// What kind of view this is, for [viewId]: `file`, `diff`, `preview`,
+  /// `chat`.
+  String get viewKind => 'file';
+
+  /// Stable identity of the view across rebuilds and app runs (the desktop
+  /// shell's panes remember views by it).
+  String get viewId => '$viewKind:${host.id}:$path';
+
   /// Whether [other] shows the same thing, so opening it again re-activates
   /// this tab instead of adding a duplicate.
   bool matches(TerminalFileTab other) =>
       other.runtimeType == runtimeType &&
       other.host.id == host.id &&
       other.path == path;
+
+  /// Builds the tab's content for views the terminal page does not know
+  /// (Chat View in the desktop shell); null for files, diffs and previews,
+  /// which the page builds itself.
+  WidgetBuilder? get viewBuilder => null;
 
   /// Releases resources when the tab is closed or the workspace goes away.
   void dispose() {}
