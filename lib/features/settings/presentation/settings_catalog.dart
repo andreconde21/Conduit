@@ -237,14 +237,14 @@ const List<SettingsEntry> settingsCatalog = [
   ),
   SettingsEntry(
     SettingsSection.chatVoice,
-    'Where to find voice',
-    keywords: ['mic', 'microphone', 'dictate', 'talk', 'speech', 'voice'],
-    availableWhen: _speech,
+    'Tool activity',
+    keywords: ['tools', 'tool calls', 'commands', 'collapse', 'hide'],
   ),
   SettingsEntry(
     SettingsSection.chatVoice,
-    'Tool activity',
-    keywords: ['tools', 'tool calls', 'commands', 'collapse', 'hide'],
+    'Where to find voice',
+    keywords: ['mic', 'microphone', 'dictate', 'talk', 'speech', 'voice'],
+    availableWhen: _speech,
   ),
   SettingsEntry(
     SettingsSection.chatVoice,

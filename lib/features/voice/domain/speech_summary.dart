@@ -69,7 +69,6 @@ class SpeechSummaryFailed extends SpeechSummaryResult {
   static const claudeMissing = 'claude-missing';
   static const notLoggedIn = 'not-logged-in';
   static const timeout = 'timeout';
-  static const tooShort = 'too-short';
   static const busy = 'busy';
   static const failed = 'failed';
 
@@ -82,10 +81,9 @@ class SpeechSummaryFailed extends SpeechSummaryResult {
   final String reason;
   final String? message;
 
-  /// Why a brief version is read instead, for a one-time note; null when
-  /// there is nothing worth saying (the answer was too short to need one).
+  /// Why a brief version is read instead, for a one-time note. (Short
+  /// answers come back as a passthrough summary, never as a failure.)
   String? get note => switch (reason) {
-    tooShort => null,
     outdated =>
       'Claude summaries need the Conductore companion 0.7.0 or later on '
           'this machine. Reading a brief version instead.',

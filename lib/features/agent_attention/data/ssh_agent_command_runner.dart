@@ -87,9 +87,10 @@ class SshAgentCommandRunner implements StdinAgentCommandRunner {
       session = await client.execute(command);
     } catch (error) {
       await _dropClient();
-      throw AppFailure(
+      throw ConnectionFailure(
         'Running a command on ${_host.name} failed.',
         describeSshConnectionError(error),
+        kind: classifyConnectionError(error),
       );
     }
     final stdout = BytesBuilder(copy: false);
@@ -136,8 +137,10 @@ class SshAgentCommandRunner implements StdinAgentCommandRunner {
     }
   }
 
-  /// Stops [session]'s process: a signal where the server supports it,
-  /// and closing the channel (which ends its input and output) anyway.
+  /// Lets go of [session]: a TERM signal (OpenSSH ignores it without a
+  /// PTY) and closing the channel. The remote process may run on until
+  /// its own time limit; callers must ignore its reply, not rely on it
+  /// dying.
   static void _abort(SSHSession session) {
     try {
       session.kill(SSHSignal.TERM);

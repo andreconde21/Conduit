@@ -27,8 +27,9 @@ abstract class AgentCommandRunner {
 abstract interface class StdinAgentCommandRunner implements AgentCommandRunner {
   /// Runs [command] with [stdin] as its input (then end of file), so long
   /// or private text never lands in the command line. Completing [cancel]
-  /// stops the command (the remote process is killed where the host
-  /// allows it) and throws [AgentCommandCancelled].
+  /// stops waiting and throws [AgentCommandCancelled]. A local process is
+  /// killed; over SSH the channel is closed, but the remote process may
+  /// run on until its own time limit, so bound it there.
   Future<AgentCommandResult> runWithStdin(
     String command, {
     required String stdin,
