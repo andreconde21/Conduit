@@ -78,7 +78,10 @@ void main() {
   final themeController = ThemeController(
     const ThemePreferencesRepository(secureStorage),
   );
-  final lockController = AppLockController(LocalAppAuthenticator());
+  final lockController = AppLockController(
+    LocalAppAuthenticator(),
+    enabled: PlatformFeatures.appLock,
+  );
   final hostsController = HostsController(
     const SecureSavedHostsRepository(secureStorage),
   );

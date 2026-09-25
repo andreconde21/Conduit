@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:conduit/core/platform_features.dart';
 import 'package:fido2/fido2_client.dart';
 import 'package:flutter/services.dart';
 
@@ -14,6 +15,12 @@ class FidoHardwareKeyCtapDevice {
   static const _usbPollInterval = Duration(milliseconds: 250);
 
   static Future<CtapDevice> open() async {
+    if (!PlatformFeatures.hardwareSecurityKeys) {
+      throw StateError(
+        'Hardware security keys are not supported on this platform yet. '
+        'Use a regular OpenSSH key for this host.',
+      );
+    }
     if (Platform.isAndroid) {
       return _openAndroid();
     }

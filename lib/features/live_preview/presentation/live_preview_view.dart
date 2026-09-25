@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/features/live_preview/presentation/live_preview_controller.dart';
 import 'package:flutter/material.dart';
@@ -19,8 +20,14 @@ class LivePreviewView extends StatefulWidget {
     required this.onChangePort,
     this.createWebViewController = WebViewController.new,
     this.openExternal = _launchExternal,
+    this.embedded,
     super.key,
   });
+
+  /// Whether the page renders inside the app. Null follows
+  /// [PlatformFeatures.embeddedWebView]; without a web view (Linux,
+  /// Windows) the forward still runs and the browser opens it.
+  final bool? embedded;
 
   final LivePreviewController controller;
   final AppPalette palette;
@@ -44,6 +51,7 @@ class LivePreviewView extends StatefulWidget {
 }
 
 class _LivePreviewViewState extends State<LivePreviewView> {
+  bool get _embedded => widget.embedded ?? PlatformFeatures.embeddedWebView;
   WebViewController? _webView;
   int? _loadedLocalPort;
   final _address = TextEditingController();
@@ -101,6 +109,9 @@ class _LivePreviewViewState extends State<LivePreviewView> {
     }
     _loadedLocalPort = url.port;
     _pageError = null;
+    if (!_embedded) {
+      return;
+    }
     final webView = _webView ??= _createWebView();
     unawaited(webView.loadRequest(url));
   }
@@ -109,9 +120,7 @@ class _LivePreviewViewState extends State<LivePreviewView> {
     final webView = widget.createWebViewController();
     unawaited(webView.setJavaScriptMode(JavaScriptMode.unrestricted));
     unawaited(
-      webView.setBackgroundColor(
-        widget.palette.canvasFor(widget.brightness),
-      ),
+      webView.setBackgroundColor(widget.palette.canvasFor(widget.brightness)),
     );
     unawaited(
       webView.setNavigationDelegate(
@@ -313,7 +322,10 @@ class _LivePreviewViewState extends State<LivePreviewView> {
           if (connectionError != null && ready)
             MaterialBanner(
               backgroundColor: palette.warning.withValues(alpha: 0.12),
-              leading: Icon(Icons.warning_amber_rounded, color: palette.warning),
+              leading: Icon(
+                Icons.warning_amber_rounded,
+                color: palette.warning,
+              ),
               content: Text(
                 connectionError,
                 style: TextStyle(
@@ -397,6 +409,24 @@ class _LivePreviewViewState extends State<LivePreviewView> {
           ],
         );
       case LivePreviewPhase.ready:
+        if (!_embedded) {
+          return _Notice(
+            icon: Icons.open_in_browser_rounded,
+            title: 'Preview ready on ${controller.url}',
+            message:
+                'This platform has no embedded web view. The forwarded '
+                'port works in any browser on this computer.',
+            palette: palette,
+            brightness: brightness,
+            actions: [
+              FilledButton.icon(
+                onPressed: _openInBrowser,
+                icon: const Icon(Icons.open_in_browser_rounded),
+                label: const Text('Open in browser'),
+              ),
+            ],
+          );
+        }
         final webView = _webView;
         if (webView == null) {
           return const SizedBox.shrink();
