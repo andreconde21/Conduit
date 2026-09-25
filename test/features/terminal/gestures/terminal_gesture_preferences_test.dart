@@ -14,6 +14,7 @@ void main() {
       expect(defaults.herdrPinch, HerdrPinchAction.fontSize);
       expect(defaults.herdrTwoFingerVertical, HerdrVerticalSwipe.workspaces);
       expect(defaults.herdrTwoFingerPanes, isTrue);
+      expect(defaults.dragScrollsRemote, isTrue);
     });
 
     test('round-trips through json', () {
@@ -25,6 +26,7 @@ void main() {
         herdrPinch: HerdrPinchAction.zoomPane,
         herdrTwoFingerVertical: HerdrVerticalSwipe.scrollback,
         herdrTwoFingerPanes: false,
+        dragScrollsRemote: false,
       );
 
       final decoded = TerminalGesturePreferences.decode(preferences.encode());
@@ -67,6 +69,8 @@ void main() {
       expect(legacy.pinchZoom, isTrue);
       expect(legacy.windowSwitchTarget, TerminalWindowSwitchTarget.herdr);
       expect(legacy.herdrTwoFingerPanes, isFalse);
+      // Records from before the drag setting existed get it on.
+      expect(legacy.dragScrollsRemote, isTrue);
 
       // Saving again marks the record current, so the choice sticks.
       final reencoded = TerminalGesturePreferences.decode(legacy.encode());
@@ -96,6 +100,7 @@ void main() {
         headerSwipeOpensSessions: false,
         edgeSwipeOpensAgents: false,
         herdrTwoFingerPanes: false,
+        dragScrollsRemote: false,
       );
       expect(none.anyEnabled, isFalse);
     });
