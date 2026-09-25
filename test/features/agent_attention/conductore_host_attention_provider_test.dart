@@ -50,7 +50,8 @@ void main() {
       expect(api.name, 'api');
       expect(api.kind, 'claude');
       expect(api.state, AgentAttentionState.needsInput);
-      expect(api.workspace, '/home/andre/api');
+      // A tmux location has no Herdr workspace; the cwd is never one.
+      expect(api.workspace, isNull);
       expect(api.tab, 'main:2');
       expect(api.pane, '%5');
       expect(
@@ -73,6 +74,7 @@ void main() {
       expect(web.name, 'web');
       expect(web.state, AgentAttentionState.working);
       expect(web.tab, isNull);
+      expect(web.workspace, isNull);
       expect(web.pendingRequests, isEmpty);
 
       expect(api.lastMessage, isNull);
@@ -80,6 +82,7 @@ void main() {
       // A Herdr pane stands in for the tmux location.
       final chat = snapshot.agents[2];
       expect(chat.state, AgentAttentionState.needsInput);
+      expect(chat.workspace, 'w1');
       expect(chat.tab, 'w1:t1');
       expect(chat.pane, 'w1:p1');
       expect(chat.lastMessage, 'Done. Shall I push?');

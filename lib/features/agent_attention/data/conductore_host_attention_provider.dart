@@ -323,6 +323,9 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider {
     final name = _string(item['name']) ?? _basename(cwd) ?? id;
     final tmux = item['tmux'];
     final herdr = item['herdr'];
+    // `workspace` is a Herdr workspace id (the home board and deep links
+    // match it against Herdr's); the cwd is never one.
+    String? workspace;
     String? tab;
     String? pane;
     if (tmux is Map) {
@@ -333,6 +336,7 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider {
       }
       pane = _string(tmux['paneId']);
     } else if (herdr is Map) {
+      workspace = _string(herdr['workspaceId']);
       tab = _string(herdr['tabId']);
       pane = _string(herdr['paneId']);
     }
@@ -346,13 +350,14 @@ class ConductoreHostAttentionProvider extends AgentAttentionProvider {
       name: name,
       kind: _string(item['kind']) ?? 'claude',
       state: parseState(_string(item['state']), pending: pending),
-      workspace: cwd,
+      workspace: workspace,
       tab: tab,
       pane: pane,
       stateChangedAt: _timestamp(item['updatedAt']),
       pendingRequests: pending,
       lastMessage: _string(item['lastMessage']),
-      project: _string(item['project']),
+      // The inbox groups by project: the cwd's basename stands in for one.
+      project: _string(item['project']) ?? _basename(cwd),
       usage: parseUsage(item['usage']),
     );
   }
