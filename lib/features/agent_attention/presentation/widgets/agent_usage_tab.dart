@@ -6,11 +6,13 @@ import 'package:flutter/material.dart';
 /// The panel's Usage tab, as a list of children for the panel's scroll
 /// view: per host, the account rate-limit windows the newest report
 /// carries, then every agent's context window as a ring, or
-/// "Not reported" when the provider has no usage for it.
+/// "Not reported" when the provider has no usage for it. [hostNotice]
+/// adds a line under a host's name (the update-for-usage hint).
 List<Widget> buildAgentUsageChildren(
   BuildContext context,
   List<AgentInboxHostInput> hosts, {
   DateTime? now,
+  Widget Function(String hostId)? hostNotice,
 }) {
   final theme = Theme.of(context);
   final anyAgents = hosts.any((host) => host.agents.isNotEmpty);
@@ -47,6 +49,7 @@ List<Widget> buildAgentUsageChildren(
           padding: const EdgeInsets.only(top: 10, bottom: 6),
           child: Text(host.hostName, style: theme.textTheme.titleSmall),
         ),
+        ?hostNotice?.call(host.hostId),
         if (_newestLimits(host.agents) case final limits?)
           for (final limit in limits) _RateLimitBar(limit: limit, now: now),
         for (final agent in host.agents)
