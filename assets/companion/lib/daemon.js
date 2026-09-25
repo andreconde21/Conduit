@@ -16,6 +16,11 @@ const CHANGE_BUFFER = 1000
 const MAX_REQUEST_BYTES = 1024 * 1024
 const DEFAULT_POLL_TIMEOUT_S = 55
 const MAX_POLL_TIMEOUT_S = 600
+// At most one usage-only change per session per this interval.
+function usageThrottleMs () {
+  const v = Number(process.env.CONDUCTORE_USAGE_THROTTLE_MS)
+  return Number.isFinite(v) && v >= 0 ? v : 10000
+}
 
 function pidAlive (pid) {
   try { process.kill(pid, 0); return true } catch (err) { return err.code === 'EPERM' }
@@ -64,6 +69,7 @@ class Daemon {
     this.changes = []
     this.waiters = new Map() // requestId -> { socket, timer, sessionId }
     this.pollers = new Set() // { socket, since, timer }
+    this.usageEmits = new Map() // sessionId -> { at, timer }
     this.server = null
     this.idleTimer = null
     this.snapshotTimer = null
@@ -104,6 +110,10 @@ class Daemon {
   commit (changes) {
     if (!changes.length) return
     for (const ch of changes) {
+      if (ch.type === 'remove') {
+        const e = this.usageEmits.get(ch.sessionId)
+        if (e) { clearTimeout(e.timer); this.usageEmits.delete(ch.sessionId) }
+      }
       this.changes.push(ch)
       log('change', `${ch.type} ${ch.sessionId} ${ch.reason} -> ${ch.agent ? ch.agent.state : 'removed'} seq ${ch.seq}`)
     }
@@ -162,6 +172,8 @@ class Daemon {
         return this.handleEvents(req, c)
       case 'decide':
         return this.handleDecide(req, c)
+      case 'usage':
+        this.reply(c, { ok: true, result: this.handleUsage(req) }); c.end(); return
       case 'stop':
         this.reply(c, { ok: true }); c.end()
         setImmediate(() => this.shutdown(0))
@@ -197,6 +209,29 @@ class Daemon {
     this.commit(state.resolvePermission(this.state, id, decision))
     log('permission', `${id} ${decision}`)
     return true
+  }
+
+  // A statusline report: store it now, publish it throttled so the long-poll
+  // does not churn on every assistant message.
+  handleUsage (req) {
+    const sid = req.sessionId
+    if (typeof sid !== 'string' || !sid) return 'ignored'
+    const usage = req.usage && typeof req.usage === 'object' ? req.usage : null
+    const result = state.setUsage(this.state, sid, usage)
+    if (result !== 'stored') return result
+    const entry = this.usageEmits.get(sid) || { at: 0, timer: null }
+    this.usageEmits.set(sid, entry)
+    if (entry.timer) return 'scheduled'
+    const wait = entry.at + usageThrottleMs() - Date.now()
+    const emit = () => {
+      entry.timer = null
+      entry.at = Date.now()
+      this.commit(state.usageChange(this.state, sid))
+    }
+    if (wait <= 0) { emit(); return 'published' }
+    entry.timer = setTimeout(emit, wait)
+    entry.timer.unref()
+    return 'scheduled'
   }
 
   handleDecide (req, c) {
@@ -252,6 +287,7 @@ class Daemon {
     log('daemon', `shutting down (${code})`)
     for (const id of [...this.waiters.keys()]) this.settle(id, 'timeout')
     for (const p of this.pollers) { this.reply(p.socket, { type: 'timeout', seq: this.state.seq }); p.socket.end() }
+    for (const e of this.usageEmits.values()) clearTimeout(e.timer)
     clearTimeout(this.snapshotTimer)
     this.flushSnapshot()
     try { this.server && this.server.close() } catch {}

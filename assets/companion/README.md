@@ -23,8 +23,9 @@ host/install.sh --uninstall
 ```
 
 `install.sh` ends by running `conductore-hostd install`, which merges nine
-hook handlers into `~/.claude/settings.json` (backup in `settings.json.bak`).
-Existing hooks are left untouched; running it again is a no-op. Check with:
+hook handlers into `~/.claude/settings.json` (backup in `settings.json.bak`)
+and wires the statusline (see Usage below). Existing hooks are left
+untouched; running it again is a no-op. Check with:
 
 ```sh
 conductore-hostd doctor
@@ -111,6 +112,8 @@ Every command prints one JSON document on stdout and exits 0, or prints
       "startedAt": 1790286139217,
       "updatedAt": 1790286139530,
       "endedAt": null,
+      "usage": { "contextUsedPct": 42.5, "contextTokens": 85000, "windowLabel": "200k",
+                 "limits": [ { "label": "5h", "usedPct": 23.5, "resetsAt": 1738425600000 } ] },
       "pending": [
         {
           "id": "3671d8715ac1",
@@ -136,6 +139,8 @@ Every command prints one JSON document on stdout and exits 0, or prints
 * `pending[].summary`: one line (command, file path, URL, …) capped at 200
   chars. `toolInput` is the raw input; above 4 KB it is replaced by
   `{"_truncated":true,"preview":"…"}`.
+* `usage` is present only once the statusline reported something for the
+  session (see Usage).
 * `source` is `daemon`, `snapshot` (daemon down, read from `state.json`, with
   `writtenAt`) or `none` (never ran). Timestamps are Unix milliseconds.
 * Agents are sorted by `updatedAt`, newest first.
@@ -159,8 +164,8 @@ than `seq` already exist, it prints them and exits at once. Lines:
 * `snapshot`: the cursor is not covered by the daemon's buffer (it restarted
   or the phone was away for more than 1000 changes). Replace everything and
   continue from its `seq`.
-* `reason` is the hook event name, `decision:<allow|deny|always|timeout|gone>`
-  or `prune`.
+* `reason` is the hook event name, `decision:<allow|deny|always|timeout|gone>`,
+  `usage` (only the `usage` field changed) or `prune`.
 
 Suggested loop on the phone: `status` once, then `events --since <seq>` in a
 loop, reconnecting on SSH errors.
@@ -265,12 +270,48 @@ Presses Escape in the agent's pane (`herdr pane send-keys <pane> esc`, else
 turn. Allowed while a permission prompt is up (Escape dismisses it).
 Prints `{"ok":true,"sessionId":"…","via":"tmux","paneId":"%5","key":"Escape"}`.
 
+### `conductore-hostd statusline [--chain '<cmd>']`
+
+Not for the phone: this is Claude Code's `statusLine` command. See Usage.
+
 ### Others
 
-* `install` / `uninstall`: `{"ok":true,"settings":"…/settings.json","events":[…]}` / `{"ok":true,"removed":[…],"daemonStopped":true}`
-* `doctor`: `{"ok":true,"user":"andre","checks":[{"name":"hooks registered","ok":true,"detail":"9 events"}, …]}`
+* `install` / `uninstall`: `{"ok":true,"settings":"…/settings.json","events":[…],"statusLine":"set|wrapped|updated|unchanged"}` / `{"ok":true,"removed":[…],"statusLineRestored":true,"daemonStopped":true}`
+* `doctor`: `{"ok":true,"user":"andre","checks":[{"name":"hooks registered","ok":true,"detail":"9 events"},{"name":"statusline (usage)","ok":true,"detail":"wired, wrapping: ~/bin/my-line"}, …]}`
+  (a missing statusline does not make `ok` false; only usage is lost)
 * `stop`: `{"ok":true,"running":true,"stopped":true}` or `{"ok":true,"running":false}`
-* `version`: `{"version":"0.2.0","protocol":1,"node":"22.23.1"}`
+* `version`: `{"version":"0.3.0","protocol":1,"node":"22.23.1"}`
+
+## Usage (context and rate limits)
+
+Hooks carry no usage data; Claude Code's statusline does. `install` sets
+`statusLine.command` to `conductore-hostd statusline` when none is set. If
+you already have one, it becomes
+`conductore-hostd statusline --chain '<your command>'` (other `statusLine`
+fields such as `padding` are kept): your command gets the same stdin and its
+output is printed unchanged. `uninstall` puts your command back.
+
+Each run maps the statusline JSON into the session's `usage`:
+
+| `usage` field | from |
+| --- | --- |
+| `contextUsedPct` | `context_window.used_percentage` (clamped 0 to 100) |
+| `contextTokens` | `context_window.total_input_tokens` |
+| `windowLabel` | `context_window.context_window_size` as `200k` / `1M` |
+| `limits[]` | `rate_limits.five_hour` → `5h`, `seven_day` → `7d`, `spend_limit` → `spend`: `{label, usedPct, resetsAt}` with `resetsAt` in epoch ms |
+
+Null fields and absent windows are omitted; `usage` itself is omitted until
+something is known. Rate limits appear only for Pro/Max accounts, after the
+first API response.
+
+A usage report never changes `state` or `updatedAt`. The daemon publishes at
+most one `reason: "usage"` change per session every 10 s
+(`CONDUCTORE_USAGE_THROTTLE_MS`), always carrying the latest value; an
+unchanged report publishes nothing. A report for a session the daemon has
+not seen yet is held until its first hook event. Without `--chain` the
+command prints `Opus · api · 42% ctx · 5h 23%`. It never fails visibly: bad
+input, a stopped daemon (started for the next report) or a failing chained
+command still exit 0.
 
 ## Permission decisions
 
@@ -351,7 +392,9 @@ cd host && node --test test/*.test.js
 
 `test/state.test.js` covers the reducer, `test/settings.test.js` the
 settings merge, `test/transcript.test.js` the transcript reader,
-`test/chat.test.js` the `transcript`/`send`/`interrupt` commands (with fake
+`test/statusline.test.js` usage mapping, statusLine wiring and throttled
+usage events through a real daemon, `test/chat.test.js` the
+`transcript`/`send`/`interrupt` commands (with fake
 `tmux`/`herdr` binaries that record their arguments), and `test/daemon.test.js` spawns a real daemon on a temp
 socket and drives the real hook client and CLI through the permission and
 long-poll flows.

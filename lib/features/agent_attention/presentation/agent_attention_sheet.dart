@@ -7,6 +7,7 @@ import 'package:conduit/features/agent_attention/domain/agent_inbox.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/widgets/agent_inbox_widgets.dart';
 import 'package:conduit/features/agent_attention/presentation/widgets/agent_usage_tab.dart';
+import 'package:conduit/features/agent_attention/presentation/widgets/usage_update_hint.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_status_chip.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:flutter/material.dart';
@@ -162,7 +163,13 @@ class _AgentAttentionSheetState extends State<AgentAttentionSheet>
               if (_tabs.index == 0)
                 ..._inboxChildren(context, inbox, grouped: hosts.length > 1)
               else
-                ...buildAgentUsageChildren(context, inputs),
+                ...buildAgentUsageChildren(
+                  context,
+                  inputs,
+                  hostNotice: (hostId) => UsageUpdateHint(
+                    host: hosts.firstWhere((host) => host.id == hostId),
+                  ),
+                ),
               _MachinesSection(
                 hosts: hosts,
                 controller: controller,
