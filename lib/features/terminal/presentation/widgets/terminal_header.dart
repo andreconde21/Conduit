@@ -1,5 +1,6 @@
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/features/terminal/presentation/gestures/terminal_gesture_recognizers.dart';
+import 'package:conduit/features/terminal/presentation/multiplexer_tabs_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_file_tabs_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
@@ -54,6 +55,8 @@ class TerminalHeader extends StatelessWidget {
     this.onSwipeSession,
     this.onSessionActivated,
     this.onSessionLongPress,
+    this.multiplexerTabsFor,
+    this.onOpenMultiplexerTabs,
     super.key,
   });
 
@@ -113,6 +116,13 @@ class TerminalHeader extends StatelessWidget {
   /// Long-press on a session's tab (its "Open in" choice).
   final ValueChanged<TerminalSessionController>? onSessionLongPress;
 
+  /// See [SessionTabs.multiplexerTabsFor] (the phone's compact mode).
+  final MultiplexerTabsController? Function(TerminalSessionController)?
+  multiplexerTabsFor;
+
+  /// See [SessionTabs.onOpenMultiplexerTabs].
+  final ValueChanged<TerminalSessionController>? onOpenMultiplexerTabs;
+
   @override
   Widget build(BuildContext context) {
     final foreground = palette.foregroundFor(brightness);
@@ -154,6 +164,8 @@ class TerminalHeader extends StatelessWidget {
                 onFileTabClosed: onFileTabClosed,
                 onSessionActivated: onSessionActivated,
                 onSessionLongPress: onSessionLongPress,
+                multiplexerTabsFor: multiplexerTabsFor,
+                onOpenMultiplexerTabs: onOpenMultiplexerTabs,
                 touchScrolls: !swipeSessions,
               ),
             ),

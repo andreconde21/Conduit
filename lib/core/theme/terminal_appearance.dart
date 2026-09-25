@@ -28,18 +28,22 @@ extension TerminalToolbarStyleDetails on TerminalToolbarStyle {
   };
 }
 
-/// When the terminal shows the multiplexer's own tabs (Herdr tabs, tmux
-/// windows) under the top row.
-enum MultiplexerTabsVisibility {
-  /// With two tabs or more on a phone; always on a desktop.
-  auto,
-  always,
-  never;
+/// How a phone or tablet shows the multiplexer's own tabs (Herdr tabs,
+/// tmux windows). A desktop always has the full strip unless this is off.
+enum MultiplexerTabsMode {
+  /// No extra row: the session's tab in the top row names the current
+  /// multiplexer tab and opens the list; switching shows a brief overlay.
+  compact,
+
+  /// The full strip under the top row (a tablet has the room).
+  strip,
+
+  off;
 
   String get label => switch (this) {
-    MultiplexerTabsVisibility.auto => 'Auto',
-    MultiplexerTabsVisibility.always => 'Always',
-    MultiplexerTabsVisibility.never => 'Never',
+    MultiplexerTabsMode.compact => 'Compact',
+    MultiplexerTabsMode.strip => 'Strip',
+    MultiplexerTabsMode.off => 'Off',
   };
 }
 

@@ -40,7 +40,7 @@ class ThemeController extends ChangeNotifier {
   bool _remoteClipboardEnabled = true;
   bool _pasteImagesAsFiles = true;
   bool _restoreSessionsOnLaunch = true;
-  MultiplexerTabsVisibility _multiplexerTabs = MultiplexerTabsVisibility.auto;
+  MultiplexerTabsMode _multiplexerTabs = MultiplexerTabsMode.compact;
   TerminalGesturePreferences _terminalGestures =
       TerminalGesturePreferences.defaults;
   String _speechLanguage = '';
@@ -102,8 +102,8 @@ class ThemeController extends ChangeNotifier {
   /// Whether the open sessions come back after the app restarts.
   bool get restoreSessionsOnLaunch => _restoreSessionsOnLaunch;
 
-  /// When the terminal shows the multiplexer's tabs.
-  MultiplexerTabsVisibility get multiplexerTabs => _multiplexerTabs;
+  /// How a phone or tablet shows the multiplexer's tabs.
+  MultiplexerTabsMode get multiplexerTabs => _multiplexerTabs;
   TerminalGesturePreferences get terminalGestures => _terminalGestures;
 
   /// BCP-47 tag dictation listens in; empty means the device locale.
@@ -372,7 +372,7 @@ class ThemeController extends ChangeNotifier {
     await _save();
   }
 
-  Future<void> setMultiplexerTabs(MultiplexerTabsVisibility value) async {
+  Future<void> setMultiplexerTabs(MultiplexerTabsMode value) async {
     if (_multiplexerTabs == value) {
       return;
     }

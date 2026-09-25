@@ -243,7 +243,7 @@ class MultiplexerTabsController extends ChangeNotifier {
 
   /// A refresh shortly after something outside the strip may have moved
   /// the multiplexer (a swipe, keys typed into the session).
-  void refreshSoon([Duration delay = const Duration(milliseconds: 400)]) {
+  void refreshSoon([Duration delay = const Duration(milliseconds: 250)]) {
     if (_disposed || !_visible) return;
     _soon?.cancel();
     _soon = Timer(delay, () => unawaited(refresh()));

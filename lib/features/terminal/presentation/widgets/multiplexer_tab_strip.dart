@@ -4,62 +4,54 @@ import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
-import 'package:conduit/features/hosts/presentation/widgets/home_session_grid.dart'
-    show agentStateColor;
 import 'package:conduit/features/terminal/domain/multiplexer_tabs.dart';
 import 'package:conduit/features/terminal/presentation/multiplexer_tabs_controller.dart';
+import 'package:conduit/features/terminal/presentation/widgets/multiplexer_tab_actions.dart';
 import 'package:flutter/material.dart';
 
-/// Whether the strip shows for [tabs] under [visibility]: always, never,
-/// or (auto) on a desktop, and on a phone once there are two tabs.
-bool showsMultiplexerTabs(
-  MultiplexerTabsVisibility visibility, {
-  required int tabCount,
+/// How the terminal shows a session's multiplexer tabs.
+enum MultiplexerTabsLayout {
+  /// A row of chips under the top row.
+  strip,
+
+  /// No extra row: the session tab names the current one (phones).
+  compact,
+
+  hidden,
+}
+
+/// A desktop always gets the strip (unless the setting is off); a phone or
+/// tablet follows [mode], compact by default.
+MultiplexerTabsLayout multiplexerTabsLayout(
+  MultiplexerTabsMode mode, {
   required bool desktop,
-}) => switch (visibility) {
-  MultiplexerTabsVisibility.never => false,
-  MultiplexerTabsVisibility.always => tabCount > 0,
-  MultiplexerTabsVisibility.auto => desktop ? tabCount > 0 : tabCount > 1,
+}) => switch (mode) {
+  MultiplexerTabsMode.off => MultiplexerTabsLayout.hidden,
+  MultiplexerTabsMode.strip => MultiplexerTabsLayout.strip,
+  MultiplexerTabsMode.compact =>
+    desktop ? MultiplexerTabsLayout.strip : MultiplexerTabsLayout.compact,
 };
 
-/// The multiplexer's own tabs under the terminal's top row: one chip per
-/// Herdr tab of the focused workspace or tmux window of the session, the
-/// active one highlighted and kept in view, a dot for an agent's state or
-/// for news since the tab was last shown, and "+" for a new one.
-///
-/// Tap switches; long-press offers rename, move and close; on a desktop
-/// the chips of a tmux session can be dragged into a new order.
-class MultiplexerTabStrip extends StatefulWidget {
-  const MultiplexerTabStrip({
+/// Keeps [controller] polling while this sits on screen: the route is not
+/// covered (tickers on), the app is in front, and [active]. Draws [child].
+class MultiplexerTabsPoller extends StatefulWidget {
+  const MultiplexerTabsPoller({
     required this.controller,
-    required this.palette,
-    required this.brightness,
-    required this.visibility,
-    required this.desktop,
-    this.onChanged,
+    this.active = true,
+    this.child = const SizedBox.shrink(),
     super.key,
   });
 
-  static const height = 32.0;
-
   final MultiplexerTabsController controller;
-  final AppPalette palette;
-  final Brightness brightness;
-  final MultiplexerTabsVisibility visibility;
-  final bool desktop;
-
-  /// After an action from the strip, so the page can refocus the terminal.
-  final VoidCallback? onChanged;
+  final bool active;
+  final Widget child;
 
   @override
-  State<MultiplexerTabStrip> createState() => _MultiplexerTabStripState();
+  State<MultiplexerTabsPoller> createState() => _MultiplexerTabsPollerState();
 }
 
-class _MultiplexerTabStripState extends State<MultiplexerTabStrip>
+class _MultiplexerTabsPollerState extends State<MultiplexerTabsPoller>
     with WidgetsBindingObserver {
-  final _activeKey = GlobalKey();
-  final _scroll = ScrollController();
-  String? _lastActive;
   bool _routeVisible = true;
   bool _appResumed = true;
 
@@ -67,26 +59,20 @@ class _MultiplexerTabStripState extends State<MultiplexerTabStrip>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    widget.controller.addListener(_revealActive);
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Covered by another route: tickers are off, stop polling.
     _routeVisible = TickerMode.valuesOf(context).enabled;
     _sync();
   }
 
   @override
-  void didUpdateWidget(covariant MultiplexerTabStrip oldWidget) {
+  void didUpdateWidget(covariant MultiplexerTabsPoller oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller) {
-      oldWidget.controller
-        ..removeListener(_revealActive)
-        ..setVisible(false);
-      widget.controller.addListener(_revealActive);
-      _lastActive = null;
+      oldWidget.controller.setVisible(false);
     }
     _sync();
   }
@@ -97,21 +83,79 @@ class _MultiplexerTabStripState extends State<MultiplexerTabStrip>
     _sync();
   }
 
-  void _sync() {
-    widget.controller.setVisible(
-      _routeVisible &&
-          _appResumed &&
-          widget.visibility != MultiplexerTabsVisibility.never,
-    );
-    _revealActive();
-  }
+  void _sync() => widget.controller.setVisible(
+    widget.active && _routeVisible && _appResumed,
+  );
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    widget.controller
-      ..removeListener(_revealActive)
-      ..setVisible(false);
+    widget.controller.setVisible(false);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
+/// The multiplexer's own tabs under the terminal's top row (desktops, and
+/// phones set to Strip): one chip per Herdr tab of the focused workspace
+/// or tmux window of the session, the active one highlighted and kept in
+/// view, a dot for an agent's state or for news since the tab was last
+/// shown, and "+" for a new one.
+///
+/// Tap switches; long-press offers rename, move and close; on a desktop
+/// the chips of a tmux session can be dragged into a new order.
+class MultiplexerTabStrip extends StatefulWidget {
+  const MultiplexerTabStrip({
+    required this.controller,
+    required this.palette,
+    required this.brightness,
+    required this.desktop,
+    this.onChanged,
+    super.key,
+  });
+
+  static const height = 32.0;
+
+  final MultiplexerTabsController controller;
+  final AppPalette palette;
+  final Brightness brightness;
+  final bool desktop;
+
+  /// After an action from the strip, so the page can refocus the terminal.
+  final VoidCallback? onChanged;
+
+  @override
+  State<MultiplexerTabStrip> createState() => _MultiplexerTabStripState();
+}
+
+class _MultiplexerTabStripState extends State<MultiplexerTabStrip> {
+  final _activeKey = GlobalKey();
+  final _scroll = ScrollController();
+  String? _lastActive;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_revealActive);
+    _revealActive();
+  }
+
+  @override
+  void didUpdateWidget(covariant MultiplexerTabStrip oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_revealActive);
+      widget.controller.addListener(_revealActive);
+      _lastActive = null;
+      _revealActive();
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_revealActive);
     _scroll.dispose();
     super.dispose();
   }
@@ -135,16 +179,6 @@ class _MultiplexerTabStripState extends State<MultiplexerTabStrip>
     });
   }
 
-  String get _noun =>
-      widget.controller.kind == MultiplexerTabsKind.tmux ? 'window' : 'tab';
-
-  void _snack(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.maybeOf(
-      context,
-    )?.showSnackBar(SnackBar(content: Text(message)));
-  }
-
   Future<void> _select(MultiplexerTab tab) async {
     await widget.controller.select(tab);
     widget.onChanged?.call();
@@ -155,115 +189,6 @@ class _MultiplexerTabStripState extends State<MultiplexerTabStrip>
     widget.onChanged?.call();
   }
 
-  Future<void> _showActions(MultiplexerTab tab) async {
-    final controller = widget.controller;
-    final index = controller.tabs.indexWhere((other) => other.id == tab.id);
-    final last = controller.tabs.length - 1;
-    final action = await showModalBottomSheet<_TabAction>(
-      context: context,
-      useSafeArea: true,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              title: Text(
-                tab.label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w800),
-              ),
-              subtitle: Text(
-                controller.kind == MultiplexerTabsKind.tmux
-                    ? 'tmux window ${tab.index}'
-                    : 'Herdr tab',
-              ),
-            ),
-            const Divider(height: 1),
-            ListTile(
-              key: const ValueKey('mux-tab-rename'),
-              leading: const Icon(Icons.drive_file_rename_outline_rounded),
-              title: Text('Rename $_noun'),
-              onTap: () => Navigator.of(context).pop(_TabAction.rename),
-            ),
-            if (controller.canReorder) ...[
-              ListTile(
-                key: const ValueKey('mux-tab-move-left'),
-                enabled: index > 0,
-                leading: const Icon(Icons.arrow_back_rounded),
-                title: const Text('Move left'),
-                onTap: () => Navigator.of(context).pop(_TabAction.moveLeft),
-              ),
-              ListTile(
-                key: const ValueKey('mux-tab-move-right'),
-                enabled: index < last,
-                leading: const Icon(Icons.arrow_forward_rounded),
-                title: const Text('Move right'),
-                onTap: () => Navigator.of(context).pop(_TabAction.moveRight),
-              ),
-            ],
-            ListTile(
-              key: const ValueKey('mux-tab-close'),
-              leading: const Icon(Icons.close_rounded),
-              title: Text('Close $_noun'),
-              onTap: () => Navigator.of(context).pop(_TabAction.close),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (!mounted || action == null) {
-      widget.onChanged?.call();
-      return;
-    }
-    switch (action) {
-      case _TabAction.rename:
-        final name = await _askName(tab);
-        if (name != null && !await controller.rename(tab, name)) {
-          _snack('Could not rename the $_noun.');
-        }
-      case _TabAction.moveLeft:
-        await controller.move(tab, -1);
-      case _TabAction.moveRight:
-        await controller.move(tab, 1);
-      case _TabAction.close:
-        if (await _confirmClose(tab) && !await controller.close(tab)) {
-          _snack('Could not close the $_noun.');
-        }
-    }
-    widget.onChanged?.call();
-  }
-
-  Future<String?> _askName(MultiplexerTab tab) => showDialog<String>(
-    context: context,
-    builder: (context) =>
-        _RenameDialog(title: 'Rename $_noun', initial: tab.label),
-  );
-
-  Future<bool> _confirmClose(MultiplexerTab tab) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Close "${tab.label}"?'),
-        content: Text(
-          'Everything running in this $_noun ends, on the machine too.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            key: const ValueKey('mux-tab-close-confirm'),
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-    return confirmed ?? false;
-  }
-
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -271,12 +196,7 @@ class _MultiplexerTabStripState extends State<MultiplexerTabStrip>
       builder: (context, _) {
         final controller = widget.controller;
         final tabs = controller.tabs;
-        if (!controller.loaded ||
-            !showsMultiplexerTabs(
-              widget.visibility,
-              tabCount: tabs.length,
-              desktop: widget.desktop,
-            )) {
+        if (!controller.loaded || tabs.isEmpty) {
           return const SizedBox.shrink();
         }
         final palette = widget.palette;
@@ -290,7 +210,14 @@ class _MultiplexerTabStripState extends State<MultiplexerTabStrip>
           palette: palette,
           brightness: brightness,
           onTap: () => unawaited(_select(tab)),
-          onLongPress: () => unawaited(_showActions(tab)),
+          onLongPress: () => unawaited(
+            showMultiplexerTabActions(
+              context,
+              controller,
+              tab,
+              onDone: widget.onChanged,
+            ),
+          ),
         );
 
         final list = reorderable
@@ -339,7 +266,7 @@ class _MultiplexerTabStripState extends State<MultiplexerTabStrip>
               ),
               IconButton(
                 key: const ValueKey('mux-tab-new'),
-                tooltip: 'New $_noun',
+                tooltip: 'New ${multiplexerTabNoun(controller)}',
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints.tightFor(
                   width: 34,
@@ -354,53 +281,6 @@ class _MultiplexerTabStripState extends State<MultiplexerTabStrip>
           ),
         );
       },
-    );
-  }
-}
-
-enum _TabAction { rename, moveLeft, moveRight, close }
-
-/// Owns its text field's controller, so it outlives the closing animation.
-class _RenameDialog extends StatefulWidget {
-  const _RenameDialog({required this.title, required this.initial});
-
-  final String title;
-  final String initial;
-
-  @override
-  State<_RenameDialog> createState() => _RenameDialogState();
-}
-
-class _RenameDialogState extends State<_RenameDialog> {
-  late final _field = TextEditingController(text: widget.initial);
-
-  @override
-  void dispose() {
-    _field.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(widget.title),
-      content: TextField(
-        key: const ValueKey('mux-tab-name'),
-        controller: _field,
-        autofocus: true,
-        textInputAction: TextInputAction.done,
-        onSubmitted: (value) => Navigator.of(context).pop(value),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(_field.text),
-          child: const Text('Rename'),
-        ),
-      ],
     );
   }
 }
@@ -428,16 +308,6 @@ class _TabChip extends StatelessWidget {
     final accent = palette.accent;
     final foreground = palette.foregroundFor(brightness);
     final muted = palette.mutedForegroundFor(brightness);
-    final status = tab.status;
-    final showsStatus =
-        status != null &&
-        status != AgentAttentionState.idle &&
-        status != AgentAttentionState.unknown;
-    final Color? dot = showsStatus
-        ? agentStateColor(context, status)
-        : tab.unread
-        ? accent
-        : null;
     return Center(
       child: Semantics(
         selected: tab.active,
@@ -445,7 +315,10 @@ class _TabChip extends StatelessWidget {
         label: [
           tab.label,
           if (tab.unread) 'new activity',
-          if (showsStatus) status.label,
+          if (tab.status case final status?
+              when status != AgentAttentionState.idle &&
+                  status != AgentAttentionState.unknown)
+            status.label,
         ].join(', '),
         excludeSemantics: true,
         child: Material(
@@ -499,19 +372,9 @@ class _TabChip extends StatelessWidget {
                       ),
                     ),
                   ),
-                  if (dot != null) ...[
+                  if (multiplexerTabDot(context, tab) != null) ...[
                     const SizedBox(width: 5),
-                    Container(
-                      key: ValueKey(
-                        showsStatus ? 'mux-tab-status' : 'mux-tab-unread',
-                      ),
-                      width: 6,
-                      height: 6,
-                      decoration: BoxDecoration(
-                        color: dot,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
+                    MultiplexerTabDot(tab: tab),
                   ],
                 ],
               ),

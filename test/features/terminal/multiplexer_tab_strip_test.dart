@@ -12,6 +12,7 @@ import 'package:conduit/features/terminal/presentation/multiplexer_tabs_controll
 import 'package:conduit/features/terminal/presentation/terminal_page.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:conduit/features/terminal/presentation/widgets/multiplexer_tab_strip.dart';
+import 'package:conduit_vt/conduit_vt.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -36,29 +37,33 @@ void main() {
   final strip = find.byKey(const ValueKey('multiplexer-tab-strip'));
   Finder chip(String id) => find.byKey(ValueKey('mux-tab-$id'));
 
-  test('when the strip shows', () {
-    bool shows(
-      MultiplexerTabsVisibility v,
-      int count, {
+  test('a desktop gets the strip, a phone the compact mode by default', () {
+    MultiplexerTabsLayout layout(
+      MultiplexerTabsMode mode, {
       bool desktop = false,
-    }) => showsMultiplexerTabs(v, tabCount: count, desktop: desktop);
-    expect(shows(MultiplexerTabsVisibility.auto, 1), isFalse);
-    expect(shows(MultiplexerTabsVisibility.auto, 2), isTrue);
-    expect(shows(MultiplexerTabsVisibility.auto, 1, desktop: true), isTrue);
-    expect(shows(MultiplexerTabsVisibility.always, 1), isTrue);
-    expect(shows(MultiplexerTabsVisibility.never, 5, desktop: true), isFalse);
-    expect(shows(MultiplexerTabsVisibility.always, 0), isFalse);
+    }) => multiplexerTabsLayout(mode, desktop: desktop);
+    expect(layout(MultiplexerTabsMode.compact), MultiplexerTabsLayout.compact);
+    expect(
+      layout(MultiplexerTabsMode.compact, desktop: true),
+      MultiplexerTabsLayout.strip,
+    );
+    expect(layout(MultiplexerTabsMode.strip), MultiplexerTabsLayout.strip);
+    expect(layout(MultiplexerTabsMode.off), MultiplexerTabsLayout.hidden);
+    expect(
+      layout(MultiplexerTabsMode.off, desktop: true),
+      MultiplexerTabsLayout.hidden,
+    );
   });
 
-  test('the setting is kept, auto by default', () async {
+  test('the setting is kept, compact by default', () async {
     final storage = InMemorySecureStorage();
     final first = ThemeController(ThemePreferencesRepository(storage));
     await first.load();
-    expect(first.multiplexerTabs, MultiplexerTabsVisibility.auto);
-    await first.setMultiplexerTabs(MultiplexerTabsVisibility.always);
+    expect(first.multiplexerTabs, MultiplexerTabsMode.compact);
+    await first.setMultiplexerTabs(MultiplexerTabsMode.strip);
     final again = ThemeController(ThemePreferencesRepository(storage));
     await again.load();
-    expect(again.multiplexerTabs, MultiplexerTabsVisibility.always);
+    expect(again.multiplexerTabs, MultiplexerTabsMode.strip);
   });
 
   group('the strip', () {
@@ -68,7 +73,6 @@ void main() {
     Future<void> pumpStrip(
       WidgetTester tester, {
       List<String> windows = const ['zsh', 'claude', 'logs'],
-      MultiplexerTabsVisibility visibility = MultiplexerTabsVisibility.auto,
       bool desktop = false,
     }) async {
       tmux = FakeTmux(windows, active: windows.length > 1 ? 1 : 0);
@@ -88,7 +92,6 @@ void main() {
                   controller: controller,
                   palette: palette,
                   brightness: Brightness.dark,
-                  visibility: visibility,
                   desktop: desktop,
                 ),
               ],
@@ -125,23 +128,9 @@ void main() {
       );
     });
 
-    testWidgets('hidden with one window on a phone in auto, shown when '
-        'always', (tester) async {
+    testWidgets('shows even a single window', (tester) async {
       await pumpStrip(tester, windows: ['zsh']);
-      expect(strip, findsNothing);
-      controller.dispose();
-      await pumpStrip(
-        tester,
-        windows: ['zsh'],
-        visibility: MultiplexerTabsVisibility.always,
-      );
       expect(strip, findsOneWidget);
-      controller.dispose();
-      await pumpStrip(tester, windows: ['zsh'], desktop: true);
-      expect(strip, findsOneWidget);
-      controller.dispose();
-      await pumpStrip(tester, visibility: MultiplexerTabsVisibility.never);
-      expect(strip, findsNothing);
     });
 
     testWidgets('tap switches, + opens a new window', (tester) async {
@@ -284,58 +273,188 @@ void main() {
       await flow.herdr.dispose();
     }
 
-    testWidgets('a plain shell has no strip', (tester) async {
+    final inline = find.byKey(const ValueKey('mux-inline-label'));
+    final overlay = find.byKey(const ValueKey('mux-tab-overlay'));
+
+    Future<void> run(WidgetTester tester, [int rounds = 3]) async {
+      for (var i = 0; i < rounds; i += 1) {
+        await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+    }
+
+    double terminalHeight(WidgetTester tester) =>
+        tester.getSize(find.byType(TerminalView)).height;
+
+    testWidgets('a plain shell has neither strip nor label', (tester) async {
       final (_, flow) = await pumpPage(tester, null);
       expect(strip, findsNothing);
+      expect(inline, findsNothing);
       await finish(tester, flow);
     });
 
-    testWidgets('a tmux session shows its windows; Ctrl+PageDown moves to '
-        'the next one', (tester) async {
+    testWidgets('on a phone a tmux session names its window in the session '
+        'tab, with no extra row', (tester) async {
+      final tmux = FakeTmux(['zsh', 'claude', 'logs'], active: 1)
+        ..windows[2].unread = true;
+      final (_, flow) = await pumpPage(
+        tester,
+        const ConnectTarget.tmux('work'),
+        runner: tmux,
+      );
+      expect(strip, findsNothing);
+      expect(tmux.commands.first, TmuxWindowCommands.list('work'));
+      expect(inline, findsOneWidget);
+      expect(
+        find.descendant(of: inline, matching: find.text('claude')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: inline, matching: find.text('2/3')),
+        findsOneWidget,
+      );
+      await finish(tester, flow);
+    });
+
+    testWidgets('the phone layout keeps its height: compact costs nothing, '
+        'only the strip takes a row', (tester) async {
+      await themeController.setMultiplexerTabs(MultiplexerTabsMode.off);
+      var (_, flow) = await pumpPage(tester, const ConnectTarget.tmux('work'));
+      final off = terminalHeight(tester);
+      expect(inline, findsNothing);
+      await finish(tester, flow);
+
+      await themeController.setMultiplexerTabs(MultiplexerTabsMode.compact);
+      (_, flow) = await pumpPage(tester, const ConnectTarget.tmux('work'));
+      expect(inline, findsOneWidget);
+      expect(terminalHeight(tester), off);
+      await finish(tester, flow);
+
+      await themeController.setMultiplexerTabs(MultiplexerTabsMode.strip);
+      (_, flow) = await pumpPage(tester, const ConnectTarget.tmux('work'));
+      expect(strip, findsOneWidget);
+      expect(terminalHeight(tester), off - MultiplexerTabStrip.height);
+      await finish(tester, flow);
+    });
+
+    testWidgets('the label opens the list: tap switches, New window adds '
+        'one, long-press closes after asking', (tester) async {
+      final tmux = FakeTmux(['zsh', 'claude', 'logs'], active: 1);
+      final (_, flow) = await pumpPage(
+        tester,
+        const ConnectTarget.tmux('work'),
+        runner: tmux,
+      );
+      await tester.tap(inline);
+      await tester.pumpAndSettle();
+      final sheet = find.byKey(const ValueKey('mux-tabs-sheet'));
+      expect(sheet, findsOneWidget);
+      expect(find.text('work · 3 windows'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('mux-tabs-sheet-@2')));
+      await tester.pumpAndSettle();
+      await run(tester);
+      expect(sheet, findsNothing);
+      expect(tmux.commands, contains(TmuxWindowCommands.select('@2')));
+
+      await tester.tap(inline);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('mux-tabs-sheet-new')));
+      await tester.pumpAndSettle();
+      await run(tester);
+      expect(
+        tmux.commands,
+        contains(TmuxWindowCommands.create(afterWindowId: '@2')),
+      );
+
+      await tester.tap(inline);
+      await tester.pumpAndSettle();
+      await tester.longPress(find.byKey(const ValueKey('mux-tabs-sheet-@0')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('mux-tab-close')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('mux-tab-close-confirm')));
+      await tester.pumpAndSettle();
+      await run(tester);
+      expect(tmux.commands, contains(TmuxWindowCommands.kill('@0')));
+      await finish(tester, flow);
+    });
+
+    testWidgets('switching windows elsewhere (a swipe) shows a brief overlay', (
+      tester,
+    ) async {
+      final tmux = FakeTmux(['zsh', 'claude', 'logs'], active: 1);
+      final (_, flow) = await pumpPage(
+        tester,
+        const ConnectTarget.tmux('work'),
+        runner: tmux,
+      );
+      // The first listing is where the session was: no overlay.
+      expect(overlay, findsNothing);
+
+      // What a swipe does: keys into tmux, then the strip's quick check.
+      await tmux.run(TmuxWindowCommands.select('@2'), timeout: Duration.zero);
+      final tapAt = tester.getCenter(find.byType(TerminalView));
+      await tester.tapAt(tapAt);
+      await tester.pump(const Duration(milliseconds: 300));
+      await run(tester);
+      expect(overlay, findsOneWidget);
+      expect(
+        find.descendant(of: overlay, matching: find.text('logs · 3/3')),
+        findsOneWidget,
+      );
+      // Gone after about a second, without layout space taken meanwhile.
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(overlay, findsNothing);
+      await finish(tester, flow);
+    });
+
+    testWidgets('Ctrl+PageDown moves to the next window', (tester) async {
       final tmux = FakeTmux(['zsh', 'claude', 'logs']);
       final (_, flow) = await pumpPage(
         tester,
         const ConnectTarget.tmux('work'),
         runner: tmux,
       );
-      expect(strip, findsOneWidget);
-      expect(tmux.commands.first, TmuxWindowCommands.list('work'));
-      expect(find.text('claude'), findsOneWidget);
-
       await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
       await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
-      for (var i = 0; i < 3; i += 1) {
-        await tester.runAsync(() => Future<void>.delayed(Duration.zero));
-        await tester.pump(const Duration(milliseconds: 50));
-      }
+      await run(tester);
       expect(tmux.commands, contains(TmuxWindowCommands.select('@1')));
       await finish(tester, flow);
     });
 
-    testWidgets('a Herdr session shows the focused workspace\'s tabs', (
+    testWidgets('a Herdr session names the focused workspace\'s tab', (
       tester,
     ) async {
-      final herdr = FakeHerdr();
       final (_, flow) = await pumpPage(
         tester,
         const ConnectTarget.herdr(workspaceId: 'w4'),
-        runner: herdr,
+        runner: FakeHerdr(),
       );
-      expect(strip, findsOneWidget);
-      expect(find.text('review'), findsOneWidget);
-      expect(find.text('Infrastructure'), findsOneWidget);
+      expect(
+        find.descendant(of: inline, matching: find.text('review')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: inline, matching: find.text('2/3')),
+        findsOneWidget,
+      );
       await finish(tester, flow);
     });
 
-    testWidgets('the setting hides it', (tester) async {
-      await themeController.setMultiplexerTabs(MultiplexerTabsVisibility.never);
+    testWidgets('the strip setting shows the full strip on a phone', (
+      tester,
+    ) async {
+      await themeController.setMultiplexerTabs(MultiplexerTabsMode.strip);
       final (_, flow) = await pumpPage(
         tester,
-        const ConnectTarget.tmux('work'),
+        const ConnectTarget.herdr(workspaceId: 'w4'),
+        runner: FakeHerdr(),
       );
-      expect(strip, findsNothing);
-      expect(themeController.multiplexerTabs, MultiplexerTabsVisibility.never);
+      expect(strip, findsOneWidget);
+      expect(inline, findsNothing);
+      expect(find.text('Infrastructure'), findsOneWidget);
       await finish(tester, flow);
     });
   });

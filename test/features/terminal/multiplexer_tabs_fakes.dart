@@ -77,7 +77,14 @@ class FakeTmux implements AgentCommandRunner {
       return _ok(
         [
           for (final (i, w) in windows.indexed)
-            tmuxWindowLine(w.id, i, w.name, active: w.active),
+            tmuxWindowLine(
+              w.id,
+              i,
+              w.name,
+              active: w.active,
+              activity: w.unread ? 99 : 0,
+              bell: w.unread,
+            ),
         ].join('\n'),
       );
     }
@@ -122,6 +129,9 @@ class FakeWindow {
   final String id;
   String name;
   bool active;
+
+  /// Raises the bell flag, as news in the window would.
+  bool unread = false;
 }
 
 /// A Herdr server answering the tab strip's commands; records them.

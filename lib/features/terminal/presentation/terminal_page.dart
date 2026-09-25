@@ -77,9 +77,12 @@ import 'package:conduit/features/terminal/presentation/terminal_workspace_contro
 import 'package:conduit/features/terminal/presentation/widgets/empty_terminal_state.dart';
 import 'package:conduit/features/terminal/presentation/widgets/floating_toolbar.dart';
 import 'package:conduit/features/terminal/presentation/widgets/image_crop_page.dart';
+import 'package:conduit/features/terminal/presentation/widgets/multiplexer_tab_actions.dart';
+import 'package:conduit/features/terminal/presentation/widgets/multiplexer_tab_compact.dart';
 import 'package:conduit/features/terminal/presentation/widgets/multiplexer_tab_strip.dart';
 import 'package:conduit/features/terminal/presentation/widgets/prompt_composer_sheet.dart';
 import 'package:conduit/features/terminal/presentation/widgets/recent_directories_sheet.dart';
+import 'package:conduit/features/terminal/presentation/widgets/session_tabs.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_header.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_link_sheet.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_surface.dart';
@@ -567,6 +570,26 @@ class _TerminalPageState extends State<TerminalPage>
     final active = widget.workspace.activeSession;
     if (active == null) return;
     _muxTabs[active.host.id]?.refreshSoon();
+  }
+
+  /// Strip (desktop, or phones set to it), compact (phones) or none.
+  MultiplexerTabsLayout get _muxLayout => multiplexerTabsLayout(
+    widget.themeController.multiplexerTabs,
+    desktop: PlatformFeatures.isDesktop,
+  );
+
+  /// The compact mode's list of the session's multiplexer tabs.
+  void _openMuxTabsSheet(TerminalSessionController session) {
+    final tabs = _muxTabs[session.host.id];
+    if (tabs == null) return;
+    unawaited(
+      showMultiplexerTabsSheet(
+        context,
+        tabs,
+        sessionLabel: SessionTabs.labelFor(session, widget.workspace.sessions),
+        onDone: _focusNode.requestFocus,
+      ),
+    );
   }
 
   /// Keys the app keeps from the terminal: Ctrl+K (the quick switcher,
@@ -1797,6 +1820,11 @@ class _TerminalPageState extends State<TerminalPage>
                               onOpenSessionGrid: _openSwitcher,
                               onSwipeSession: _swipeSession,
                               onSessionActivated: _openPreferredView,
+                              multiplexerTabsFor:
+                                  _muxLayout == MultiplexerTabsLayout.compact
+                                  ? _muxTabsFor
+                                  : null,
+                              onOpenMultiplexerTabs: _openMuxTabsSheet,
                               onSessionLongPress: (session) =>
                                   unawaited(_pickSessionView(session)),
                               swipeDownOpensSessionGrid: widget
@@ -1813,18 +1841,25 @@ class _TerminalPageState extends State<TerminalPage>
                             );
                           },
                         ),
-                      if (!_fullscreen &&
-                          activeFileTab == null &&
-                          activeSession != null)
+                      // Keeps the active session's multiplexer tabs fresh;
+                      // only the strip layout takes a row.
+                      if (activeFileTab == null && activeSession != null)
                         if (_muxTabsFor(activeSession) case final muxTabs?)
-                          MultiplexerTabStrip(
+                          MultiplexerTabsPoller(
                             key: ValueKey('mux-tabs-${activeSession.host.id}'),
                             controller: muxTabs,
-                            palette: palette,
-                            brightness: brightness,
-                            visibility: widget.themeController.multiplexerTabs,
-                            desktop: PlatformFeatures.isDesktop,
-                            onChanged: _focusNode.requestFocus,
+                            active: _muxLayout != MultiplexerTabsLayout.hidden,
+                            child:
+                                !_fullscreen &&
+                                    _muxLayout == MultiplexerTabsLayout.strip
+                                ? MultiplexerTabStrip(
+                                    controller: muxTabs,
+                                    palette: palette,
+                                    brightness: brightness,
+                                    desktop: PlatformFeatures.isDesktop,
+                                    onChanged: _focusNode.requestFocus,
+                                  )
+                                : const SizedBox.shrink(),
                           ),
                       Expanded(
                         child: Stack(
@@ -1989,6 +2024,18 @@ class _TerminalPageState extends State<TerminalPage>
                                       ),
                               ),
                             ),
+                            if (activeFileTab == null &&
+                                activeSession != null &&
+                                _muxLayout == MultiplexerTabsLayout.compact &&
+                                _muxTabs[activeSession.host.id] != null)
+                              Positioned.fill(
+                                child: MultiplexerTabOverlay(
+                                  key: ValueKey(
+                                    'mux-overlay-${activeSession.host.id}',
+                                  ),
+                                  controller: _muxTabs[activeSession.host.id]!,
+                                ),
+                              ),
                             if (_pasteStatus case final status?)
                               Positioned(
                                 top: 8,

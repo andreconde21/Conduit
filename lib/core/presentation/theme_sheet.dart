@@ -532,15 +532,17 @@ class _TerminalAppearanceControls extends StatelessWidget {
                     const Icon(Icons.tab_rounded, size: 20),
                     const SizedBox(width: 10),
                     Text(
-                      'Show multiplexer tabs',
+                      'Multiplexer tabs on phone',
                       style: theme.textTheme.titleSmall,
                     ),
                   ],
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Herdr tabs and tmux windows under the top row. Auto shows '
-                  'them from two tabs on a phone, always on a computer.',
+                  'Herdr tabs and tmux windows. Compact names the current one '
+                  'in the session tab (tap it for the list) and costs no '
+                  'screen space; Strip adds a row, for tablets. A computer '
+                  'always shows the strip.',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: colorScheme.onSurfaceVariant,
                   ),
@@ -548,10 +550,10 @@ class _TerminalAppearanceControls extends StatelessWidget {
                 const SizedBox(height: 12),
                 SizedBox(
                   width: double.infinity,
-                  child: SegmentedButton<MultiplexerTabsVisibility>(
+                  child: SegmentedButton<MultiplexerTabsMode>(
                     segments: [
-                      for (final value in MultiplexerTabsVisibility.values)
-                        ButtonSegment<MultiplexerTabsVisibility>(
+                      for (final value in MultiplexerTabsMode.values)
+                        ButtonSegment<MultiplexerTabsMode>(
                           value: value,
                           label: Text(value.label),
                         ),

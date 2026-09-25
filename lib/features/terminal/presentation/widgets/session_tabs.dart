@@ -2,9 +2,11 @@ import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
+import 'package:conduit/features/terminal/presentation/multiplexer_tabs_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_file_tabs_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
+import 'package:conduit/features/terminal/presentation/widgets/multiplexer_tab_compact.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
@@ -29,6 +31,8 @@ class SessionTabs extends StatefulWidget {
     this.onSessionActivated,
     this.onSessionLongPress,
     this.touchScrolls = true,
+    this.multiplexerTabsFor,
+    this.onOpenMultiplexerTabs,
     super.key,
   });
 
@@ -53,6 +57,14 @@ class SessionTabs extends StatefulWidget {
   /// on the row switches sessions: the strip then follows the active tab,
   /// and a mouse or trackpad still scrolls it.
   final bool touchScrolls;
+
+  /// The multiplexer tabs to name inside a session's (active) tab, the
+  /// phone's compact mode; null names none.
+  final MultiplexerTabsController? Function(TerminalSessionController)?
+  multiplexerTabsFor;
+
+  /// A tap on that name: the list of the multiplexer's tabs.
+  final ValueChanged<TerminalSessionController>? onOpenMultiplexerTabs;
 
   /// Height of one tab chip.
   static const tabHeight = 30.0;
@@ -159,9 +171,22 @@ class _SessionTabsState extends State<SessionTabs> {
           final session = sessions[index];
           final selected =
               widget.activeFileTab == null && session == widget.activeSession;
+          final muxTabs = selected
+              ? widget.multiplexerTabsFor?.call(session)
+              : null;
           return _Tab(
             key: selected ? _activeKey : ValueKey(session),
             label: SessionTabs.labelFor(session, sessions),
+            inline: muxTabs == null
+                ? null
+                : MultiplexerTabInlineLabel(
+                    controller: muxTabs,
+                    color: widget.palette.foregroundFor(widget.brightness),
+                    mutedColor: widget.palette.mutedForegroundFor(
+                      widget.brightness,
+                    ),
+                    onTap: () => widget.onOpenMultiplexerTabs?.call(session),
+                  ),
             tooltip: '${session.title}\n${session.host.endpoint}',
             leading: _SessionLeading(session: session),
             selected: selected,
@@ -247,6 +272,7 @@ class _Tab extends StatelessWidget {
     required this.onTap,
     required this.onClose,
     this.onLongPress,
+    this.inline,
     this.dirty = false,
     super.key,
   });
@@ -261,6 +287,9 @@ class _Tab extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onClose;
   final VoidCallback? onLongPress;
+
+  /// Tappable extra after the label (the current multiplexer tab).
+  final Widget? inline;
 
   @override
   Widget build(BuildContext context) {
@@ -287,7 +316,7 @@ class _Tab extends StatelessWidget {
           onLongPress: onLongPress,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 140),
-            constraints: const BoxConstraints(maxWidth: 176),
+            constraints: BoxConstraints(maxWidth: inline == null ? 176 : 280),
             decoration: BoxDecoration(
               color: background,
               borderRadius: BorderRadius.circular(AppTheme.radius),
@@ -315,6 +344,7 @@ class _Tab extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (inline != null) Flexible(child: inline!),
                 if (dirty)
                   Padding(
                     padding: const EdgeInsets.only(left: 4),

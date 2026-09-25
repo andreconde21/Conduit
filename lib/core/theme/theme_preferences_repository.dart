@@ -33,7 +33,7 @@ class ThemePreferences {
     this.remoteClipboardEnabled = true,
     this.pasteImagesAsFiles = true,
     this.restoreSessionsOnLaunch = true,
-    this.multiplexerTabs = MultiplexerTabsVisibility.auto,
+    this.multiplexerTabs = MultiplexerTabsMode.compact,
     this.omarchySyncHostId,
     this.omarchySyncedTheme,
   });
@@ -91,8 +91,8 @@ class ThemePreferences {
   /// list is kept in secure storage). On by default.
   final bool restoreSessionsOnLaunch;
 
-  /// When the multiplexer's tabs show under the terminal's top row.
-  final MultiplexerTabsVisibility multiplexerTabs;
+  /// How a phone or tablet shows the multiplexer's tabs.
+  final MultiplexerTabsMode multiplexerTabs;
 
   /// The saved machine whose Omarchy theme the app follows; null when the
   /// app uses [palette].
@@ -141,7 +141,7 @@ class ThemePreferencesRepository {
   static const _pasteImagesAsFilesKey = 'conductore.paste_images_as_files.v1';
   static const _restoreSessionsOnLaunchKey =
       'conductore.restore_sessions_on_launch.v1';
-  static const _multiplexerTabsKey = 'conductore.multiplexer_tabs.v1';
+  static const _multiplexerTabsKey = 'conductore.multiplexer_tabs_phone.v1';
 
   final FlutterSecureStorage _storage;
 
@@ -254,9 +254,9 @@ class ThemePreferencesRepository {
       restoreSessionsOnLaunch:
           rawRestoreSessionsOnLaunch == null ||
           rawRestoreSessionsOnLaunch == 'true',
-      multiplexerTabs: MultiplexerTabsVisibility.values.firstWhere(
+      multiplexerTabs: MultiplexerTabsMode.values.firstWhere(
         (value) => value.name == rawMultiplexerTabs,
-        orElse: () => MultiplexerTabsVisibility.auto,
+        orElse: () => MultiplexerTabsMode.compact,
       ),
       pasteImagesAsFiles:
           rawPasteImagesAsFiles == null || rawPasteImagesAsFiles == 'true',
