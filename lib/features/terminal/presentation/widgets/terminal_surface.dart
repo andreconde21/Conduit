@@ -76,7 +76,8 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
   Offset? _longPressOrigin;
 
   // One-finger drags that scroll the remote program.
-  late final _RemoteScrollDragRecognizer _remoteDrag;
+  // Owned (and disposed) by its RawGestureDetector.
+  _RemoteScrollDragRecognizer? _remoteDrag;
   final _remoteScroll = RemoteScrollAccumulator();
   RemoteScrollRoute _remoteRoute = RemoteScrollRoute.local;
   Offset _remoteDragPosition = Offset.zero;
@@ -98,11 +99,6 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
       pointerInputs: _pointerInputsFor(widget.terminalMouseInput),
     );
     widget.session.predictiveEchoEnabled = widget.predictiveEchoEnabled;
-    _remoteDrag = _RemoteScrollDragRecognizer(claim: _claimRemoteDrag)
-      ..onStart = _handleRemoteDragStart
-      ..onUpdate = _handleRemoteDragUpdate
-      ..onEnd = _handleRemoteDragEnd
-      ..onCancel = _remoteScroll.reset;
     WidgetsBinding.instance.addPostFrameCallback((_) => _connectIfNeeded());
   }
 
@@ -133,7 +129,6 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
   @override
   void dispose() {
     _stopMomentum();
-    _remoteDrag.dispose();
     _longPressTimer?.cancel();
     _terminalController.dispose();
     super.dispose();
@@ -251,7 +246,7 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
     if (_pointersDown > 1) {
       // Two fingers belong to the gesture layer (pinch, two-finger
       // scrollback, Herdr swipes), not to a one-finger drag.
-      _remoteDrag.yieldToMultiTouch();
+      _remoteDrag?.yieldToMultiTouch();
     }
     // A second finger (pinch, two-finger scroll) is never a long press.
     final multiTouch = _longPressPointer != null;
@@ -471,6 +466,36 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
               },
             ),
           ),
+          if (widget.dragScrollsRemote)
+            // Above the terminal view so it sees each move first: the
+            // view's own scrollables would otherwise take the drag and, on
+            // the alternate screen, send Shift+wheel (see
+            // encodeWheelEvent). It only joins the arena for drags that
+            // belong to the remote program, so local scrollback, taps and
+            // long-press selection behave as before. It stays mounted in
+            // scroll mode (declining every drag there) so a drag that
+            // enters copy mode keeps going.
+            Positioned.fill(
+              child: RawGestureDetector(
+                behavior: HitTestBehavior.translucent,
+                gestures: {
+                  _RemoteScrollDragRecognizer:
+                      GestureRecognizerFactoryWithHandlers<
+                        _RemoteScrollDragRecognizer
+                      >(
+                        () => _RemoteScrollDragRecognizer(
+                          claim: _claimRemoteDrag,
+                        ),
+                        (recognizer) => _remoteDrag = recognizer
+                          ..onStart = _handleRemoteDragStart
+                          ..onUpdate = _handleRemoteDragUpdate
+                          ..onEnd = _handleRemoteDragEnd
+                          ..onCancel = _remoteScroll.reset,
+                      ),
+                },
+                child: const SizedBox.expand(),
+              ),
+            ),
           if (widget.tmuxScrollMode)
             Positioned.fill(
               child: GestureDetector(
@@ -479,25 +504,6 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
                 onVerticalDragEnd: _handleTmuxScrollEnd,
                 // Copy mode a drag opened on its own closes with a tap.
                 onTap: _dragEnteredScrollMode ? _leaveDragScrollMode : null,
-                child: const SizedBox.expand(),
-              ),
-            )
-          else if (widget.dragScrollsRemote)
-            // Above the terminal view so it sees each move first: the
-            // view's own scrollables would otherwise take the drag and, on
-            // the alternate screen, send Shift+wheel (see
-            // encodeWheelEvent). It only joins the arena for drags that
-            // belong to the remote program, so local scrollback, taps and
-            // long-press selection behave as before.
-            Positioned.fill(
-              child: RawGestureDetector(
-                behavior: HitTestBehavior.translucent,
-                gestures: {
-                  _RemoteScrollDragRecognizer:
-                      GestureRecognizerFactoryWithHandlers<
-                        _RemoteScrollDragRecognizer
-                      >(() => _remoteDrag, (_) {}),
-                },
                 child: const SizedBox.expand(),
               ),
             ),
