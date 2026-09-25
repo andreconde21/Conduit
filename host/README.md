@@ -12,7 +12,7 @@ relay, nothing listening on the network.
                                                           ▼
                                                    conductore-hostd (Node daemon)
                                                           ▲ unix socket
-    phone ──ssh user@host "conductore-hostd status|events|decide|transcript|send|ports|usage"
+    phone ──ssh user@host "conductore-hostd status|events|decide|transcript|send|ports|usage|summarize"
 
 Built to cost nothing while agents work: a hook event is one `cat` and one
 `ln` (about 2.5 ms and 2 MB, no Node start), and the daemon sleeps until a
@@ -66,6 +66,7 @@ starts it when the spool is not empty. `conductore-hostd stop` stops it;
 | `~/.conductore/state.json` | atomic snapshot of the state, read by `status` when the daemon is down |
 | `~/.conductore/ports.json` | listening ports and the seq each first appeared at (`ports`) |
 | `~/.conductore/usage-cache.json` | `usage`: per-transcript offsets and daily token sums, last 31 days (about 1.3 MB for 1,100 transcripts) |
+| `~/.conductore/summarize.lock` | pid of the running `summarize` (one at a time; never the text) |
 | `~/.conductore/hostd.log` | log, rotated once at 1 MB to `hostd.log.1` |
 | `~/.conductore/always-rules.json` | record of every rule added through an "always" decision |
 
@@ -351,7 +352,7 @@ session's context, and tokens with an estimated cost per local day,
 project and model.
 
 ```json
-{"version":"0.6.0","schema":1,"machine":"devbox","generatedAt":1790340104253,
+{"version":"0.7.0","schema":1,"machine":"devbox","generatedAt":1790340104253,
  "timeZone":"Europe/Lisbon","today":"2026-09-25","from":"2026-09-19",
  "claude":{"present":true,
    "limits":[{"label":"5h","usedPct":42,"resetsAt":1790348400000,"expired":false},
@@ -413,6 +414,45 @@ project and model.
   the daemon's event path, and a second concurrent call answers from the
   cache with `scan.busy: true` instead of scanning too.
 
+### `conductore-hostd summarize [--max-words 45] [--timeout-ms 20000]`
+
+A spoken version of an assistant reply for the phone's "Claude summary"
+read-aloud mode: one or two sentences, plain words, at most `--max-words`
+(5–200) words. The reply comes on stdin (UTF-8; beyond 64 KB it is
+truncated), never as an argument. Exactly one JSON line on stdout and exit
+0 in every case:
+
+```json
+{"schema":1,"summary":"The nightly build failed because the lockfile was made with npm 11 but CI runs npm 9. I pinned npm to 11. Should I open a pull request?","ms":2830,"model":"claude-haiku-4-5-20251001"}
+{"schema":1,"summary":"Done. The tests pass.","ms":0,"model":null,"passthrough":true}
+{"schema":1,"error":"timeout","message":"claude did not answer within 20000 ms"}
+```
+
+* A reply under 40 words (or no longer than `--max-words`), markdown
+  stripped, comes back as it is with `passthrough: true`; claude is not
+  called.
+* `error`: `claude-missing` (not on PATH, `~/.local/bin` or
+  `~/.claude/local`), `not-logged-in`, `timeout`, `busy` (another
+  `summarize` still ran after 2 s), `failed` (anything else, including
+  empty input and bad flags).
+* It runs `claude -p --tools "" --safe-mode --no-session-persistence
+  --output-format json --model haiku --system-prompt <fixed instruction>`
+  with the reply on stdin between random delimiters and marked as content,
+  never instructions. No tools; `--safe-mode` skips hooks (the companion's
+  own included, so the call never shows up as an agent), skills, plugins,
+  MCP servers and CLAUDE.md; nothing is written under `~/.claude/projects`.
+  `MAX_THINKING_TOKENS=0`: with extended thinking Haiku took 5–55 s here,
+  without it about 3 s (2.8 s median on development-central).
+* The answer is stripped of markdown, a "Summary:" label and quotes, and cut
+  to the word cap at a sentence boundary, keeping a closing question.
+* A CLI one-shot like `usage`: no daemon, no cost at idle. It runs at nice
+  10, claude in its own process group (killed on timeout, SIGHUP, SIGINT or
+  SIGTERM), one call per user at a time (`~/.conductore/summarize.lock`
+  holds only a pid). The text is never logged or written to disk.
+* Claude Code itself still does its start-up bookkeeping for the call: a
+  `~/.claude/sessions/<pid>.json` entry removed at exit, `~/.claude.json`
+  counters, and plugin marketplace refreshes.
+
 ### `conductore-hostd statusline [--chain '<cmd>']`
 
 Not for the phone: the Node statusline of 0.3, kept so a not yet migrated
@@ -422,12 +462,12 @@ instead. See Usage.
 ### Others
 
 * `install` / `uninstall`: `{"ok":true,"settings":"…/settings.json","hook":"…/conductore-hook","statusline":"…/conductore-statusline","events":[…],"statusLine":"set|wrapped|updated|unchanged"}` / `{"ok":true,"removed":[…],"statusLineRestored":true,"daemonStopped":true}`
-* `doctor`: `{"ok":true,"user":"andre","checks":[{"name":"hooks registered","ok":true,"detail":"9 events"},{"name":"statusline (usage)","ok":true,"detail":"wired, wrapping: ~/bin/my-line"},{"name":"hook latency","ok":true,"detail":"3.1 ms per event (median of 5, no-op event)"},{"name":"daemon memory","ok":true,"detail":"45.9 MB RSS, 180 ms CPU in 3600 s, version 0.6.0"}, …]}`
+* `doctor`: `{"ok":true,"user":"andre","checks":[{"name":"hooks registered","ok":true,"detail":"9 events"},{"name":"statusline (usage)","ok":true,"detail":"wired, wrapping: ~/bin/my-line"},{"name":"hook latency","ok":true,"detail":"3.1 ms per event (median of 5, no-op event)"},{"name":"daemon memory","ok":true,"detail":"45.9 MB RSS, 180 ms CPU in 3600 s, version 0.7.0"}, …]}`
   (a missing statusline, daemon or latency does not make `ok` false; the
   latency is measured around the spawn from Node, so it includes a little
   process start-up; with no daemon running, it starts one)
 * `stop`: `{"ok":true,"running":true,"stopped":true}` or `{"ok":true,"running":false}`
-* `version`: `{"version":"0.6.0","protocol":1,"node":"22.23.1"}`
+* `version`: `{"version":"0.7.0","protocol":1,"node":"22.23.1"}`
 * `daemon [--detach]`: runs the daemon (what the clients start;
   `--detach` starts it in its own session with the flags from Footprint).
 
@@ -628,7 +668,10 @@ settings merge, `test/transcript.test.js` the transcript reader,
 the sh statusline (default line parity with `lib/statusline.js`, hold and
 park throttle, `--chain` passthrough) through a real daemon,
 `test/chat.test.js` the `transcript`/`send`/`interrupt` commands (with fake
-`tmux`/`herdr` binaries that record their arguments), and
+`tmux`/`herdr` binaries that record their arguments),
+`test/summarize.test.js` the `summarize` command with a fake `claude`
+(argv, passthrough, markdown and word cap, timeout kill, busy, truncation),
+and
 `test/daemon.test.js` spawns a real daemon on a temp socket and drives the sh
 hook and the CLI through spool handoff (daemon down, ordering, staging
 cleanup), tmux/Herdr location, the FIFO permission flows (allow, deny,

@@ -17,7 +17,7 @@ const os = require('os')
 const path = require('path')
 
 const PROTOCOL_VERSION = 1
-const VERSION = '0.6.0'
+const VERSION = '0.7.0'
 
 // V8 flags the daemon runs with (measured in README "Footprint"). It holds a
 // few hundred KB of state: small heap limits keep V8 from growing, lite mode
