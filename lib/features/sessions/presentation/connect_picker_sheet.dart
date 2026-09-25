@@ -631,8 +631,8 @@ class _Badge extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final (background, foreground) = switch (tone) {
       _BadgeTone.success => (
-        const Color(0xFF22C55E).withValues(alpha: 0.18),
-        const Color(0xFF16A34A),
+        colorScheme.primary.withValues(alpha: 0.18),
+        colorScheme.primary,
       ),
       _BadgeTone.danger => (
         colorScheme.error.withValues(alpha: 0.16),
@@ -647,7 +647,7 @@ class _Badge extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
         color: background,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: AppTheme.borderRadius,
       ),
       child: Text(
         label,
