@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:conduit/core/theme/app_palette.dart';
+import 'package:conduit/features/terminal/domain/terminal_link_detector.dart';
 import 'package:conduit/features/terminal/domain/terminal_path_detector.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit_vt/conduit_vt.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 class TerminalSurface extends StatefulWidget {
@@ -17,6 +21,8 @@ class TerminalSurface extends StatefulWidget {
     required this.tmuxScrollMode,
     required this.onExitTmuxScrollMode,
     this.onPathTap,
+    this.onLinkTap,
+    this.onLinkLongPress,
     super.key,
   });
 
@@ -35,6 +41,14 @@ class TerminalSurface extends StatefulWidget {
   /// file path.
   final ValueChanged<String>? onPathTap;
 
+  /// Called when the user taps an http(s) link in the output.
+  final ValueChanged<String>? onLinkTap;
+
+  /// Called when the user long-presses an http(s) link, with the link and
+  /// the logical line it sits on. The word selection the long press makes
+  /// stays unless the callback resolves to true (an action was taken).
+  final Future<bool> Function(String url, String line)? onLinkLongPress;
+
   @override
   State<TerminalSurface> createState() => _TerminalSurfaceState();
 }
@@ -42,6 +56,10 @@ class TerminalSurface extends StatefulWidget {
 class _TerminalSurfaceState extends State<TerminalSurface> {
   double _tmuxScrollDelta = 0;
   late final TerminalController _terminalController;
+  final _viewKey = GlobalKey<TerminalViewState>();
+  Timer? _longPressTimer;
+  int? _longPressPointer;
+  Offset? _longPressOrigin;
 
   static PointerInputs _pointerInputsFor(bool terminalMouseInput) {
     return terminalMouseInput
@@ -78,6 +96,7 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
 
   @override
   void dispose() {
+    _longPressTimer?.cancel();
     _terminalController.dispose();
     super.dispose();
   }
@@ -108,25 +127,48 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
   static const _maxWrappedRows = 8;
 
   void _handleTapUp(TapUpDetails details, CellOffset offset) {
-    final onPathTap = widget.onPathTap;
-    if (onPathTap == null || widget.tmuxScrollMode) {
-      return;
-    }
-    final terminal = widget.session.terminal;
-    final lines = terminal.buffer.lines;
-    if (offset.y < 0 || offset.y >= lines.length) {
+    if (widget.tmuxScrollMode) {
       return;
     }
     // The cursor row is the prompt or the command being typed. Tapping there
     // is how the keyboard gets summoned on a phone, and prompts routinely
     // show the working directory, so it must not raise an "Open" snackbar on
     // every tap. Output above the cursor is unaffected.
-    if (offset.y == terminal.buffer.absoluteCursorY) {
+    if (offset.y == widget.session.terminal.buffer.absoluteCursorY) {
       return;
     }
-    // Join soft-wrapped rows into one logical line so a path broken across
-    // rows is still recognized; earlier rows are padded back to full width
-    // because getText() trims trailing blanks.
+    final line = _logicalLineAt(offset);
+    if (line == null) {
+      return;
+    }
+    final onLinkTap = widget.onLinkTap;
+    if (onLinkTap != null) {
+      final url = terminalUrlAt(line.text, line.column);
+      if (url != null) {
+        onLinkTap(url);
+        return;
+      }
+    }
+    final onPathTap = widget.onPathTap;
+    if (onPathTap == null) {
+      return;
+    }
+    final path = terminalPathAt(line.text, line.column);
+    if (path != null) {
+      onPathTap(path);
+    }
+  }
+
+  /// The logical line under [offset] with soft-wrapped rows joined, so a
+  /// path or link broken across rows is still recognized, and the tapped
+  /// column translated into it. Earlier rows are padded back to full width
+  /// because getText() trims trailing blanks.
+  ({String text, int column})? _logicalLineAt(CellOffset offset) {
+    final terminal = widget.session.terminal;
+    final lines = terminal.buffer.lines;
+    if (offset.y < 0 || offset.y >= lines.length) {
+      return null;
+    }
     var first = offset.y;
     while (first > 0 &&
         offset.y - first < _maxWrappedRows &&
@@ -149,9 +191,71 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
       }
       buffer.write(text);
     }
-    final path = terminalPathAt(buffer.toString(), column);
-    if (path != null) {
-      onPathTap(path);
+    return (text: buffer.toString(), column: column);
+  }
+
+  // Long press on a link. The terminal's own long press (word selection)
+  // lives inside TerminalView's gesture arena; a raw Listener watches the
+  // same pointer without competing, so selection keeps working and the
+  // link menu opens on top of it.
+  void _handlePointerDown(PointerDownEvent event) {
+    // A second finger (pinch, two-finger scroll) is never a long press.
+    final multiTouch = _longPressPointer != null;
+    _cancelLongPress();
+    if (multiTouch || widget.onLinkLongPress == null || widget.tmuxScrollMode) {
+      return;
+    }
+    _longPressPointer = event.pointer;
+    _longPressOrigin = event.position;
+    _longPressTimer = Timer(kLongPressTimeout, () {
+      final origin = _longPressOrigin;
+      _longPressPointer = null;
+      if (origin != null) {
+        unawaited(_handleLinkLongPress(origin));
+      }
+    });
+  }
+
+  void _handlePointerMove(PointerMoveEvent event) {
+    final origin = _longPressOrigin;
+    if (event.pointer == _longPressPointer &&
+        origin != null &&
+        (event.position - origin).distance > kTouchSlop) {
+      _cancelLongPress();
+    }
+  }
+
+  void _handlePointerEnd(PointerEvent event) {
+    if (event.pointer == _longPressPointer) {
+      _cancelLongPress();
+    }
+  }
+
+  void _cancelLongPress() {
+    _longPressTimer?.cancel();
+    _longPressTimer = null;
+    _longPressPointer = null;
+    _longPressOrigin = null;
+  }
+
+  Future<void> _handleLinkLongPress(Offset globalPosition) async {
+    final onLinkLongPress = widget.onLinkLongPress;
+    final render = _viewKey.currentState?.renderTerminal;
+    if (onLinkLongPress == null || render == null || !render.attached) {
+      return;
+    }
+    final offset = render.getCellOffset(render.globalToLocal(globalPosition));
+    final line = _logicalLineAt(offset);
+    if (line == null) {
+      return;
+    }
+    final url = terminalUrlAt(line.text, line.column);
+    if (url == null) {
+      return;
+    }
+    final acted = await onLinkLongPress(url, line.text.trimRight());
+    if (acted && mounted) {
+      _terminalController.clearSelection();
     }
   }
 
@@ -160,32 +264,40 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
     return ClipRect(
       child: Stack(
         children: [
-          ListenableBuilder(
-            listenable: widget.session.terminalPaintListenable,
-            builder: (context, _) {
-              final overlays = widget.session.overlays;
-              return TerminalView(
-                widget.session.terminal,
-                controller: _terminalController,
-                onTapUp: _handleTapUp,
-                focusNode: widget.focusNode,
-                autofocus: widget.focusNode != null,
-                deleteDetection: true,
-                keyboardType: TextInputType.visiblePassword,
-                theme: widget.palette.terminalThemeFor(widget.brightness),
-                overlays: overlays,
-                textStyle: TerminalStyle(
-                  fontFamily: widget.fontFamily,
-                  fontSize: widget.fontSize,
-                ),
-                padding: const EdgeInsets.fromLTRB(0, 6, 0, 4),
-                cursorType: overlays.isEmpty
-                    ? TerminalCursorType.block
-                    : TerminalCursorType.verticalBar,
-                alwaysShowCursor: true,
-                simulateScroll: !widget.tmuxScrollMode,
-              );
-            },
+          Listener(
+            behavior: HitTestBehavior.translucent,
+            onPointerDown: _handlePointerDown,
+            onPointerMove: _handlePointerMove,
+            onPointerUp: _handlePointerEnd,
+            onPointerCancel: _handlePointerEnd,
+            child: ListenableBuilder(
+              listenable: widget.session.terminalPaintListenable,
+              builder: (context, _) {
+                final overlays = widget.session.overlays;
+                return TerminalView(
+                  widget.session.terminal,
+                  key: _viewKey,
+                  controller: _terminalController,
+                  onTapUp: _handleTapUp,
+                  focusNode: widget.focusNode,
+                  autofocus: widget.focusNode != null,
+                  deleteDetection: true,
+                  keyboardType: TextInputType.visiblePassword,
+                  theme: widget.palette.terminalThemeFor(widget.brightness),
+                  overlays: overlays,
+                  textStyle: TerminalStyle(
+                    fontFamily: widget.fontFamily,
+                    fontSize: widget.fontSize,
+                  ),
+                  padding: const EdgeInsets.fromLTRB(0, 6, 0, 4),
+                  cursorType: overlays.isEmpty
+                      ? TerminalCursorType.block
+                      : TerminalCursorType.verticalBar,
+                  alwaysShowCursor: true,
+                  simulateScroll: !widget.tmuxScrollMode,
+                );
+              },
+            ),
           ),
           if (widget.tmuxScrollMode)
             Positioned.fill(

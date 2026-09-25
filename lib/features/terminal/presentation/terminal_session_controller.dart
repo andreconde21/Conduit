@@ -87,6 +87,7 @@ class TerminalSessionController extends ChangeNotifier {
   /// The window title the remote application last set (OSC 0/2), empty
   /// until one arrives. Herdr and tmux both keep it current.
   String get terminalTitle => _terminalTitle;
+
   /// Text the remote asked to put on the clipboard with OSC 52 (vim, tmux
   /// `set-clipboard on`, Claude Code's copy). Already decoded, capped at
   /// [osc52MaxBytes]; read requests are never answered. Whether it reaches

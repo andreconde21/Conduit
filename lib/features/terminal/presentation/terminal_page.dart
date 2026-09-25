@@ -30,6 +30,7 @@ import 'package:conduit/features/share_target/presentation/share_target_controll
 import 'package:conduit/features/share_target/presentation/share_target_scope.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:conduit/features/terminal/domain/security_key_interaction.dart';
+import 'package:conduit/features/terminal/domain/terminal_link_detector.dart';
 import 'package:conduit/features/terminal/presentation/gestures/terminal_gesture_layer.dart';
 import 'package:conduit/features/terminal/presentation/security_key_picker_dialog.dart';
 import 'package:conduit/features/terminal/presentation/security_key_pin_dialog.dart';
@@ -42,6 +43,7 @@ import 'package:conduit/features/terminal/presentation/widgets/floating_toolbar.
 import 'package:conduit/features/terminal/presentation/widgets/prompt_composer_sheet.dart';
 import 'package:conduit/features/terminal/presentation/widgets/session_tools_menu.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_header.dart';
+import 'package:conduit/features/terminal/presentation/widgets/terminal_link_sheet.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_surface.dart';
 import 'package:conduit/features/voice/data/platform_speech_recognizer.dart';
 import 'package:conduit/features/voice/domain/speech_recognizer.dart';
@@ -52,6 +54,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 class TerminalPage extends StatefulWidget {
@@ -82,6 +85,7 @@ class TerminalPage extends StatefulWidget {
 
   /// Remembers the last previewed port per host.
   final LivePreviewPortStore livePreviewPortStore;
+
   /// Optional connect flow for the session grid's "+" tile.
   final SessionConnectFlow? connectFlow;
 
@@ -239,8 +243,9 @@ class _TerminalPageState extends State<TerminalPage> {
       return true;
     });
     for (final session in sessions) {
-      _clipboardSubscriptions[session] ??= session.remoteClipboardWrites
-          .listen((text) => _handleRemoteClipboardWrite(session, text));
+      _clipboardSubscriptions[session] ??= session.remoteClipboardWrites.listen(
+        (text) => _handleRemoteClipboardWrite(session, text),
+      );
     }
   }
 
@@ -315,6 +320,113 @@ class _TerminalPageState extends State<TerminalPage> {
             onPressed: () => _fileTabs.open(session.host, path),
           ),
         ),
+      );
+  }
+
+  /// A tapped link: a snackbar to open or copy it. Links to the host's own
+  /// ports (localhost:3000) open in the live preview, since the phone's
+  /// browser would look for them on the phone.
+  void _handleLinkTap(TerminalSessionController session, String url) {
+    final previewPort = _previewPortFor(session, url);
+    final messenger = ScaffoldMessenger.of(context);
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Expanded(
+                child: Text(url, maxLines: 1, overflow: TextOverflow.ellipsis),
+              ),
+              TextButton(
+                onPressed: () {
+                  messenger.hideCurrentSnackBar();
+                  _copyToClipboard(url, 'Link copied');
+                },
+                child: const Text('Copy'),
+              ),
+            ],
+          ),
+          duration: const Duration(seconds: 5),
+          action: SnackBarAction(
+            label: previewPort == null ? 'Open' : 'Preview',
+            onPressed: () => previewPort == null
+                ? unawaited(_openInBrowser(url))
+                : unawaited(
+                    _openLivePreview(
+                      session,
+                      port: previewPort,
+                      path: previewPathOf(url),
+                    ),
+                  ),
+          ),
+        ),
+      );
+  }
+
+  Future<bool> _handleLinkLongPress(
+    TerminalSessionController session,
+    String url,
+    String line,
+  ) async {
+    final previewPort = _previewPortFor(session, url);
+    final action = await showTerminalLinkSheet(
+      context,
+      url: url,
+      previewPort: previewPort,
+    );
+    if (!mounted || action == null) {
+      return false;
+    }
+    switch (action) {
+      case TerminalLinkAction.openInBrowser:
+        unawaited(_openInBrowser(url));
+      case TerminalLinkAction.openInPreview:
+        unawaited(
+          _openLivePreview(
+            session,
+            port: previewPort,
+            path: previewPathOf(url),
+          ),
+        );
+      case TerminalLinkAction.copyLink:
+        _copyToClipboard(url, 'Link copied');
+      case TerminalLinkAction.copyText:
+        _copyToClipboard(line, 'Line copied');
+    }
+    return true;
+  }
+
+  int? _previewPortFor(TerminalSessionController session, String url) {
+    if (session.host.isLocal || widget.hostKeyVerifier == null) {
+      return null;
+    }
+    return loopbackPreviewPort(url);
+  }
+
+  Future<void> _openInBrowser(String url) async {
+    final uri = Uri.tryParse(url);
+    var opened = false;
+    if (uri != null) {
+      try {
+        opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } catch (_) {
+        opened = false;
+      }
+    }
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('No app can open it')));
+    }
+  }
+
+  void _copyToClipboard(String text, String message) {
+    unawaited(Clipboard.setData(ClipboardData(text: text)));
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
       );
   }
 
@@ -441,7 +553,13 @@ class _TerminalPageState extends State<TerminalPage> {
     }
   }
 
-  Future<void> _openLivePreview(TerminalSessionController session) async {
+  /// Opens the host's live preview tab. With [port] (a tapped
+  /// localhost link) the port dialog is skipped and [path] is loaded.
+  Future<void> _openLivePreview(
+    TerminalSessionController session, {
+    int? port,
+    String? path,
+  }) async {
     final verifier = widget.hostKeyVerifier;
     if (verifier == null) {
       return;
@@ -453,6 +571,16 @@ class _TerminalPageState extends State<TerminalPage> {
         .firstOrNull;
     if (existing != null) {
       _fileTabs.activate(existing);
+      final controller = existing.controller;
+      if (port != null &&
+          (controller.remotePort != port ||
+              controller.path !=
+                  LivePreviewController.normalizePath(path ?? '/'))) {
+        controller.setPath(path ?? '/');
+        // Restarting rebinds the local port, which reloads the WebView on
+        // the new path.
+        unawaited(controller.start(port));
+      }
       return;
     }
     final controller = LivePreviewController(
@@ -461,24 +589,30 @@ class _TerminalPageState extends State<TerminalPage> {
       portStore: widget.livePreviewPortStore,
       commandRunner: SshAgentCommandRunner(verifier, host),
     );
-    final initialPort = await controller.suggestedPort();
-    if (!mounted) {
-      controller.dispose();
-      return;
+    final int? chosenPort;
+    if (port != null) {
+      chosenPort = port;
+      controller.setPath(path ?? '/');
+    } else {
+      final initialPort = await controller.suggestedPort();
+      if (!mounted) {
+        controller.dispose();
+        return;
+      }
+      chosenPort = await showLivePreviewPortDialog(
+        context,
+        initialPort: initialPort,
+        detectPorts: controller.detectPorts,
+        hostName: host.name,
+      );
     }
-    final port = await showLivePreviewPortDialog(
-      context,
-      initialPort: initialPort,
-      detectPorts: controller.detectPorts,
-      hostName: host.name,
-    );
-    if (port == null || !mounted) {
+    if (chosenPort == null || !mounted) {
       controller.dispose();
       return;
     }
     controller.attachSession(session, () => session.isConnected);
     _fileTabs.add(LivePreviewTab(host: host, controller: controller));
-    unawaited(controller.start(port));
+    unawaited(controller.start(chosenPort));
   }
 
   Future<void> _changePreviewPort(LivePreviewTab tab) async {
@@ -701,6 +835,14 @@ class _TerminalPageState extends State<TerminalPage> {
                                         },
                                         onPathTap: (path) =>
                                             _handlePathTap(session, path),
+                                        onLinkTap: (url) =>
+                                            _handleLinkTap(session, url),
+                                        onLinkLongPress: (url, line) =>
+                                            _handleLinkLongPress(
+                                              session,
+                                              url,
+                                              line,
+                                            ),
                                       ),
                                     ),
                                   for (final tab in fileTabs)
