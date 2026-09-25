@@ -256,6 +256,8 @@ class TwoFingerUpdate {
     required this.focalStep,
     required this.scale,
     required this.spanDelta,
+    this.firstDelta = Offset.zero,
+    this.secondDelta = Offset.zero,
   });
 
   /// Movement of the midpoint between the two fingers since the gesture
@@ -270,6 +272,12 @@ class TwoFingerUpdate {
 
   /// Change in finger distance since the gesture started, in pixels.
   final double spanDelta;
+
+  /// Movement of each finger since the gesture started. Fingers report
+  /// their moves in separate events, so a two-finger swipe briefly looks
+  /// like a pinch in [spanDelta]; comparing the fingers tells them apart.
+  final Offset firstDelta;
+  final Offset secondDelta;
 }
 
 /// Claims both pointers of a two-finger touch as soon as the second finger
@@ -294,6 +302,8 @@ class TwoFingerGestureRecognizer extends TerminalPointerMember {
   Offset? _startFocal;
   Offset? _lastFocal;
   double? _startSpan;
+  Offset? _startFirst;
+  Offset? _startSecond;
   bool _active = false;
 
   bool get isActive => _active;
@@ -316,6 +326,8 @@ class TwoFingerGestureRecognizer extends TerminalPointerMember {
       _startFocal = _focal;
       _lastFocal = _startFocal;
       _startSpan = _span;
+      _startFirst = _positions[_order[0]];
+      _startSecond = _positions[_order[1]];
       _active = true;
       for (final entry in List.of(_entries.values)) {
         entry.resolve(GestureDisposition.accepted);
@@ -393,6 +405,8 @@ class TwoFingerGestureRecognizer extends TerminalPointerMember {
         focalStep: focal - lastFocal,
         scale: startSpan == 0 ? 1 : span / startSpan,
         spanDelta: span - startSpan,
+        firstDelta: _positions[_order[0]]! - (_startFirst ?? Offset.zero),
+        secondDelta: _positions[_order[1]]! - (_startSecond ?? Offset.zero),
       ),
     );
   }

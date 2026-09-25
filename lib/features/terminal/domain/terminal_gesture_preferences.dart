@@ -16,6 +16,40 @@ extension TerminalWindowSwitchTargetDetails on TerminalWindowSwitchTarget {
   };
 }
 
+/// What a pinch does in a Herdr session.
+enum HerdrPinchAction {
+  /// Spread to zoom the focused pane full-screen, pinch in to restore
+  /// (`herdr pane zoom --on` / `--off`).
+  zoomPane,
+
+  /// Change the terminal font size, as in tmux and plain shells.
+  fontSize,
+}
+
+/// What a two-finger vertical swipe does in a Herdr session.
+enum HerdrVerticalSwipe {
+  /// Swipe up for the next workspace, down for the previous one. Scrollback
+  /// is reached by resting two fingers first, then dragging.
+  workspaces,
+
+  /// Scroll back through history, as in tmux.
+  scrollback,
+}
+
+extension HerdrPinchActionDetails on HerdrPinchAction {
+  String get label => switch (this) {
+    HerdrPinchAction.zoomPane => 'Zoom pane',
+    HerdrPinchAction.fontSize => 'Font size',
+  };
+}
+
+extension HerdrVerticalSwipeDetails on HerdrVerticalSwipe {
+  String get label => switch (this) {
+    HerdrVerticalSwipe.workspaces => 'Workspaces',
+    HerdrVerticalSwipe.scrollback => 'Scrollback',
+  };
+}
+
 /// Per-gesture switches for the terminal touch gestures. Every gesture is
 /// individually toggleable so a gesture that fights a remote app (a TUI that
 /// wants its own two-finger scroll, say) can be turned off on its own.
@@ -27,6 +61,9 @@ class TerminalGesturePreferences {
     this.twoFingerScroll = true,
     this.headerSwipeOpensSessions = true,
     this.edgeSwipeOpensAgents = true,
+    this.herdrPinch = HerdrPinchAction.zoomPane,
+    this.herdrTwoFingerVertical = HerdrVerticalSwipe.workspaces,
+    this.herdrTwoFingerPanes = true,
   });
 
   static const defaults = TerminalGesturePreferences();
@@ -49,12 +86,23 @@ class TerminalGesturePreferences {
   /// Swipe in from the right edge opens the agent panel.
   final bool edgeSwipeOpensAgents;
 
+  /// In Herdr: what [pinchZoom] does.
+  final HerdrPinchAction herdrPinch;
+
+  /// In Herdr: what a two-finger vertical swipe does. With
+  /// [HerdrVerticalSwipe.workspaces], scrollback needs [twoFingerScroll].
+  final HerdrVerticalSwipe herdrTwoFingerVertical;
+
+  /// In Herdr: two-finger left/right focuses the neighbouring pane.
+  final bool herdrTwoFingerPanes;
+
   bool get anyEnabled =>
       swipeSwitchesWindow ||
       pinchZoom ||
       twoFingerScroll ||
       headerSwipeOpensSessions ||
-      edgeSwipeOpensAgents;
+      edgeSwipeOpensAgents ||
+      herdrTwoFingerPanes;
 
   TerminalGesturePreferences copyWith({
     bool? swipeSwitchesWindow,
@@ -63,6 +111,9 @@ class TerminalGesturePreferences {
     bool? twoFingerScroll,
     bool? headerSwipeOpensSessions,
     bool? edgeSwipeOpensAgents,
+    HerdrPinchAction? herdrPinch,
+    HerdrVerticalSwipe? herdrTwoFingerVertical,
+    bool? herdrTwoFingerPanes,
   }) {
     return TerminalGesturePreferences(
       swipeSwitchesWindow: swipeSwitchesWindow ?? this.swipeSwitchesWindow,
@@ -72,6 +123,10 @@ class TerminalGesturePreferences {
       headerSwipeOpensSessions:
           headerSwipeOpensSessions ?? this.headerSwipeOpensSessions,
       edgeSwipeOpensAgents: edgeSwipeOpensAgents ?? this.edgeSwipeOpensAgents,
+      herdrPinch: herdrPinch ?? this.herdrPinch,
+      herdrTwoFingerVertical:
+          herdrTwoFingerVertical ?? this.herdrTwoFingerVertical,
+      herdrTwoFingerPanes: herdrTwoFingerPanes ?? this.herdrTwoFingerPanes,
     );
   }
 
@@ -83,6 +138,9 @@ class TerminalGesturePreferences {
       'twoFingerScroll': twoFingerScroll,
       'headerSwipeOpensSessions': headerSwipeOpensSessions,
       'edgeSwipeOpensAgents': edgeSwipeOpensAgents,
+      'herdrPinch': herdrPinch.name,
+      'herdrTwoFingerVertical': herdrTwoFingerVertical.name,
+      'herdrTwoFingerPanes': herdrTwoFingerPanes,
     };
   }
 
@@ -116,6 +174,18 @@ class TerminalGesturePreferences {
         'edgeSwipeOpensAgents',
         defaults.edgeSwipeOpensAgents,
       ),
+      herdrPinch: HerdrPinchAction.values.firstWhere(
+        (value) => value.name == json['herdrPinch'],
+        orElse: () => defaults.herdrPinch,
+      ),
+      herdrTwoFingerVertical: HerdrVerticalSwipe.values.firstWhere(
+        (value) => value.name == json['herdrTwoFingerVertical'],
+        orElse: () => defaults.herdrTwoFingerVertical,
+      ),
+      herdrTwoFingerPanes: flag(
+        'herdrTwoFingerPanes',
+        defaults.herdrTwoFingerPanes,
+      ),
     );
   }
 
@@ -141,7 +211,10 @@ class TerminalGesturePreferences {
         other.pinchZoom == pinchZoom &&
         other.twoFingerScroll == twoFingerScroll &&
         other.headerSwipeOpensSessions == headerSwipeOpensSessions &&
-        other.edgeSwipeOpensAgents == edgeSwipeOpensAgents;
+        other.edgeSwipeOpensAgents == edgeSwipeOpensAgents &&
+        other.herdrPinch == herdrPinch &&
+        other.herdrTwoFingerVertical == herdrTwoFingerVertical &&
+        other.herdrTwoFingerPanes == herdrTwoFingerPanes;
   }
 
   @override
@@ -152,5 +225,8 @@ class TerminalGesturePreferences {
     twoFingerScroll,
     headerSwipeOpensSessions,
     edgeSwipeOpensAgents,
+    herdrPinch,
+    herdrTwoFingerVertical,
+    herdrTwoFingerPanes,
   );
 }

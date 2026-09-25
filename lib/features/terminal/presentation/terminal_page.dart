@@ -20,6 +20,7 @@ import 'package:conduit/features/live_preview/presentation/live_preview_port_dia
 import 'package:conduit/features/live_preview/presentation/live_preview_tab.dart';
 import 'package:conduit/features/live_preview/presentation/live_preview_view.dart';
 import 'package:conduit/features/prompt_menus/presentation/prompt_menu_strip.dart';
+import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
 import 'package:conduit/features/sessions/presentation/session_grid_page.dart';
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
@@ -30,6 +31,7 @@ import 'package:conduit/features/share_target/presentation/share_target_controll
 import 'package:conduit/features/share_target/presentation/share_target_scope.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:conduit/features/terminal/domain/security_key_interaction.dart';
+import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
 import 'package:conduit/features/terminal/presentation/gestures/terminal_gesture_layer.dart';
 import 'package:conduit/features/terminal/presentation/security_key_picker_dialog.dart';
 import 'package:conduit/features/terminal/presentation/security_key_pin_dialog.dart';
@@ -82,6 +84,7 @@ class TerminalPage extends StatefulWidget {
 
   /// Remembers the last previewed port per host.
   final LivePreviewPortStore livePreviewPortStore;
+
   /// Optional connect flow for the session grid's "+" tile.
   final SessionConnectFlow? connectFlow;
 
@@ -354,6 +357,18 @@ class _TerminalPageState extends State<TerminalPage> {
     _showTerminal();
   }
 
+  /// The multiplexer a session's gestures drive: the one it was opened on,
+  /// or null (the Gestures preference) for plain shells.
+  static TerminalWindowSwitchTarget? _gestureTargetFor(
+    TerminalSessionController session,
+  ) {
+    return switch (ConnectTarget.fromSessionHostId(session.host.id)?.kind) {
+      ConnectTargetKind.herdr => TerminalWindowSwitchTarget.herdr,
+      ConnectTargetKind.tmux => TerminalWindowSwitchTarget.tmux,
+      ConnectTargetKind.shell || null => null,
+    };
+  }
+
   /// Gesture hook: swipe in from the right edge opens the agent attention
   /// sheet when monitoring is available, otherwise the gesture is off.
   VoidCallback? _agentPanelOpener() {
@@ -600,6 +615,15 @@ class _TerminalPageState extends State<TerminalPage> {
                                       in widget.workspace.sessions)
                                     TerminalGestureLayer(
                                       key: ValueKey(session.host.id),
+                                      target: _gestureTargetFor(session),
+                                      herdrControl: widget.connectFlow?.herdr
+                                          .controlFor(session),
+                                      onHerdrWorkspaceFocused: (workspaceId) =>
+                                          widget.connectFlow?.herdr
+                                              .noteWorkspace(
+                                                session,
+                                                workspaceId,
+                                              ),
                                       preferences: widget
                                           .themeController
                                           .terminalGestures,

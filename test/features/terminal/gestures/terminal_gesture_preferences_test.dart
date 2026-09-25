@@ -11,6 +11,9 @@ void main() {
       expect(defaults.twoFingerScroll, isTrue);
       expect(defaults.headerSwipeOpensSessions, isTrue);
       expect(defaults.edgeSwipeOpensAgents, isTrue);
+      expect(defaults.herdrPinch, HerdrPinchAction.zoomPane);
+      expect(defaults.herdrTwoFingerVertical, HerdrVerticalSwipe.workspaces);
+      expect(defaults.herdrTwoFingerPanes, isTrue);
     });
 
     test('round-trips through json', () {
@@ -19,6 +22,9 @@ void main() {
         windowSwitchTarget: TerminalWindowSwitchTarget.herdr,
         pinchZoom: false,
         headerSwipeOpensSessions: false,
+        herdrPinch: HerdrPinchAction.fontSize,
+        herdrTwoFingerVertical: HerdrVerticalSwipe.scrollback,
+        herdrTwoFingerPanes: false,
       );
 
       final decoded = TerminalGesturePreferences.decode(preferences.encode());
@@ -65,6 +71,7 @@ void main() {
         twoFingerScroll: false,
         headerSwipeOpensSessions: false,
         edgeSwipeOpensAgents: false,
+        herdrTwoFingerPanes: false,
       );
       expect(none.anyEnabled, isFalse);
     });
