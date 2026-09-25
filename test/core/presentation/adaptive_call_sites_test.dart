@@ -1,11 +1,16 @@
+import 'dart:async';
+
 import 'package:conduit/core/presentation/adaptive_modal.dart';
+import 'package:conduit/core/presentation/theme_sheet.dart';
+import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/hosts/domain/multiplexer_prefix_key.dart';
-import 'package:conduit/features/hosts/presentation/widgets/home_chrome.dart';
 import 'package:conduit/features/hosts/presentation/widgets/multiplexer_prefix_picker.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_link_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import '../../support/test_doubles.dart';
 
 /// Representative call sites: the same result on phone (bottom sheet) and
 /// desktop (popover or dialog).
@@ -68,30 +73,33 @@ void main() {
     expect(await result, TerminalLinkAction.copyLink);
   });
 
+  // The home gear's menu sheet became the full-screen Settings page; the
+  // lock screen's theme sheet is the settings modal left.
   testWidgets(
-    'home settings menu: popover on desktop',
+    'lock screen theme sheet: centred dialog on desktop',
     (tester) async {
+      final theme = ThemeController(InMemoryThemePreferences());
+      await theme.load();
       final context = await pumpHost(tester, desktop);
-      final result = showHomeSettingsSheet(context);
+      unawaited(showThemeSheet(context: context, controller: theme));
       await tester.pumpAndSettle();
-      expect(popover, findsOneWidget);
+      expect(dialog, findsOneWidget);
       expect(find.byType(BottomSheet), findsNothing);
-      await tester.tap(find.text('Sync'));
-      await tester.pumpAndSettle();
-      expect(await result, HomeSettingsChoice.sync);
+      expect(find.text('Appearance'), findsOneWidget);
     },
     variant: TargetPlatformVariant.only(TargetPlatform.windows),
   );
 
-  testWidgets('home settings menu: bottom sheet on a phone', (tester) async {
+  testWidgets('lock screen theme sheet: bottom sheet on a phone', (
+    tester,
+  ) async {
+    final theme = ThemeController(InMemoryThemePreferences());
+    await theme.load();
     final context = await pumpHost(tester, phone);
-    final result = showHomeSettingsSheet(context);
+    unawaited(showThemeSheet(context: context, controller: theme));
     await tester.pumpAndSettle();
-    expect(popover, findsNothing);
+    expect(dialog, findsNothing);
     expect(find.byType(BottomSheet), findsOneWidget);
-    await tester.tap(find.text('Sync'));
-    await tester.pumpAndSettle();
-    expect(await result, HomeSettingsChoice.sync);
   });
 
   testWidgets(

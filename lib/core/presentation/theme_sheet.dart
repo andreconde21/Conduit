@@ -1,5 +1,4 @@
 import 'package:conduit/core/diagnostics/app_error_log.dart';
-import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
@@ -8,22 +7,18 @@ import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/core/theme/omarchy_theme_sync_controller.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
-import 'package:conduit/features/backup/data/app_backup_service.dart';
-import 'package:conduit/features/backup/presentation/backup_sheet.dart';
-import 'package:conduit/features/home_widget/data/platform_agent_status_widget_channel.dart';
-import 'package:conduit/features/home_widget/presentation/quick_settings_tile_controls.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
-import 'package:conduit/features/session_navigation/presentation/session_view_widgets.dart';
-import 'package:conduit/features/snippets/presentation/snippet_editor.dart';
-import 'package:conduit/features/terminal/presentation/gestures/terminal_gestures_settings.dart';
-import 'package:conduit/features/voice/presentation/speech_settings_controls.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+/// The lock screen's palette button: only the look (theme and terminal
+/// font). Every other setting lives in the Settings page, which needs the
+/// app unlocked.
 Future<void> showThemeSheet({
   required BuildContext context,
   required ThemeController controller,
-  AppBackupService? backupService,
 }) {
   return showAdaptiveModal<void>(
     kind: AdaptiveModalKind.dialog,
@@ -31,16 +26,15 @@ Future<void> showThemeSheet({
     isScrollControlled: true,
     builder: (context) => AnnotatedRegion<SystemUiOverlayStyle>(
       value: AppTheme.systemUiOverlayStyle(Theme.of(context).brightness),
-      child: _ThemeSheet(controller: controller, backupService: backupService),
+      child: _ThemeSheet(controller: controller),
     ),
   );
 }
 
 class _ThemeSheet extends StatelessWidget {
-  const _ThemeSheet({required this.controller, required this.backupService});
+  const _ThemeSheet({required this.controller});
 
   final ThemeController controller;
-  final AppBackupService? backupService;
 
   @override
   Widget build(BuildContext context) {
@@ -67,53 +61,14 @@ class _ThemeSheet extends StatelessWidget {
                       const ConduitGlyph(size: 24),
                     ],
                   ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Omarchy themes. The terminal, home screen and dialogs share one look.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
                   const SizedBox(height: 18),
                   const ConduitSectionLabel('Theme'),
                   const SizedBox(height: 10),
-                  if (controller.omarchySync case final sync?) ...[
-                    OmarchySyncControls(sync: sync),
-                    const SizedBox(height: 14),
-                  ],
-                  _ThemeGrid(controller: controller),
+                  ThemeGrid(controller: controller),
                   const SizedBox(height: 22),
-                  const ConduitSectionLabel('Terminal'),
+                  const ConduitSectionLabel('Terminal font'),
                   const SizedBox(height: 10),
-                  _TerminalAppearanceControls(controller: controller),
-                  const SizedBox(height: 22),
-                  const ConduitSectionLabel('Gestures'),
-                  const SizedBox(height: 10),
-                  TerminalGesturesSettings(controller: controller),
-                  if (PlatformFeatures.homeWidget) ...[
-                    const SizedBox(height: 22),
-                    const ConduitSectionLabel('Home'),
-                    const SizedBox(height: 10),
-                    _HomeAppearanceControls(controller: controller),
-                    const SizedBox(height: 10),
-                    QuickSettingsTileControls(
-                      channel: PlatformAgentStatusWidgetChannel.instance,
-                    ),
-                    const SizedBox(height: 22),
-                    const ConduitSectionLabel('Speech'),
-                    const SizedBox(height: 10),
-                    SpeechSettingsControls(controller: controller),
-                  ],
-                  if (backupService != null) ...[
-                    const SizedBox(height: 22),
-                    const ConduitSectionLabel('Backup'),
-                    const SizedBox(height: 10),
-                    _BackupControls(backupService: backupService!),
-                  ],
-                  const SizedBox(height: 22),
-                  const ConduitSectionLabel('About'),
-                  const SizedBox(height: 10),
-                  const _AboutControls(),
+                  TerminalFontControls(controller: controller),
                 ],
               ),
             );
@@ -124,15 +79,15 @@ class _ThemeSheet extends StatelessWidget {
   }
 }
 
-class _HomeAppearanceControls extends StatelessWidget {
-  const _HomeAppearanceControls({required this.controller});
+/// A bordered surface card: the building block of every settings page.
+class SettingsCard extends StatelessWidget {
+  const SettingsCard({required this.child, super.key});
 
-  final ThemeController controller;
+  final Widget child;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final colorScheme = Theme.of(context).colorScheme;
     return Material(
       color: colorScheme.surface,
       shape: RoundedRectangleBorder(
@@ -140,57 +95,122 @@ class _HomeAppearanceControls extends StatelessWidget {
         borderRadius: AppTheme.borderRadius,
       ),
       clipBehavior: Clip.antiAlias,
+      child: child,
+    );
+  }
+}
+
+/// One on/off setting in a [SettingsCard].
+class SettingsSwitchCard extends StatelessWidget {
+  const SettingsSwitchCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    required this.onChanged,
+    this.switchKey,
+    super.key,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  /// Key of the switch tile itself (tests find and tap it).
+  final Key? switchKey;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SettingsCard(
       child: SwitchListTile(
-        secondary: const Icon(Icons.terminal_rounded),
-        title: const Text('Show local shell'),
+        key: switchKey,
+        secondary: Icon(icon),
+        title: Text(title),
         subtitle: Text(
-          'Show the local terminal shortcut on the home screen.',
+          subtitle,
           style: theme.textTheme.bodySmall?.copyWith(
-            color: colorScheme.onSurfaceVariant,
+            color: theme.colorScheme.onSurfaceVariant,
           ),
         ),
-        value: controller.showLocalShell,
-        onChanged: controller.setShowLocalShell,
+        value: value,
+        onChanged: onChanged,
       ),
     );
   }
 }
 
-class _BackupControls extends StatelessWidget {
-  const _BackupControls({required this.backupService});
+/// A choice between a few values, with a title and the chosen value's
+/// description, in a [SettingsCard].
+class SettingsSegmentCard<T extends Object> extends StatelessWidget {
+  const SettingsSegmentCard({
+    required this.icon,
+    required this.title,
+    required this.description,
+    required this.values,
+    required this.label,
+    required this.selected,
+    required this.onChanged,
+    super.key,
+  });
 
-  final AppBackupService backupService;
+  final IconData icon;
+  final String title;
+  final String description;
+  final List<T> values;
+  final String Function(T value) label;
+  final T selected;
+  final ValueChanged<T> onChanged;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    return Material(
-      color: colorScheme.surface,
-      shape: RoundedRectangleBorder(
-        side: BorderSide(color: colorScheme.outlineVariant),
-        borderRadius: AppTheme.borderRadius,
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: ListTile(
-        leading: const Icon(Icons.backup_rounded),
-        title: const Text('Backup and restore'),
-        subtitle: Text(
-          'Export settings and machines or import a saved backup.',
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: colorScheme.onSurfaceVariant,
-          ),
+    return SettingsCard(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, size: 20),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(title, style: theme.textTheme.titleSmall),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              description,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: SegmentedButton<T>(
+                segments: [
+                  for (final value in values)
+                    ButtonSegment<T>(value: value, label: Text(label(value))),
+                ],
+                selected: {selected},
+                onSelectionChanged: (selection) => onChanged(selection.single),
+              ),
+            ),
+          ],
         ),
-        trailing: const Icon(Icons.chevron_right_rounded),
-        onTap: () =>
-            showBackupSheet(context: context, backupService: backupService),
       ),
     );
   }
 }
 
-class _TerminalAppearanceControls extends StatelessWidget {
-  const _TerminalAppearanceControls({required this.controller});
+/// Terminal font, size and a preview line in that font.
+class TerminalFontControls extends StatelessWidget {
+  const TerminalFontControls({required this.controller, super.key});
 
   final ThemeController controller;
 
@@ -275,322 +295,54 @@ class _TerminalAppearanceControls extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(height: 12),
-        Container(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-          decoration: BoxDecoration(
-            color: colorScheme.surface,
-            borderRadius: AppTheme.borderRadius,
-            border: Border.all(color: colorScheme.outlineVariant),
-          ),
-          child: Row(
-            children: [
-              const Icon(Icons.keyboard_command_key_rounded, size: 18),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text('Key rows', style: theme.textTheme.labelLarge),
-              ),
-              Text(
-                '${controller.terminalKeyboardRows.length}',
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: colorScheme.primary,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(width: 10),
-              TextButton.icon(
-                onPressed: () => _showKeyboardRowsEditor(context, controller),
-                icon: const Icon(Icons.tune_rounded, size: 17),
-                label: const Text('Edit'),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 14),
-        Material(
-          color: colorScheme.surface,
-          shape: RoundedRectangleBorder(
-            side: BorderSide(color: colorScheme.outlineVariant),
-            borderRadius: AppTheme.borderRadius,
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(Icons.space_bar_rounded, size: 20),
-                    const SizedBox(width: 10),
-                    Text('Toolbar style', style: theme.textTheme.titleSmall),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  controller.terminalToolbarStyle.description,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: SegmentedButton<TerminalToolbarStyle>(
-                    segments: [
-                      for (final style in TerminalToolbarStyle.values)
-                        ButtonSegment<TerminalToolbarStyle>(
-                          value: style,
-                          label: Text(style.label),
-                        ),
-                    ],
-                    selected: {controller.terminalToolbarStyle},
-                    onSelectionChanged: (selection) {
-                      controller.setTerminalToolbarStyle(selection.single);
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 14),
-        Material(
-          color: colorScheme.surface,
-          shape: RoundedRectangleBorder(
-            side: BorderSide(color: colorScheme.outlineVariant),
-            borderRadius: AppTheme.borderRadius,
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(Icons.keyboard_return_rounded, size: 20),
-                    const SizedBox(width: 10),
-                    Text('Enter sends', style: theme.textTheme.titleSmall),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  controller.terminalEnterSequence.description,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: SegmentedButton<TerminalEnterSequence>(
-                    segments: [
-                      for (final sequence in TerminalEnterSequence.values)
-                        ButtonSegment<TerminalEnterSequence>(
-                          value: sequence,
-                          label: Text(sequence.label),
-                        ),
-                    ],
-                    selected: {controller.terminalEnterSequence},
-                    onSelectionChanged: (selection) {
-                      controller.setTerminalEnterSequence(selection.single);
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 14),
-        Material(
-          color: colorScheme.surface,
-          shape: RoundedRectangleBorder(
-            side: BorderSide(color: colorScheme.outlineVariant),
-            borderRadius: AppTheme.borderRadius,
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: SwitchListTile(
-            secondary: const Icon(Icons.mouse_rounded),
-            title: const Text('Send mouse taps'),
-            subtitle: Text(
-              'Forward terminal taps as mouse clicks when apps enable mouse tracking.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-              ),
-            ),
-            value: controller.terminalMouseInput,
-            onChanged: controller.setTerminalMouseInput,
-          ),
-        ),
-        const SizedBox(height: 14),
-        Material(
-          color: colorScheme.surface,
-          shape: RoundedRectangleBorder(
-            side: BorderSide(color: colorScheme.outlineVariant),
-            borderRadius: AppTheme.borderRadius,
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: SwitchListTile(
-            secondary: const Icon(Icons.smart_button_rounded),
-            title: const Text('Menu buttons'),
-            subtitle: Text(
-              'Answer numbered menus and y/n prompts (Claude Code, installers) '
-              'with buttons above the keyboard bar.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-              ),
-            ),
-            value: controller.menuButtonsEnabled,
-            onChanged: controller.setMenuButtonsEnabled,
-          ),
-        ),
-        const SizedBox(height: 14),
-        Material(
-          color: colorScheme.surface,
-          shape: RoundedRectangleBorder(
-            side: BorderSide(color: colorScheme.outlineVariant),
-            borderRadius: AppTheme.borderRadius,
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: SwitchListTile(
-            secondary: const Icon(Icons.content_paste_go_rounded),
-            title: const Text('Remote clipboard'),
-            subtitle: Text(
-              'Let programs on the host copy to this phone (OSC 52: vim, '
-              'tmux with set-clipboard on). The host can never read it.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-              ),
-            ),
-            value: controller.remoteClipboardEnabled,
-            onChanged: controller.setRemoteClipboardEnabled,
-          ),
-        ),
-        const SizedBox(height: 14),
-        Material(
-          color: colorScheme.surface,
-          shape: RoundedRectangleBorder(
-            side: BorderSide(color: colorScheme.outlineVariant),
-            borderRadius: AppTheme.borderRadius,
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: SwitchListTile(
-            key: const ValueKey('paste-images-as-files'),
-            secondary: const Icon(Icons.image_outlined),
-            title: const Text('Paste images as uploaded files'),
-            subtitle: Text(
-              'Pasting an image uploads it to the machine\'s share inbox '
-              'and pastes its path, which Claude Code reads as an image. '
-              'Off: paste text only.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-              ),
-            ),
-            value: controller.pasteImagesAsFiles,
-            onChanged: controller.setPasteImagesAsFiles,
-          ),
-        ),
-        const SizedBox(height: 14),
-        Material(
-          color: colorScheme.surface,
-          shape: RoundedRectangleBorder(
-            side: BorderSide(color: colorScheme.outlineVariant),
-            borderRadius: AppTheme.borderRadius,
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: SwitchListTile(
-            key: const ValueKey('restore-sessions-switch'),
-            secondary: const Icon(Icons.restore_page_rounded),
-            title: const Text('Restore sessions on launch'),
-            subtitle: Text(
-              'Bring back the open sessions after the app restarts. tmux and '
-              'Herdr sessions reattach; plain shells start fresh.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-              ),
-            ),
-            value: controller.restoreSessionsOnLaunch,
-            onChanged: controller.setRestoreSessionsOnLaunch,
-          ),
-        ),
-        const SizedBox(height: 14),
-        const SessionViewSettingsTile(),
-        Material(
-          key: const ValueKey('multiplexer-tabs-setting'),
-          color: colorScheme.surface,
-          shape: RoundedRectangleBorder(
-            side: BorderSide(color: colorScheme.outlineVariant),
-            borderRadius: AppTheme.borderRadius,
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(Icons.tab_rounded, size: 20),
-                    const SizedBox(width: 10),
-                    Text(
-                      'Multiplexer tabs on phone',
-                      style: theme.textTheme.titleSmall,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Herdr tabs and tmux windows. Compact names the current one '
-                  'in the session tab (tap it for the list) and costs no '
-                  'screen space; Strip adds a row, for tablets. A computer '
-                  'always shows the strip.',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: SegmentedButton<MultiplexerTabsMode>(
-                    segments: [
-                      for (final value in MultiplexerTabsMode.values)
-                        ButtonSegment<MultiplexerTabsMode>(
-                          value: value,
-                          label: Text(value.label),
-                        ),
-                    ],
-                    selected: {controller.multiplexerTabs},
-                    onSelectionChanged: (selection) {
-                      controller.setMultiplexerTabs(selection.single);
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 14),
-        Container(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-          decoration: BoxDecoration(
-            color: colorScheme.surface,
-            borderRadius: AppTheme.borderRadius,
-            border: Border.all(color: colorScheme.outlineVariant),
-          ),
-          child: SnippetListEditor(
-            title: 'Global snippets',
-            caption: 'Shown from the Snip key-row menu on every machine.',
-            snippets: controller.terminalSnippets,
-            onChanged: controller.setTerminalSnippets,
-          ),
-        ),
       ],
     );
   }
 }
 
-Future<void> _showKeyboardRowsEditor(
+/// The key rows above the keyboard: how many, and the editor.
+class KeyRowsTile extends StatelessWidget {
+  const KeyRowsTile({required this.controller, super.key});
+
+  final ThemeController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: AppTheme.borderRadius,
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.keyboard_command_key_rounded, size: 18),
+          const SizedBox(width: 8),
+          Expanded(child: Text('Key rows', style: theme.textTheme.labelLarge)),
+          Text(
+            '${controller.terminalKeyboardRows.length}',
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: colorScheme.primary,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(width: 10),
+          TextButton.icon(
+            key: const ValueKey('key-rows-edit'),
+            onPressed: () => showKeyboardRowsEditor(context, controller),
+            icon: const Icon(Icons.tune_rounded, size: 17),
+            label: const Text('Edit'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+Future<void> showKeyboardRowsEditor(
   BuildContext context,
   ThemeController controller,
 ) {
@@ -1256,8 +1008,8 @@ IconData _keyboardActionIcon(TerminalKeyboardAction action) {
 }
 
 /// The bundled Omarchy themes, dark first, as tappable previews.
-class _ThemeGrid extends StatelessWidget {
-  const _ThemeGrid({required this.controller});
+class ThemeGrid extends StatelessWidget {
+  const ThemeGrid({required this.controller, super.key});
 
   final ThemeController controller;
 
@@ -1564,24 +1316,63 @@ class _OmarchySyncControlsState extends State<OmarchySyncControls> {
   }
 }
 
-/// App identity and the upstream credit Conductore keeps under Apache-2.0.
-class _AboutControls extends StatelessWidget {
-  const _AboutControls();
+/// Conductore's repository and the upstream project it is based on.
+const conductoreRepositoryUrl =
+    'https://github.com/andreconde21/conductore-mobile';
+const conduitUpstreamUrl = 'https://github.com/gwitko/Conduit';
+
+/// App identity, version and the upstream credit Conductore keeps under
+/// Apache-2.0, with the licences, recent errors and project links.
+class AboutControls extends StatelessWidget {
+  const AboutControls({super.key});
+
+  static Future<String?> _version() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      return info.buildNumber.isEmpty
+          ? info.version
+          : '${info.version} (${info.buildNumber})';
+    } catch (_) {
+      return null; // No platform plugin (tests).
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final muted = theme.textTheme.bodySmall?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+    );
+    Widget link(String label, String url, IconData icon) => Align(
+      alignment: Alignment.centerLeft,
+      child: TextButton.icon(
+        onPressed: () =>
+            launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
+        icon: Icon(icon, size: 18),
+        label: Text(label),
+      ),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('Conductore', style: theme.textTheme.titleMedium),
+        FutureBuilder<String?>(
+          future: _version(),
+          builder: (context, snapshot) {
+            final version = snapshot.data;
+            if (version == null) return const SizedBox.shrink();
+            return Text(
+              'Version $version',
+              key: const ValueKey('about-version'),
+              style: muted,
+            );
+          },
+        ),
         const SizedBox(height: 4),
         Text(
           'Based on Conduit by gwitko (Apache-2.0)',
           key: const ValueKey('about-upstream-credit'),
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
+          style: muted,
         ),
         const SizedBox(height: 6),
         Align(
@@ -1597,6 +1388,8 @@ class _AboutControls extends StatelessWidget {
           ),
         ),
         const _ErrorLogButton(),
+        link('Conductore on GitHub', conductoreRepositoryUrl, Icons.code),
+        link('Conduit (upstream)', conduitUpstreamUrl, Icons.call_split),
       ],
     );
   }

@@ -12,6 +12,7 @@ import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
 import 'package:conduit/features/sync/data/app_local_sync_store.dart';
 import 'package:conduit/features/sync/data/app_settings_codec.dart';
 import 'package:conduit/features/sync/data/sync_crypto.dart';
+import 'package:conduit/features/sync/domain/local_data_changes.dart';
 import 'package:conduit/features/sync/domain/local_sync_store.dart';
 import 'package:conduit/features/sync/domain/sync_category.dart';
 import 'package:conduit/features/sync/domain/sync_record.dart';
@@ -30,6 +31,7 @@ class AppBackupService {
     required ThemeController themeController,
     required HostKeyVerifier hostKeyVerifier,
     LocalSyncStore? localStore,
+    LocalDataChanges? changes,
     SyncCrypto crypto = const SyncCrypto(),
     AppBackupCrypto legacyCrypto = const AppBackupCrypto(),
     DateTime Function()? now,
@@ -45,7 +47,9 @@ class AppBackupService {
              connectPreferences: _NoJsonMapStore(),
              recentDirectoriesStore: _NoJsonMapStore(),
              sessions: InMemorySessionSnapshotRepository(),
+             changes: changes,
            ),
+       _changes = changes,
        _crypto = crypto,
        _legacyCrypto = legacyCrypto,
        _now = now ?? DateTime.now;
@@ -56,6 +60,10 @@ class AppBackupService {
   final ThemeController _themeController;
   final HostKeyVerifier _hostKeyVerifier;
   final LocalSyncStore _localStore;
+
+  /// Announced after a legacy import (bundle imports go through the local
+  /// store, which announces its own writes).
+  final LocalDataChanges? _changes;
   final SyncCrypto _crypto;
   final AppBackupCrypto _legacyCrypto;
   final DateTime Function() _now;
@@ -182,6 +190,7 @@ class AppBackupService {
       ...trustedKeys,
     ]);
     await _restoreTheme(payload['theme']);
+    _changes?.announce();
 
     return AppBackupImportResult(
       hostsImported: hosts.length,

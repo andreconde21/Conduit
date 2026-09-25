@@ -1,4 +1,3 @@
-import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:flutter/material.dart';
 
@@ -61,62 +60,4 @@ class HomeTopBar extends StatelessWidget {
       ),
     );
   }
-}
-
-/// Entries of the home settings sheet.
-enum HomeSettingsChoice { appearance, sync, trustedKeys, agentHooks, lock }
-
-/// The gear's sheet: appearance and backup, sync, trusted keys, the selected
-/// machine's agent hooks, and lock.
-Future<HomeSettingsChoice?> showHomeSettingsSheet(
-  BuildContext context, {
-  String? machineName,
-}) {
-  return showAdaptiveModal<HomeSettingsChoice>(
-    kind: AdaptiveModalKind.menu,
-    context: context,
-    useSafeArea: true,
-    builder: (context) {
-      void pick(HomeSettingsChoice choice) => Navigator.of(context).pop(choice);
-      return SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 8),
-            ListTile(
-              leading: const Icon(Icons.palette_outlined),
-              title: const Text('Appearance'),
-              subtitle: const Text('Theme, terminal font, backup'),
-              onTap: () => pick(HomeSettingsChoice.appearance),
-            ),
-            ListTile(
-              key: const ValueKey('home-settings-sync'),
-              leading: const Icon(Icons.sync_rounded),
-              title: const Text('Sync'),
-              subtitle: const Text('Machines and settings on all devices'),
-              onTap: () => pick(HomeSettingsChoice.sync),
-            ),
-            ListTile(
-              leading: const Icon(Icons.shield_outlined),
-              title: const Text('Trusted keys'),
-              onTap: () => pick(HomeSettingsChoice.trustedKeys),
-            ),
-            if (machineName != null)
-              ListTile(
-                leading: const Icon(Icons.webhook_rounded),
-                title: const Text('Agent hooks'),
-                subtitle: Text(machineName),
-                onTap: () => pick(HomeSettingsChoice.agentHooks),
-              ),
-            ListTile(
-              leading: const Icon(Icons.lock_outline_rounded),
-              title: const Text('Lock now'),
-              onTap: () => pick(HomeSettingsChoice.lock),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      );
-    },
-  );
 }

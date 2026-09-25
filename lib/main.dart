@@ -38,6 +38,7 @@ import 'package:conduit/features/sessions/data/secure_connect_preferences_reposi
 import 'package:conduit/features/sessions/data/secure_session_snapshot_repository.dart';
 import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
 import 'package:conduit/features/sessions/presentation/session_restore_controller.dart';
+import 'package:conduit/features/settings/presentation/settings_services.dart';
 import 'package:conduit/features/sftp/data/dart_ssh_sftp_repository.dart';
 import 'package:conduit/features/sftp/data/file_picker_file_export.dart';
 import 'package:conduit/features/sftp/data/secure_sftp_bookmarks_repository.dart';
@@ -52,6 +53,7 @@ import 'package:conduit/features/share_target/presentation/share_target_scope.da
 import 'package:conduit/features/sync/data/app_local_sync_store.dart';
 import 'package:conduit/features/sync/data/ssh_sync_hub.dart';
 import 'package:conduit/features/sync/data/sync_state_store.dart';
+import 'package:conduit/features/sync/domain/local_data_changes.dart';
 import 'package:conduit/features/sync/presentation/sync_controller.dart';
 import 'package:conduit/features/sync/presentation/sync_scope.dart';
 import 'package:conduit/features/terminal/data/connectivity_plus_network.dart';
@@ -227,6 +229,9 @@ void main() {
   themeController.addListener(
     () => sessionRestore.enabled = themeController.restoreSessionsOnLaunch,
   );
+  // Backup imports and sync pulls announce here; the home page reloads
+  // what it cached (trusted keys, machine filter) and its boards.
+  final localDataChanges = LocalDataChanges();
   // This device's data as sync records: file backups and device sync
   // (Settings › Sync) read and write the app through it.
   final localSyncStore = AppLocalSyncStore(
@@ -252,12 +257,14 @@ void main() {
       SecureSessionSnapshotRepository(secureStorage),
     ),
     ready: themeLoaded,
+    changes: localDataChanges,
   );
   final backupService = AppBackupService(
     hostsController: hostsController,
     themeController: themeController,
     hostKeyVerifier: hostKeyVerifier,
     localStore: localSyncStore,
+    changes: localDataChanges,
   );
   // Settings › Sync: this device's data, end-to-end encrypted, through
   // one saved machine (the hub) over the same SSH/SFTP stack.
@@ -290,34 +297,54 @@ void main() {
   );
   loadSessionViews(sessionViews);
 
+  // Settings from any route (the terminal's ⋮ menu): the same services
+  // the home page's gear passes.
+  final settingsServices = SettingsServices(
+    theme: themeController,
+    backupService: backupService,
+    hostsController: hostsController,
+    hostKeyVerifier: hostKeyVerifier,
+    agentAttention: agentAttention,
+    onLockNow: () async {
+      // Locking closes every session; unlocking brings them back.
+      await sessionRestore.holdForLock();
+      await workspaceController.closeAll();
+      lockController.lock();
+    },
+  );
+
   runApp(
-    SyncScope(
-      controller: syncController,
-      child: VoiceSettingsScope(
-        settings: themeController,
-        child: SessionViewScope(
-          controller: sessionViews,
-          child: CompanionSetupScope(
-            controller: companionSetup,
-            agentAttention: agentAttention,
-            child: ConduitApp(
-              themeController: themeController,
-              lockController: lockController,
-              hostsController: hostsController,
-              terminalRepository: terminalRepository,
-              workspaceController: workspaceController,
-              localShellController: localShellController,
-              hostKeyVerifier: hostKeyVerifier,
-              promptCoordinator: promptCoordinator,
-              sftpRepository: sftpRepository,
-              sftpBookmarksRepository: sftpBookmarksRepository,
+    SettingsScope(
+      services: settingsServices,
+      child: SyncScope(
+        controller: syncController,
+        child: VoiceSettingsScope(
+          settings: themeController,
+          child: SessionViewScope(
+            controller: sessionViews,
+            child: CompanionSetupScope(
+              controller: companionSetup,
               agentAttention: agentAttention,
-              backupService: backupService,
-              fileExport: fileExport,
-              connectFlow: connectFlow,
-              shareTarget: shareTarget,
-              sessionRestore: sessionRestore,
-              hostChannels: hostChannels,
+              child: ConduitApp(
+                themeController: themeController,
+                lockController: lockController,
+                hostsController: hostsController,
+                terminalRepository: terminalRepository,
+                workspaceController: workspaceController,
+                localShellController: localShellController,
+                hostKeyVerifier: hostKeyVerifier,
+                promptCoordinator: promptCoordinator,
+                sftpRepository: sftpRepository,
+                sftpBookmarksRepository: sftpBookmarksRepository,
+                agentAttention: agentAttention,
+                backupService: backupService,
+                fileExport: fileExport,
+                connectFlow: connectFlow,
+                shareTarget: shareTarget,
+                sessionRestore: sessionRestore,
+                localDataChanges: localDataChanges,
+                hostChannels: hostChannels,
+              ),
             ),
           ),
         ),
@@ -344,6 +371,7 @@ class ConduitApp extends StatefulWidget {
     this.connectFlow,
     this.shareTarget,
     this.sessionRestore,
+    this.localDataChanges,
     this.hostChannels,
     super.key,
   });
@@ -366,6 +394,9 @@ class ConduitApp extends StatefulWidget {
   /// Share-to-agent flow; null disables the Android share target.
   final ShareTargetController? shareTarget;
   final SessionRestoreController? sessionRestore;
+
+  /// Backup imports and sync pulls, for the pages that cache saved data.
+  final LocalDataChanges? localDataChanges;
 
   /// Commands and port forwards per machine (SSH or This computer); null
   /// means SSH only.
@@ -604,6 +635,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
                 fileExport: widget.fileExport,
                 connectFlow: widget.connectFlow,
                 sessionRestore: widget.sessionRestore,
+                localDataChanges: widget.localDataChanges,
                 hostChannels: widget.hostChannels,
               );
               return _wrapShareTargetHost(

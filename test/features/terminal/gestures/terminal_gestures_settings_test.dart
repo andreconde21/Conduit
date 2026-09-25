@@ -1,5 +1,7 @@
-import 'package:conduit/core/presentation/theme_sheet.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
+import 'package:conduit/features/settings/presentation/settings_catalog.dart';
+import 'package:conduit/features/settings/presentation/settings_page.dart';
+import 'package:conduit/features/settings/presentation/settings_services.dart';
 import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
 import 'package:conduit/features/terminal/presentation/gestures/terminal_gestures_settings.dart';
 import 'package:flutter/material.dart';
@@ -83,40 +85,34 @@ void main() {
     expect(controller.terminalGestures.pinchZoom, isTrue);
   });
 
-  testWidgets('the appearance sheet shows a Gestures section', (tester) async {
+  testWidgets('Settings › Input shows a Gestures section', (tester) async {
     final controller = ThemeController(InMemoryThemePreferences());
     await controller.load();
 
     await tester.pumpWidget(
       MaterialApp(
-        home: Builder(
-          builder: (context) {
-            return Scaffold(
-              body: Center(
-                child: FilledButton(
-                  onPressed: () {
-                    showThemeSheet(context: context, controller: controller);
-                  },
-                  child: const Text('Appearance'),
-                ),
-              ),
-            );
-          },
+        home: SettingsSectionPage(
+          section: SettingsSection.input,
+          services: SettingsServices(theme: controller),
         ),
       ),
     );
-
-    await tester.tap(find.text('Appearance'));
     await tester.pumpAndSettle();
+    final scrollable = find
+        .descendant(
+          of: find.byKey(const ValueKey('settings-body-input')),
+          matching: find.byType(Scrollable),
+        )
+        .first;
     await tester.scrollUntilVisible(
-      find.text('GESTURES'),
+      find.text('Gestures'),
       120,
-      scrollable: find.byType(Scrollable).last,
+      scrollable: scrollable,
     );
     await tester.scrollUntilVisible(
       find.text('Pinch to zoom'),
       120,
-      scrollable: find.byType(Scrollable).last,
+      scrollable: scrollable,
     );
     await tester.pumpAndSettle();
 

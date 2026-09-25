@@ -339,7 +339,7 @@ class HomeBoardController extends ChangeNotifier {
   /// even when its saved record lost the last-connected time.
   void selectHost(SavedHost? host, {bool connectedBefore = false}) {
     if (_disposed) return;
-    if (host?.id == _host?.id) {
+    if (host?.id == _host?.id && _sameEndpoint(host, _host)) {
       final wasWaiting = _needsRequest;
       _host = host;
       _connectedBefore = _connectedBefore || connectedBefore;
@@ -363,6 +363,20 @@ class HomeBoardController extends ChangeNotifier {
     notifyListeners();
     _start();
   }
+
+  /// Whether [a] and [b] reach the machine the same way: an imported or
+  /// synced record that changes the address or login starts over with a
+  /// new channel instead of polling through the old one.
+  static bool _sameEndpoint(SavedHost? a, SavedHost? b) =>
+      a == null ||
+      b == null ||
+      (a.host == b.host &&
+          a.port == b.port &&
+          a.username == b.username &&
+          a.authMethod == b.authMethod &&
+          a.password == b.password &&
+          a.privateKey == b.privateKey &&
+          a.passphrase == b.passphrase);
 
   /// Starts polling while the home page is on screen and the app is in
   /// the foreground; stops it (and closes the channel) otherwise.

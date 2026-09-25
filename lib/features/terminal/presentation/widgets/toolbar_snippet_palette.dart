@@ -139,7 +139,7 @@ class ToolbarSnippetPalette extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Text(
-                'No snippets saved. Add global snippets in Appearance, or '
+                'No snippets saved. Add global snippets in Settings › Terminal, or '
                 'per-machine snippets when editing a machine.',
                 style: theme.textTheme.bodySmall?.copyWith(color: muted),
               ),

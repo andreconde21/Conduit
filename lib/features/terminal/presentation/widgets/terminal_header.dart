@@ -22,6 +22,7 @@ enum TerminalHeaderAction {
   reconnect,
   fullscreen,
   newSession,
+  settings,
   closeSession,
   keyboardShortcuts,
 }
@@ -56,6 +57,7 @@ class TerminalHeader extends StatelessWidget {
     this.onNewSession,
     this.onShowShortcuts,
     this.onOpenChatView,
+    this.onOpenSettings,
     this.attentionCount = 0,
     this.onOpenAgentAttention,
     this.onOpenSessionTool,
@@ -100,6 +102,9 @@ class TerminalHeader extends StatelessWidget {
   /// Opens the chat view of the active session's Claude agent; null hides
   /// the entry.
   final VoidCallback? onOpenChatView;
+
+  /// Opens the Settings page (the ⋮ menu's "Settings"); null hides it.
+  final VoidCallback? onOpenSettings;
 
   /// Number of monitored agents currently needing attention (badge).
   final int attentionCount;
@@ -209,6 +214,7 @@ class TerminalHeader extends StatelessWidget {
               onNewSession: onNewSession,
               onShowShortcuts: onShowShortcuts,
               onOpenChatView: onOpenChatView,
+              onOpenSettings: onOpenSettings,
               onOpenSessionTool: onOpenSessionTool,
               onClose: session == null
                   ? null
@@ -350,6 +356,7 @@ class _OverflowMenu extends StatelessWidget {
     this.onShowShortcuts,
     this.onOpenChatView,
     this.onOpenSessionTool,
+    this.onOpenSettings,
   });
 
   final TerminalSessionController? session;
@@ -361,6 +368,7 @@ class _OverflowMenu extends StatelessWidget {
   final VoidCallback? onShowShortcuts;
   final VoidCallback? onOpenChatView;
   final ValueChanged<SessionTool>? onOpenSessionTool;
+  final VoidCallback? onOpenSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -386,6 +394,7 @@ class _OverflowMenu extends StatelessWidget {
         TerminalHeaderAction.reconnect => onReconnect?.call(),
         TerminalHeaderAction.fullscreen => onToggleFullscreen?.call(),
         TerminalHeaderAction.newSession => onNewSession?.call(),
+        TerminalHeaderAction.settings => onOpenSettings?.call(),
         TerminalHeaderAction.closeSession => onClose?.call(),
         TerminalHeaderAction.keyboardShortcuts => onShowShortcuts?.call(),
       },
@@ -435,6 +444,12 @@ class _OverflowMenu extends StatelessWidget {
               const PopupMenuItem(
                 value: TerminalHeaderAction.newSession,
                 child: _MenuRow(Icons.add_rounded, 'New session'),
+              ),
+            if (onOpenSettings != null)
+              const PopupMenuItem(
+                key: ValueKey('terminal-menu-settings'),
+                value: TerminalHeaderAction.settings,
+                child: _MenuRow(Icons.settings_outlined, 'Settings'),
               ),
             if (onShowShortcuts != null)
               const PopupMenuItem(

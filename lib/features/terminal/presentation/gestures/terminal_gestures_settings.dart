@@ -2,7 +2,7 @@ import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
 import 'package:flutter/material.dart';
 
-/// The "Gestures" section of the Appearance sheet: one switch per terminal
+/// The "Gestures" part of Settings › Input: one switch per terminal
 /// gesture plus the multiplexer the window swipe talks to.
 class TerminalGesturesSettings extends StatelessWidget {
   const TerminalGesturesSettings({required this.controller, super.key});
