@@ -116,7 +116,7 @@ void main() {
       'scrolled-up view', (tester) async {
     final chat = await pumpPage(tester, [
       ok(page([...history, userLine('u1', 'go')], state: 'working')),
-      ok(page([], offset: 200, state: 'waiting_input')),
+      ok(page([], offset: 200)),
       ok(page([message(40)], offset: 300, state: 'working')),
     ]);
     expect(find.byKey(const ValueKey('chat-working-indicator')), findsOne);
