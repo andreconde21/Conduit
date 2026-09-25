@@ -4,6 +4,7 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:conduit/core/presentation/theme_sheet.dart';
 import 'package:conduit/core/theme/app_palette.dart';
@@ -183,7 +184,10 @@ Future<CompanionBundle> loadCompanionBundle() async {
   final manifest =
       jsonDecode(File('assets/companion/manifest.json').readAsStringSync())
           as Map<String, Object?>;
-  return CompanionBundle(version: manifest['version']! as String, files: {});
+  return CompanionBundle(
+    version: manifest['version']! as String,
+    archive: Uint8List(0),
+  );
 }
 
 int minutesAgo(int minutes) =>

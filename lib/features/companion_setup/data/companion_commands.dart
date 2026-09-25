@@ -33,13 +33,45 @@ abstract final class CompanionCommands {
   static String makeDirectories(Iterable<String> paths) =>
       script('mkdir -p ${paths.map(shellQuoteArgument).join(' ')}');
 
-  /// Runs the uploaded `install.sh` (optionally with `--uninstall`).
-  static String runInstaller(String directory, {bool uninstall = false}) =>
-      remoteToolCommand(
-        'sh',
-        '${shellQuoteArgument('$directory/install.sh')}'
-            '${uninstall ? ' --uninstall' : ''}',
-      );
+  /// Unpacks the uploaded companion archive in [directory], checks every
+  /// unpacked file against [checksumLines] (`<sha256>  <path>`) when
+  /// `sha256sum` or `shasum` exists, then runs its `install.sh` (optionally
+  /// with `--uninstall`).
+  ///
+  /// Exits 127 with a readable message when the host has no `tar`, and 1
+  /// when unpacking or a checksum fails, so install.sh never runs on a
+  /// partial or corrupted upload.
+  static String unpackAndInstall(
+    String directory, {
+    required String archive,
+    required List<String> checksumLines,
+    bool uninstall = false,
+  }) {
+    final sums = checksumLines.map(shellQuoteArgument).join(' ');
+    return script(
+      [
+        'cd ${shellQuoteArgument(directory)} || exit 1',
+        'if ! command -v tar >/dev/null 2>&1; then '
+            'echo "tar not found on PATH: the companion is uploaded as '
+            '$archive, install tar and gzip and try again" >&2; '
+            'exit 127; fi',
+        'tar -xzf ${shellQuoteArgument(archive)} || { '
+            'echo "could not unpack $archive (is gzip installed?)" >&2; '
+            'exit 1; }',
+        'if command -v sha256sum >/dev/null 2>&1; then sum="sha256sum -c"; '
+            'elif command -v shasum >/dev/null 2>&1; then '
+            'sum="shasum -a 256 -c"; else sum=""; fi',
+        'if [ -n "\$sum" ]; then '
+            'out=\$(printf "%s\\n" $sums | \$sum 2>&1) || { '
+            'printf "%s\\n" "\$out" >&2; '
+            'echo "checksum mismatch after unpacking $archive, '
+            'not installing" >&2; exit 1; }; '
+            'else echo "sha256sum and shasum not found, '
+            'skipped the checksum check" >&2; fi',
+        'exec sh install.sh${uninstall ? ' --uninstall' : ''}',
+      ].join('\n'),
+    );
+  }
 
   /// Feeds the hook client a Notification and then a SessionEnd for
   /// [testSessionId], exactly as Claude Code would (JSON on stdin, event

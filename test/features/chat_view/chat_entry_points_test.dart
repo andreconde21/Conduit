@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
@@ -176,7 +178,8 @@ void main() {
         const AgentCommandResult(stdout: '', stderr: '', exitCode: 127),
       ]),
       sftpRepository: NoNetworkSftpRepository(),
-      loadBundle: () async => const CompanionBundle(version: '0', files: {}),
+      loadBundle: () async =>
+          CompanionBundle(version: '0', archive: Uint8List(0)),
     );
     addTearDown(companion.dispose);
     await tester.pumpWidget(
