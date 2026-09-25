@@ -117,6 +117,13 @@ Windows `.ico`, the macOS AppIcon set and the Linux window icon).
   shell, because closing it ends what runs there. tmux and Herdr sessions
   just detach. Fullscreen hides the app's chrome, not the OS window
   decorations. There is no scrollback search yet (conduit_vt has none).
+- **Menus and sheets.** Nothing slides up from the bottom on desktop.
+  Action menus open as popovers at the click. Pickers and forms, such as
+  the connect picker, open as centred dialogs. The agent inbox and the
+  Herdr and tmux navigators slide in from the right. The quick switcher
+  and snippets open as a command palette at the top. Esc closes any of
+  them, and the first field has the focus. Phones keep the bottom sheets.
+  All of these go through `lib/core/presentation/adaptive_modal.dart`.
 - **On-screen keys.** The pill and key rows are hidden by default. The
   *On-screen keys* button above the bottom edge brings them back for the
   multiplexer shortcuts, snippets and the chat button. It resets for each
