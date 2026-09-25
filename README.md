@@ -4,7 +4,7 @@ Drive Claude Code, Herdr and tmux sessions on your own machines from your phone,
 
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 ![Flutter](https://img.shields.io/badge/Flutter-3.44.1-02569B?logo=flutter)
-[![Latest release](https://img.shields.io/github/v/release/andreconde21/Conduit?include_prereleases&label=release)](../../releases)
+[![Latest release](https://img.shields.io/github/v/release/andreconde21/conductore-mobile?include_prereleases&label=release)](../../releases)
 
 Conductore is an Android app (iOS is not built yet). It is a fork of
 [Conduit](https://github.com/gwitko/Conduit) by gwitko.
@@ -139,7 +139,7 @@ The app uploads the companion over SFTP and runs its installer.
 **Install by hand.** Needs Node.js 18 or newer on Linux or macOS.
 
 ```sh
-git clone https://github.com/andreconde21/Conduit && cd Conduit/host && ./install.sh
+git clone https://github.com/andreconde21/conductore-mobile && cd conductore-mobile/host && ./install.sh
 conductore-hostd doctor
 ```
 

@@ -30,7 +30,7 @@ Future<void> showCompanionSetup(
 
 /// Commands for installing the companion by hand from the git repository.
 const companionManualInstallCommands = [
-  'git clone https://github.com/andreconde21/Conduit && cd Conduit/host && '
+  'git clone https://github.com/andreconde21/conductore-mobile && cd conductore-mobile/host && '
       './install.sh',
   'conductore-hostd doctor',
 ];

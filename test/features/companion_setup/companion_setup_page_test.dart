@@ -289,7 +289,7 @@ void main() {
 
     expect(
       find.text(
-        'git clone https://github.com/andreconde21/Conduit && cd Conduit/host '
+        'git clone https://github.com/andreconde21/conductore-mobile && cd conductore-mobile/host '
         '&& ./install.sh',
       ),
       findsOneWidget,
