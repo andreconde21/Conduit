@@ -12,6 +12,11 @@
     <string name="agent_tile_not_monitoring">Open app to monitor</string>
     <string name="agent_tile_one_needs_input">1 needs input</string>
     <string name="agent_tile_needs_input">%1$d need input</string>
+    <string name="agent_widget_limit_5h">5h</string>
+    <string name="agent_widget_limit_7d">wk</string>
+    <!-- Tile subtitle with Claude's limits: "5h 42% · wk 18%". -->
+    <string name="agent_tile_limits">5h %1$s · wk %2$s</string>
+    <string name="agent_widget_limit_description">%1$s limit %2$d%% used</string>
 
     <!-- Omarchy Everforest (themes/everforest/colors.toml), the app's default
          theme, in every mode: the widget matches the app, not the wallpaper.
@@ -24,6 +29,8 @@
     <color name="agent_widget_accent">#7FBBB3</color>
     <color name="agent_widget_on_accent">#2D353B</color>
     <color name="agent_widget_urgent">#E67E80</color>
+    <!-- A limit ring at 80 % and up (critical, 95 %, uses urgent). -->
+    <color name="agent_widget_warning">#DBBC7F</color>
 
     <!-- Omarchy's windows are square; the launcher may round the widget
          further on Android 12+. -->

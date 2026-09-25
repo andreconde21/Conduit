@@ -41,6 +41,104 @@
             android:textColor="@color/agent_widget_on_surface"
             android:textSize="14sp"
             android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/widget_ring_5h_label"
+            style="@style/AgentWidgetRingLabel"
+            android:text="@string/agent_widget_limit_5h"
+            android:visibility="gone" />
+
+        <FrameLayout
+            android:id="@+id/widget_ring_5h"
+            android:layout_width="30dp"
+            android:layout_height="30dp"
+            android:visibility="gone">
+            <ProgressBar
+                android:id="@+id/widget_ring_5h_normal"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:progressDrawable="@drawable/agent_widget_ring_normal"
+                android:indeterminate="false"
+                android:max="100"
+                android:visibility="gone"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+            <ProgressBar
+                android:id="@+id/widget_ring_5h_warning"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:progressDrawable="@drawable/agent_widget_ring_warning"
+                android:indeterminate="false"
+                android:max="100"
+                android:visibility="gone"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+            <ProgressBar
+                android:id="@+id/widget_ring_5h_critical"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:progressDrawable="@drawable/agent_widget_ring_critical"
+                android:indeterminate="false"
+                android:max="100"
+                android:visibility="gone"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+
+            <TextView
+                android:id="@+id/widget_ring_5h_text"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:gravity="center"
+                android:textColor="@color/agent_widget_on_surface"
+                android:textSize="10sp"
+                android:textStyle="bold" />
+        </FrameLayout>
+
+        <TextView
+            android:id="@+id/widget_ring_7d_label"
+            style="@style/AgentWidgetRingLabel"
+            android:text="@string/agent_widget_limit_7d"
+            android:visibility="gone" />
+
+        <FrameLayout
+            android:id="@+id/widget_ring_7d"
+            android:layout_width="30dp"
+            android:layout_height="30dp"
+            android:visibility="gone">
+            <ProgressBar
+                android:id="@+id/widget_ring_7d_normal"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:progressDrawable="@drawable/agent_widget_ring_normal"
+                android:indeterminate="false"
+                android:max="100"
+                android:visibility="gone"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+            <ProgressBar
+                android:id="@+id/widget_ring_7d_warning"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:progressDrawable="@drawable/agent_widget_ring_warning"
+                android:indeterminate="false"
+                android:max="100"
+                android:visibility="gone"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+            <ProgressBar
+                android:id="@+id/widget_ring_7d_critical"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:progressDrawable="@drawable/agent_widget_ring_critical"
+                android:indeterminate="false"
+                android:max="100"
+                android:visibility="gone"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+
+            <TextView
+                android:id="@+id/widget_ring_7d_text"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:gravity="center"
+                android:textColor="@color/agent_widget_on_surface"
+                android:textSize="10sp"
+                android:textStyle="bold" />
+        </FrameLayout>
     </LinearLayout>
 
     <TextView
