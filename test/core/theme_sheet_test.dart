@@ -336,6 +336,21 @@ void main() {
     addTearDown(AppErrorLog.instance.clear);
     await tester.pump();
     await tester.ensureVisible(find.text('Recent errors (1)'));
+    await tester.pumpAndSettle();
+    // The sheet's list can reach past the screen's bottom edge: keep
+    // dragging until the button is on screen, not just in the list.
+    final screenBottom =
+        tester.view.physicalSize.height / tester.view.devicePixelRatio;
+    for (
+      var i = 0;
+      i < 10 &&
+          tester.getCenter(find.text('Recent errors (1)')).dy >
+              screenBottom - 24;
+      i += 1
+    ) {
+      await tester.drag(find.byType(ListView).first, const Offset(0, -200));
+      await tester.pumpAndSettle();
+    }
     await tester.tap(find.text('Recent errors (1)'));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('recent-errors')), findsOneWidget);
