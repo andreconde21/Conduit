@@ -9,10 +9,8 @@ class UnifiedDiff {
 
   bool get isEmpty => files.isEmpty;
 
-  int get additions =>
-      files.fold(0, (total, file) => total + file.additions);
-  int get deletions =>
-      files.fold(0, (total, file) => total + file.deletions);
+  int get additions => files.fold(0, (total, file) => total + file.additions);
+  int get deletions => files.fold(0, (total, file) => total + file.deletions);
 
   /// Parses [text], the raw output of `git diff --no-color`.
   static UnifiedDiff parse(String text) {
@@ -269,7 +267,8 @@ class DiffLine {
   int get hashCode => Object.hash(kind, text, oldLineNumber, newLineNumber);
 
   @override
-  String toString() => 'DiffLine(${kind.name}, $oldLineNumber/$newLineNumber, '
+  String toString() =>
+      'DiffLine(${kind.name}, $oldLineNumber/$newLineNumber, '
       '${text.length > 30 ? '${text.substring(0, 30)}…' : text})';
 }
 

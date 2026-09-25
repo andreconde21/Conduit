@@ -41,6 +41,7 @@ class FakeWebViewController extends PlatformWebViewController {
   final List<Uri> loaded = [];
   int reloads = 0;
   JavaScriptMode? javaScriptMode;
+  final List<String?> userAgents = [];
 
   @override
   Future<void> loadRequest(LoadRequestParams params) async =>
@@ -55,6 +56,10 @@ class FakeWebViewController extends PlatformWebViewController {
 
   @override
   Future<void> setBackgroundColor(Color color) async {}
+
+  @override
+  Future<void> setUserAgent(String? userAgent) async =>
+      userAgents.add(userAgent);
 
   @override
   Future<void> setPlatformNavigationDelegate(
@@ -227,7 +232,9 @@ void main() {
     await tester.tap(find.byTooltip('Reload'));
     await tester.pump();
     expect(platform.controller!.reloads, 1);
-    await tester.tap(find.byTooltip('Open in browser'));
+    await tester.tap(find.byTooltip('More'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Open in browser'));
     await tester.pump();
     expect(external, [Uri.parse('http://127.0.0.1:40000/')]);
   });

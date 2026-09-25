@@ -102,7 +102,8 @@ class _DiffViewState extends State<DiffView> {
     final palette = widget.palette;
     final brightness = widget.brightness;
     final status = widget.controller.snapshot?.status;
-    final untracked = status?.entries
+    final untracked =
+        status?.entries
             .where((entry) => entry.kind == GitStatusEntryKind.untracked)
             .toList() ??
         const <GitStatusEntry>[];
@@ -323,9 +324,7 @@ class _DiffViewState extends State<DiffView> {
       ];
       return _Notice(
         icon: Icons.check_circle_outline_rounded,
-        title: controller.showStaged
-            ? 'Nothing staged'
-            : 'No unstaged changes',
+        title: controller.showStaged ? 'Nothing staged' : 'No unstaged changes',
         message: hints.join(' · '),
         palette: palette,
         brightness: brightness,

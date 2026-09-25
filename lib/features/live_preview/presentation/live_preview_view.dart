@@ -1,16 +1,28 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:conduit/core/theme/app_palette.dart';
+import 'package:conduit/features/live_preview/data/preview_screen_capture.dart';
+import 'package:conduit/features/live_preview/domain/preview_screenshot.dart';
+import 'package:conduit/features/live_preview/domain/preview_viewport.dart';
 import 'package:conduit/features/live_preview/presentation/live_preview_controller.dart';
+import 'package:conduit/features/live_preview/presentation/preview_annotate_page.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 typedef WebViewControllerFactory = WebViewController Function();
 typedef ExternalUrlOpener = Future<bool> Function(Uri url);
+typedef PreviewAnnotator =
+    Future<PreviewAnnotateResult?> Function(
+      BuildContext context,
+      Uint8List png,
+    );
 
-/// A WebView on the forwarded port with a path-only address bar, reload
-/// and open-in-browser.
+/// A WebView on the forwarded port with a path-only address bar, a
+/// Phone / Tablet / Desktop width toggle, a screenshot-to-Claude button,
+/// reload and open-in-browser.
 class LivePreviewView extends StatefulWidget {
   const LivePreviewView({
     required this.controller,
@@ -19,6 +31,9 @@ class LivePreviewView extends StatefulWidget {
     required this.onChangePort,
     this.createWebViewController = WebViewController.new,
     this.openExternal = _launchExternal,
+    this.onScreenshot,
+    this.screenCapture = const PlatformPreviewScreenCapture(),
+    this.annotate = showPreviewAnnotatePage,
     super.key,
   });
 
@@ -36,6 +51,16 @@ class LivePreviewView extends StatefulWidget {
   /// loopback forward just like the WebView does.
   final ExternalUrlOpener openExternal;
 
+  /// Sends a captured (and annotated) screenshot on to Claude; null hides
+  /// the camera button.
+  final Future<void> Function(PreviewScreenshot shot)? onScreenshot;
+
+  /// Captures the WebView; injectable for tests.
+  final PreviewScreenCapture screenCapture;
+
+  /// The annotate step; injectable for tests.
+  final PreviewAnnotator annotate;
+
   static Future<bool> _launchExternal(Uri url) =>
       launchUrl(url, mode: LaunchMode.externalApplication);
 
@@ -50,6 +75,11 @@ class _LivePreviewViewState extends State<LivePreviewView> {
   final _addressFocus = FocusNode();
   bool _pageLoading = false;
   String? _pageError;
+  final _captureKey = GlobalKey();
+  bool _capturing = false;
+
+  /// The user agent the WebView was last given (null: its default).
+  String? _userAgent;
 
   @override
   void initState() {
@@ -85,6 +115,7 @@ class _LivePreviewViewState extends State<LivePreviewView> {
       _address.text = widget.controller.path;
     }
     _syncWebView();
+    if (_loadedLocalPort != null) unawaited(_syncViewport());
     setState(() {});
   }
 
@@ -102,7 +133,36 @@ class _LivePreviewViewState extends State<LivePreviewView> {
     _loadedLocalPort = url.port;
     _pageError = null;
     final webView = _webView ??= _createWebView();
-    unawaited(webView.loadRequest(url));
+    if (widget.controller.viewport.userAgent == _userAgent) {
+      unawaited(webView.loadRequest(url));
+    } else {
+      unawaited(_applyUserAgent(webView).then((_) => webView.loadRequest(url)));
+    }
+  }
+
+  /// Gives the WebView the viewport's user agent; true when it changed.
+  /// The phone viewport keeps the WebView's default, so a first load on it
+  /// sets nothing.
+  Future<bool> _applyUserAgent(WebViewController webView) async {
+    final userAgent = widget.controller.viewport.userAgent;
+    if (userAgent == _userAgent) return false;
+    _userAgent = userAgent;
+    try {
+      await webView.setUserAgent(userAgent);
+    } catch (_) {
+      // A platform without it still gets the emulated width.
+    }
+    return true;
+  }
+
+  /// A viewport change: new user agent, then a reload so the server sees
+  /// it (the layout width changes at once).
+  Future<void> _syncViewport() async {
+    final webView = _webView;
+    if (webView == null || widget.controller.url == null) return;
+    if (await _applyUserAgent(webView)) {
+      await webView.reload();
+    }
   }
 
   WebViewController _createWebView() {
@@ -215,6 +275,54 @@ class _LivePreviewViewState extends State<LivePreviewView> {
     }
   }
 
+  /// Captures the page, lets the user mark it up, and hands it on.
+  Future<void> _screenshot() async {
+    final send = widget.onScreenshot;
+    final boundary =
+        _captureKey.currentContext?.findRenderObject()
+            as RenderRepaintBoundary?;
+    final port = widget.controller.remotePort;
+    if (send == null || boundary == null || port == null || _capturing) {
+      return;
+    }
+    setState(() => _capturing = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final Uint8List png;
+      try {
+        png = await widget.screenCapture.capture(
+          boundary,
+          MediaQuery.devicePixelRatioOf(context),
+        );
+      } catch (error) {
+        messenger.showSnackBar(
+          SnackBar(content: Text('Could not capture the page: $error')),
+        );
+        return;
+      }
+      if (!mounted) return;
+      final annotated = await widget.annotate(context, png);
+      if (annotated == null || !mounted) return;
+      await send(
+        PreviewScreenshot(
+          png: annotated.png,
+          port: port,
+          path: widget.controller.path,
+          viewport: widget.controller.viewport,
+          note: annotated.note,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _capturing = false);
+    }
+  }
+
+  static IconData _viewportIcon(PreviewViewport viewport) => switch (viewport) {
+    PreviewViewport.phone => Icons.smartphone_rounded,
+    PreviewViewport.tablet => Icons.tablet_android_rounded,
+    PreviewViewport.desktop => Icons.desktop_windows_outlined,
+  };
+
   @override
   Widget build(BuildContext context) {
     final controller = widget.controller;
@@ -285,6 +393,44 @@ class _LivePreviewViewState extends State<LivePreviewView> {
                     ),
                   ),
                 ),
+                PopupMenuButton<PreviewViewport>(
+                  key: const ValueKey('preview-viewport'),
+                  tooltip: 'Width: ${controller.viewport.label}',
+                  iconSize: 19,
+                  iconColor: muted,
+                  icon: Icon(_viewportIcon(controller.viewport)),
+                  initialValue: controller.viewport,
+                  onSelected: controller.setViewport,
+                  itemBuilder: (context) => [
+                    for (final viewport in PreviewViewport.values)
+                      CheckedPopupMenuItem(
+                        value: viewport,
+                        checked: viewport == controller.viewport,
+                        child: Text(
+                          viewport.cssWidth == null
+                              ? viewport.label
+                              : '${viewport.label} · '
+                                    '${viewport.cssWidth!.round()} px',
+                        ),
+                      ),
+                  ],
+                ),
+                if (widget.onScreenshot != null)
+                  IconButton(
+                    tooltip: 'Screenshot to Claude',
+                    iconSize: 19,
+                    color: muted,
+                    icon: _capturing
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.photo_camera_outlined),
+                    onPressed: ready && !_capturing && _pageError == null
+                        ? _screenshot
+                        : null,
+                  ),
                 IconButton(
                   tooltip: 'Reload',
                   iconSize: 19,
@@ -292,12 +438,23 @@ class _LivePreviewViewState extends State<LivePreviewView> {
                   icon: const Icon(Icons.refresh_rounded),
                   onPressed: ready ? _reload : null,
                 ),
-                IconButton(
-                  tooltip: 'Open in browser',
+                PopupMenuButton<VoidCallback>(
+                  tooltip: 'More',
                   iconSize: 19,
-                  color: muted,
-                  icon: const Icon(Icons.open_in_browser_rounded),
-                  onPressed: ready ? _openInBrowser : null,
+                  iconColor: muted,
+                  enabled: ready,
+                  onSelected: (action) => action(),
+                  itemBuilder: (context) => [
+                    PopupMenuItem(
+                      value: () => unawaited(_openInBrowser()),
+                      child: const ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        leading: Icon(Icons.open_in_browser_rounded),
+                        title: Text('Open in browser'),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -415,8 +572,55 @@ class _LivePreviewViewState extends State<LivePreviewView> {
             ],
           );
         }
-        return WebViewWidget(controller: webView);
+        return RepaintBoundary(
+          key: _captureKey,
+          child: PreviewViewportFrame(
+            viewport: controller.viewport,
+            child: WebViewWidget(controller: webView),
+          ),
+        );
     }
+  }
+}
+
+/// Lays [child] out at [viewport]'s width and scales it down to fit, so
+/// the page sees a tablet or desktop viewport on a phone. The phone
+/// viewport passes [child] through untouched.
+class PreviewViewportFrame extends StatelessWidget {
+  const PreviewViewportFrame({
+    required this.viewport,
+    required this.child,
+    super.key,
+  });
+
+  final PreviewViewport viewport;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final width = viewport.cssWidth;
+    if (width == null) return child;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final scale = viewport.scaleFor(constraints.maxWidth);
+        final height = constraints.maxHeight / scale;
+        return ClipRect(
+          child: Align(
+            alignment: Alignment.topCenter,
+            child: SizedBox(
+              width: width * scale,
+              height: constraints.maxHeight,
+              child: FittedBox(
+                key: const ValueKey('preview-viewport-frame'),
+                fit: BoxFit.fitWidth,
+                alignment: Alignment.topCenter,
+                child: SizedBox(width: width, height: height, child: child),
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 }
 

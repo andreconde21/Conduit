@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_palette.dart';
@@ -18,10 +19,12 @@ import 'package:conduit/features/diff_view/presentation/diff_view.dart';
 import 'package:conduit/features/diff_view/presentation/diff_view_controller.dart';
 import 'package:conduit/features/diff_view/presentation/diff_view_tab.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/live_preview/data/preview_screenshot_sender.dart';
 import 'package:conduit/features/live_preview/data/secure_live_preview_port_store.dart';
 import 'package:conduit/features/live_preview/data/ssh_port_forwarder.dart';
 import 'package:conduit/features/live_preview/domain/dev_server_detection.dart';
 import 'package:conduit/features/live_preview/domain/live_preview_port_store.dart';
+import 'package:conduit/features/live_preview/domain/preview_screenshot.dart';
 import 'package:conduit/features/live_preview/presentation/live_preview_controller.dart';
 import 'package:conduit/features/live_preview/presentation/live_preview_port_dialog.dart';
 import 'package:conduit/features/live_preview/presentation/live_preview_tab.dart';
@@ -432,10 +435,15 @@ class _TerminalPageState extends State<TerminalPage> {
   /// a machine without the companion, or without a Claude session here,
   /// gets the composer with a note why; a broken companion explains what to
   /// fix; several candidates ask which one.
-  Future<void> _openChatForSession(
+  ///
+  /// With [draft] (a Live preview screenshot) Chat View opens with it in
+  /// the composer. Returns whether Chat View opened, so a caller with a
+  /// draft can put it in the composer otherwise.
+  Future<bool> _openChatForSession(
     AgentAttentionController attention,
-    TerminalSessionController session,
-  ) async {
+    TerminalSessionController session, {
+    String draft = '',
+  }) async {
     final host = session.host;
     final List<AgentInfo> agents;
     if (chatViewAvailable(attention, host)) {
@@ -450,14 +458,14 @@ class _TerminalPageState extends State<TerminalPage> {
           'No Conductore companion on ${host.name}, so there is no Chat '
           'View here. Opened the composer.',
         );
-        return;
+        return false;
       }
       final access = await checkChatViewAccessWithProgress(
         context,
         attention: attention,
         host: host,
       );
-      if (!mounted || access == null) return;
+      if (!mounted || access == null) return false;
       if (!access.ready) {
         if (access.companionMissing) {
           _openComposerBecause(
@@ -467,11 +475,11 @@ class _TerminalPageState extends State<TerminalPage> {
         } else {
           await showChatViewUnavailable(context, host: host, access: access);
         }
-        return;
+        return false;
       }
       agents = access.agents;
     }
-    if (!mounted || widget.workspace.activeSession != session) return;
+    if (!mounted || widget.workspace.activeSession != session) return false;
 
     var location = _chatLocationFor(session);
     var match = resolveChatAgent(host, agents, location: location);
@@ -479,7 +487,7 @@ class _TerminalPageState extends State<TerminalPage> {
       // Several Claude sessions in this workspace: the one on screen is
       // the pane Herdr has focused.
       final pane = await _focusedHerdrPane(session, location);
-      if (!mounted) return;
+      if (!mounted) return false;
       if (pane != null) {
         location = ChatSessionLocation(
           herdrWorkspaceId: location.herdrWorkspaceId,
@@ -491,7 +499,8 @@ class _TerminalPageState extends State<TerminalPage> {
     }
     switch (match) {
       case ChatAgentMatched(:final agent):
-        _openChat(attention, host, agent);
+        _openChat(attention, host, agent, draft: draft);
+        return true;
       case ChatAgentAmbiguous(:final candidates, :final elsewhere):
         final agent = await pickChatAgent(
           context,
@@ -504,7 +513,8 @@ class _TerminalPageState extends State<TerminalPage> {
               : 'Open chat for…',
         );
         if (agent != null && mounted) {
-          _openChat(attention, host, agent);
+          _openChat(attention, host, agent, draft: draft);
+          return true;
         }
       case ChatAgentNone():
         _openComposerBecause(
@@ -512,6 +522,7 @@ class _TerminalPageState extends State<TerminalPage> {
           'composer.',
         );
     }
+    return false;
   }
 
   static String _placeName(TerminalSessionController session) =>
@@ -566,8 +577,9 @@ class _TerminalPageState extends State<TerminalPage> {
   void _openChat(
     AgentAttentionController attention,
     SavedHost host,
-    AgentInfo agent,
-  ) {
+    AgentInfo agent, {
+    String draft = '',
+  }) {
     unawaited(
       openChatView(
         context: context,
@@ -577,6 +589,7 @@ class _TerminalPageState extends State<TerminalPage> {
         dictation: _dictation,
         onOpenTerminal: () => _showAgentTerminal(attention, host, agent),
         accessoryBuilder: _chatPreviewChip(host),
+        initialDraft: draft,
       ),
     );
   }
@@ -1161,6 +1174,96 @@ class _TerminalPageState extends State<TerminalPage> {
     _previewWatchers[session]?.markPreviewing(chosenPort);
   }
 
+  /// Live preview's "Screenshot to Claude": uploads the image to the
+  /// host's share inbox (like a Chat mode image) and puts its path and a
+  /// note in front of Claude: Chat View's composer when this session runs
+  /// a Claude session the companion knows, else the Chat mode composer.
+  Future<void> _sendPreviewScreenshot(
+    LivePreviewTab tab,
+    PreviewScreenshot shot,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Text('Uploading screenshot…'),
+          duration: Duration(minutes: 1),
+        ),
+      );
+    final String draft;
+    try {
+      draft = await PreviewScreenshotSender(
+        upload: (file) async => (await SftpShareUploader(
+          widget.sftpRepository,
+        ).upload(tab.host, [file])).single,
+      ).send(shot);
+    } catch (error) {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              'Could not upload the screenshot: '
+              '${error is AppFailure ? error.userMessage : error}',
+            ),
+          ),
+        );
+      return;
+    }
+    messenger.hideCurrentSnackBar();
+    if (!mounted) return;
+    final session = widget.workspace.sessions
+        .where((session) => session.host.id == tab.host.id)
+        .firstOrNull;
+    if (session == null) {
+      _copyToClipboard(draft, 'Screenshot uploaded; its path is copied');
+      return;
+    }
+    await _deliverChatDraft(session, draft);
+  }
+
+  /// Opens [session]'s chat with [draft] in the composer: Chat View when
+  /// it can, else Chat mode's composer sheet.
+  Future<void> _deliverChatDraft(
+    TerminalSessionController session,
+    String draft,
+  ) async {
+    if (widget.workspace.activeSession != session) {
+      widget.workspace.activate(session);
+    }
+    _showTerminal();
+    final attention = widget.agentAttention;
+    if (attention != null && !session.host.isLocal) {
+      final opened = await _openChatForSession(
+        attention,
+        session,
+        draft: draft,
+      );
+      if (opened || !mounted) return;
+    }
+    _putDraftInComposer(session, draft);
+  }
+
+  /// Adds [draft] to [session]'s Chat mode draft and opens the composer
+  /// sheet, the way a file shared into the app arrives.
+  void _putDraftInComposer(TerminalSessionController session, String draft) {
+    final hostId = session.host.id;
+    setState(() {
+      _composeDrafts[hostId] = mergeShareDraft(
+        _composeDrafts[hostId] ?? '',
+        draft,
+      );
+      _composeMode = true;
+      _composeRevision += 1;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.workspace.activeSession == session) {
+        unawaited(_openPromptComposer(session));
+      }
+    });
+  }
+
   Future<void> _changePreviewPort(LivePreviewTab tab) async {
     final controller = tab.controller;
     final initialPort =
@@ -1200,6 +1303,7 @@ class _TerminalPageState extends State<TerminalPage> {
         palette: palette,
         brightness: brightness,
         onChangePort: () => unawaited(_changePreviewPort(tab)),
+        onScreenshot: (shot) => _sendPreviewScreenshot(tab, shot),
       ),
       _ => SftpFileViewer(
         key: tab.viewerKey,

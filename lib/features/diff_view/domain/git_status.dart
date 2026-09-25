@@ -18,8 +18,7 @@ class GitStatus {
   final List<GitStatusEntry> entries;
 
   int get stagedCount => entries.where((entry) => entry.isStaged).length;
-  int get unstagedCount =>
-      entries.where((entry) => entry.isUnstaged).length;
+  int get unstagedCount => entries.where((entry) => entry.isUnstaged).length;
   int get untrackedCount => entries
       .where((entry) => entry.kind == GitStatusEntryKind.untracked)
       .length;
