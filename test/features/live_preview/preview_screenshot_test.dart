@@ -350,11 +350,16 @@ void main() {
         find.byKey(const ValueKey('annotate-note')),
         'This arrow',
       );
-      await tester.runAsync(() async {
-        await tester.tap(find.byKey(const ValueKey('annotate-send')));
-        await Future<void>.delayed(const Duration(milliseconds: 200));
-      });
-      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('annotate-send')));
+      // Encoding the annotated PNG is real async work; slow CI runners need
+      // longer than a fixed delay, so wait for the result itself (max ~10 s).
+      for (var i = 0; i < 100 && result == null; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 100)),
+        );
+        await tester.pump();
+      }
+      await tester.pump(const Duration(milliseconds: 400));
       expect(result?.note, 'This arrow');
       expect(result?.png, isNot(png));
     });
