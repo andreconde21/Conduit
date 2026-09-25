@@ -92,6 +92,31 @@ Windows `.ico`, the macOS AppIcon set and the Linux window icon).
 - **Mouse.** Drag to select, and use the wheel to scroll back. The phone
   swipe gestures only react to touch, so a mouse drag never switches tmux
   windows.
+- **Zoom.** Ctrl + mouse wheel (Cmd + wheel on macOS) or a trackpad pinch
+  changes the terminal font size, like the phone's pinch, and it is saved
+  the same way. A plain wheel still scrolls.
+- **Shortcuts.** Ctrl+Shift+/ (Cmd+/ on macOS) or *Keyboard shortcuts* in
+  the terminal menu lists them all:
+
+  | Action | Linux / Windows | macOS |
+  |---|---|---|
+  | Zoom in / out / reset | Ctrl+= (or Ctrl++) / Ctrl+- / Ctrl+0 | Cmd+= / Cmd+- / Cmd+0 |
+  | New session on this machine (connect picker) | Ctrl+Shift+T | Cmd+T |
+  | Close session | Ctrl+Shift+W | Cmd+W |
+  | Next / previous session | Ctrl+Tab / Ctrl+Shift+Tab, Ctrl+PgDn / Ctrl+PgUp | Ctrl+Tab / Ctrl+Shift+Tab, Cmd+Shift+] / Cmd+Shift+[ |
+  | Go to session 1 to 9 | Alt+1 to Alt+9 | Cmd+1 to Cmd+9 |
+  | Fullscreen terminal | F11 | Ctrl+Cmd+F or F11 |
+  | Keyboard shortcuts | Ctrl+Shift+/ | Cmd+/ |
+
+  None of these reach the shell. Two choices avoid clashes with shells and
+  TUIs. Go to session uses Alt+digit, because Ctrl+2 to Ctrl+8 are control
+  characters (Ctrl+6 is vim's alternate file). The price is readline's
+  rarely used Alt+digit argument. Help is Ctrl+Shift+/ because Ctrl+/ sends
+  ^_ (undo) and F1 belongs to htop and mc. Ctrl+Shift+- (Ctrl+_, undo)
+  still reaches the shell. Close asks first when the session is a plain
+  shell, because closing it ends what runs there. tmux and Herdr sessions
+  just detach. Fullscreen hides the app's chrome, not the OS window
+  decorations. There is no scrollback search yet (conduit_vt has none).
 - **On-screen keys.** The pill and key rows are hidden by default. The
   *On-screen keys* button above the bottom edge brings them back for the
   multiplexer shortcuts, snippets and the chat button. It resets for each
@@ -154,5 +179,5 @@ Gating lives in `lib/core/platform_features.dart`. Every flag reads
 - The UI is the phone UI with a centred home screen. Settings and sheets are
   full width. A real desktop layout, such as a side-by-side host list and
   terminal, comes later.
-- No desktop keyboard shortcuts for app actions yet (new tab, switch
-  session, font zoom). Use the terminal font size setting.
+- No scrollback search (Ctrl+Shift+F) yet, and the shortcuts are not
+  configurable.
