@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:conduit/core/app_failure.dart';
+import 'package:conduit/core/platform_features.dart';
+import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/chat_view/data/conductore_chat_client.dart';
 import 'package:conduit/features/chat_view/domain/chat_items.dart';
@@ -8,7 +10,12 @@ import 'package:conduit/features/chat_view/presentation/chat_view_controller.dar
 import 'package:conduit/features/chat_view/presentation/widgets/chat_composer.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_thread_items.dart';
 import 'package:conduit/features/terminal/presentation/widgets/prompt_composer_sheet.dart';
+import 'package:conduit/features/voice/data/platform_text_to_speech.dart';
+import 'package:conduit/features/voice/domain/text_to_speech.dart';
+import 'package:conduit/features/voice/domain/voice_preferences.dart';
 import 'package:conduit/features/voice/presentation/dictation_controller.dart';
+import 'package:conduit/features/voice/presentation/read_aloud_controller.dart';
+import 'package:conduit/features/voice/presentation/voice_settings_scope.dart';
 import 'package:flutter/material.dart';
 
 /// A native chat over one live Claude Code session: the transcript as
@@ -23,6 +30,7 @@ class ChatViewPage extends StatefulWidget {
     this.ownsController = true,
     this.onSetUpCompanion,
     this.onEnableMonitoring,
+    this.textToSpeech,
     super.key,
   });
 
@@ -44,6 +52,10 @@ class ChatViewPage extends StatefulWidget {
   /// the Agents panel and live updates need it). Non-null only while it is
   /// off; the banner offering it hides once tapped.
   final Future<void> Function()? onEnableMonitoring;
+
+  /// Speaks replies when "Read replies aloud" is on; defaults to the
+  /// on-device engine on Android and to none elsewhere (tests inject one).
+  final TextToSpeech? textToSpeech;
 
   @override
   State<ChatViewPage> createState() => _ChatViewPageState();
@@ -69,6 +81,7 @@ class _ChatViewPageState extends State<ChatViewPage>
 
   bool _showJump = false;
   Timer? _clock;
+  ReadAloudController? _readAloud;
 
   ChatViewController get _chat => widget.controller;
 
@@ -78,20 +91,108 @@ class _ChatViewPageState extends State<ChatViewPage>
     WidgetsBinding.instance.addObserver(this);
     _scroll.addListener(_onScroll);
     _chat.setVisible(true);
+    final tts =
+        widget.textToSpeech ??
+        (PlatformFeatures.textToSpeech ? PlatformTextToSpeech() : null);
+    if (tts != null) {
+      _readAloud = ReadAloudController(
+        tts: tts,
+        preferences: () => _settings?.voice ?? VoicePreferences.defaults,
+        dictationLanguage: () => _settings?.speechLanguage ?? '',
+      );
+      unawaited(_readAloud!.checkAvailability());
+      _chat.addListener(_feedReadAloud);
+      widget.dictation?.addListener(_syncDictation);
+    }
     // The elapsed time in the header.
     _clock = Timer.periodic(const Duration(seconds: 15), (_) {
       if (mounted) setState(() {});
     });
   }
 
+  bool _readAloudPrimed = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final readAloud = _readAloud;
+    if (readAloud != null && !_readAloudPrimed) {
+      _readAloudPrimed = true;
+      final voice = _settings?.voice ?? VoicePreferences.defaults;
+      readAloud.setEnabled(voice.readAloudFor(_chat.sessionId));
+      _feedReadAloud();
+    }
+  }
+
+  ThemeController? get _settings => VoiceSettingsScope.maybeOf(context);
+
+  /// Hands every new poll to the reader; the first loaded thread only
+  /// marks what is already there as read.
+  void _feedReadAloud() {
+    if (!_chat.loading && _chat.unsupported == null) {
+      _readAloud?.observe(_chat.items, _chat.pending);
+    }
+  }
+
+  void _syncDictation() {
+    _readAloud?.suppressed = widget.dictation?.isActive ?? false;
+  }
+
+  void _toggleReadAloud() {
+    final readAloud = _readAloud;
+    if (readAloud == null) return;
+    final enabled = !readAloud.enabled;
+    readAloud.setEnabled(enabled);
+    final settings = _settings;
+    if (settings != null) {
+      unawaited(
+        settings.setVoice(
+          settings.voice.withSessionReadAloud(_chat.sessionId, enabled),
+        ),
+      );
+    }
+  }
+
+  /// The user is acting (sending, answering): stop talking over them.
+  void _quiet() => _readAloud?.stop();
+
+  Future<void> _send(String text, {bool enter = true}) {
+    _quiet();
+    return _chat.send(text, enter: enter);
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    _chat.setVisible(state == AppLifecycleState.resumed);
+    final readAloud = _readAloud;
+    if (state == AppLifecycleState.resumed ||
+        readAloud == null ||
+        !readAloud.enabled) {
+      _chat.setVisible(state == AppLifecycleState.resumed);
+      return;
+    }
+    // Read-aloud is on. Keep polling and reading while only the screen
+    // went off with this chat on top; leaving the chat (another app, the
+    // home screen) silences it. No background service keeps it alive.
+    if (state == AppLifecycleState.inactive) {
+      return;
+    }
+    final onTop = ModalRoute.of(context)?.isCurrent ?? true;
+    unawaited(
+      readAloud.screenOn().then((screenOn) {
+        if (!mounted) return;
+        final keep = onTop && !screenOn;
+        _chat.setVisible(keep);
+        if (!keep) readAloud.stop();
+      }),
+    );
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _chat.removeListener(_feedReadAloud);
+    widget.dictation?.removeListener(_syncDictation);
+    _readAloud?.dispose();
     _clock?.cancel();
     _scroll.dispose();
     _chat.setVisible(false);
@@ -127,6 +228,7 @@ class _ChatViewPageState extends State<ChatViewPage>
     PendingPermissionRequest request,
     PermissionVerdict verdict,
   ) async {
+    _quiet();
     final messenger = ScaffoldMessenger.maybeOf(context);
     try {
       await _chat.decide(request, verdict);
@@ -143,6 +245,7 @@ class _ChatViewPageState extends State<ChatViewPage>
   }
 
   Future<void> _pick(int number) async {
+    _quiet();
     try {
       await _chat.answerQuestion(number);
     } catch (error) {
@@ -162,7 +265,7 @@ class _ChatViewPageState extends State<ChatViewPage>
       initialText: text,
       onDraftChanged: (value) => draft = value,
       onSend: (value, {required submit}) async {
-        await _chat.send(value, enter: submit);
+        await _send(value, enter: submit);
         draft = '';
       },
       submitEnter: true,
@@ -221,6 +324,11 @@ class _ChatViewPageState extends State<ChatViewPage>
               ],
             ),
             actions: [
+              if (_readAloud case final readAloud?)
+                _ReadAloudToggle(
+                  controller: readAloud,
+                  onPressed: _toggleReadAloud,
+                ),
               TextButton.icon(
                 onPressed: widget.onOpenTerminal,
                 icon: const Icon(Icons.terminal_rounded),
@@ -269,7 +377,7 @@ class _ChatViewPageState extends State<ChatViewPage>
                   showInterrupt:
                       activity == ChatActivity.working ||
                       activity == ChatActivity.thinking,
-                  onSend: _chat.send,
+                  onSend: _send,
                   onInterrupt: _chat.interrupt,
                   onExpand: _openComposer,
                   dictation: widget.dictation,
@@ -420,6 +528,41 @@ class _Centered extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// The header's speaker: on/off for "Read replies aloud"; tinted while
+/// speaking. Turning it off stops speech at once.
+class _ReadAloudToggle extends StatelessWidget {
+  const _ReadAloudToggle({required this.controller, required this.onPressed});
+
+  final ReadAloudController controller;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: controller,
+      builder: (context, _) {
+        if (!controller.isAvailable) {
+          return const SizedBox.shrink();
+        }
+        final on = controller.enabled;
+        return IconButton(
+          key: const ValueKey('chat-read-aloud'),
+          tooltip: on ? 'Stop reading replies aloud' : 'Read replies aloud',
+          isSelected: on,
+          onPressed: onPressed,
+          icon: const Icon(Icons.volume_off_outlined),
+          selectedIcon: Icon(
+            controller.speaking
+                ? Icons.record_voice_over_rounded
+                : Icons.volume_up_rounded,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+        );
+      },
     );
   }
 }

@@ -92,6 +92,9 @@ class ReadAloudController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Whether the phone's screen is on (false once it turns off).
+  Future<bool> screenOn() => _tts.isInteractive();
+
   /// Turns reading on or off. Off stops speech immediately.
   void setEnabled(bool value) {
     if (_enabled == value) return;
