@@ -13,8 +13,8 @@ enum HerdrDirection { left, right, up, down }
 /// Herdr CLI commands for one Herdr server (the default session, or a named
 /// one via `--session`), wrapped for a non-interactive SSH shell.
 ///
-/// Every command here was checked against Herdr 0.9.1 (`herdr <cmd>
-/// --help`), and the pane and zoom commands were run against a live
+/// Every command here was checked against Herdr 0.9.1 (each command's
+/// `--help`), and the pane and zoom commands were run against a live
 /// server: without `--pane`/`--current` they act on the UI-focused pane,
 /// which is what a phone gesture means.
 class HerdrCommands {
@@ -61,15 +61,15 @@ class HerdrCommands {
 /// focus the new one" cannot overtake itself.
 class HerdrRemoteControl {
   HerdrRemoteControl({
-    required AgentCommandRunner Function() runnerFactory,
+    required this.runnerFactory,
     this.session = '',
     this.idleTimeout = const Duration(minutes: 2),
-  }) : _runnerFactory = runnerFactory,
-       commands = HerdrCommands(session);
+  }) : commands = HerdrCommands(session);
 
   static const _timeout = Duration(seconds: 10);
 
-  final AgentCommandRunner Function() _runnerFactory;
+  /// Opens the command channel; called again after an idle close.
+  final AgentCommandRunner Function() runnerFactory;
   final String session;
   final HerdrCommands commands;
   final Duration idleTimeout;
@@ -99,7 +99,7 @@ class HerdrRemoteControl {
     }
     _idle?.cancel();
     try {
-      final runner = _runner ??= _runnerFactory();
+      final runner = _runner ??= runnerFactory();
       return await runner.run(command, timeout: _timeout);
     } on AppFailure {
       return null;
