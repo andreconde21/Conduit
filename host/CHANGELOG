@@ -1,6 +1,6 @@
 # Changelog — host companion
 
-## Unreleased
+## 0.3.0 (2026-09-25)
 
 - feat: `statusline [--chain '<cmd>']` records context and rate-limit usage per session (`usage` on each agent, throttled `reason: usage` changes); `install` wires or wraps `statusLine`, `uninstall` restores it, `doctor` reports it.
 

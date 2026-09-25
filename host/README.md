@@ -280,7 +280,7 @@ Not for the phone: this is Claude Code's `statusLine` command. See Usage.
 * `doctor`: `{"ok":true,"user":"andre","checks":[{"name":"hooks registered","ok":true,"detail":"9 events"},{"name":"statusline (usage)","ok":true,"detail":"wired, wrapping: ~/bin/my-line"}, …]}`
   (a missing statusline does not make `ok` false; only usage is lost)
 * `stop`: `{"ok":true,"running":true,"stopped":true}` or `{"ok":true,"running":false}`
-* `version`: `{"version":"0.2.0","protocol":1,"node":"22.23.1"}`
+* `version`: `{"version":"0.3.0","protocol":1,"node":"22.23.1"}`
 
 ## Usage (context and rate limits)
 
