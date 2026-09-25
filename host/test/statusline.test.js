@@ -84,7 +84,7 @@ const env = {
   CONDUCTORE_HOME: home,
   CONDUCTORE_SOCKET: path.join(home, 'hostd.sock'),
   CONDUCTORE_CLAUDE_SETTINGS: path.join(home, 'settings.json'),
-  CONDUCTORE_USAGE_THROTTLE_MS: '400'
+  CONDUCTORE_USAGE_THROTTLE_MS: '3000'
 }
 for (const k of ['TMUX', 'TMUX_PANE', 'HERDR_WORKSPACE_ID', 'HERDR_PANE_ID', 'HERDR_TAB_ID']) delete env[k]
 
@@ -136,8 +136,9 @@ test('statusline stores usage without changing state; changes are throttled', as
   const seq2 = first.json.seq
   await run(HOSTD, ['statusline'], JSON.stringify(sample({ context_window: { used_percentage: 50 } })))
   await run(HOSTD, ['statusline'], JSON.stringify(sample({ context_window: { used_percentage: 60 } })))
-  await sleep(700)
-  const lines = (await run(HOSTD, ['events', '--since', String(seq2), '--timeout', '1'], '')).stdout.trim().split('\n').map(l => JSON.parse(l))
+  // The window is wide (3 s) so slow process start-up under load cannot split
+  // the two reports; the held change arrives when the window ends.
+  const lines = (await run(HOSTD, ['events', '--since', String(seq2), '--timeout', '8'], '')).stdout.trim().split('\n').map(l => JSON.parse(l))
   const usageChanges = lines.filter(l => l.reason === 'usage')
   assert.equal(usageChanges.length, 1)
   assert.equal(usageChanges[0].agent.usage.contextUsedPct, 60)
