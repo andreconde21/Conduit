@@ -5,8 +5,7 @@ import 'package:conduit/features/sync/data/app_local_sync_store.dart';
 /// Whether a per-host record belongs to "This computer", which means a
 /// different machine on every device and so is never backed up or synced.
 bool isDeviceLocalHostId(String hostId) =>
-    hostId == thisComputerHostId ||
-    hostId.startsWith('$thisComputerHostId#');
+    hostId == thisComputerHostId || hostId.startsWith('$thisComputerHostId#');
 
 /// A per-host map (connect-picker memory, recent directories) as backups
 /// and sync see it: without "This computer", whose entries survive every

@@ -258,26 +258,29 @@ class TerminalSessionController extends ChangeNotifier {
           .cast<List<int>>()
           .transform(const Utf8Decoder(allowMalformed: true))
           .listen(_writeTerminalOutput, onError: _handleStreamError);
-      _doneSubscription = session.done.asStream().asyncMap((_) async {
-        if (session is ExitStatusTerminalSession) {
-          return (session as ExitStatusTerminalSession).exitCode
-              .then<int?>((code) => code)
-              .catchError((_) => null);
-        }
-        return null;
-      }).listen((code) {
-        if (_status == TerminalConnectionStatus.connected &&
-            _session == session) {
-          _status = TerminalConnectionStatus.disconnected;
-          _exitCode = code;
-          terminal.write(switch ((host.isLocal, code)) {
-            (_, final int code) => '\r\n[Shell exited (code $code)]\r\n',
-            (true, null) => '\r\nShell exited.\r\n',
-            (false, null) => '\r\nConnection closed.\r\n',
-          });
-          notifyListeners();
-        }
-      }, onError: _handleStreamError);
+      _doneSubscription = session.done
+          .asStream()
+          .asyncMap((_) async {
+            if (session is ExitStatusTerminalSession) {
+              return (session as ExitStatusTerminalSession).exitCode
+                  .then<int?>((code) => code)
+                  .catchError((_) => null);
+            }
+            return null;
+          })
+          .listen((code) {
+            if (_status == TerminalConnectionStatus.connected &&
+                _session == session) {
+              _status = TerminalConnectionStatus.disconnected;
+              _exitCode = code;
+              terminal.write(switch ((host.isLocal, code)) {
+                (_, final int code) => '\r\n[Shell exited (code $code)]\r\n',
+                (true, null) => '\r\nShell exited.\r\n',
+                (false, null) => '\r\nConnection closed.\r\n',
+              });
+              notifyListeners();
+            }
+          }, onError: _handleStreamError);
 
       if (session is RoamingTerminalSession) {
         _connectivitySubscription = connectivity?.onNetworkChanged.listen(

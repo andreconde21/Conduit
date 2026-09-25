@@ -76,6 +76,7 @@ class HostsController extends ChangeNotifier {
       notifyListeners();
     }
   }
+
   HostListSortMode get sortMode => _sortMode;
   List<String> get manualOrder => List.unmodifiable(_manualOrder);
 

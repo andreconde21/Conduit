@@ -388,7 +388,9 @@ class _OverflowMenu extends StatelessWidget {
                 child: _MenuRow(
                   Icons.refresh_rounded,
                   // A local shell starts over; there is no connection.
-                  session?.runsOnThisComputer ?? false ? 'Restart' : 'Reconnect',
+                  session?.runsOnThisComputer ?? false
+                      ? 'Restart'
+                      : 'Reconnect',
                 ),
               ),
             if (onToggleFullscreen != null)
