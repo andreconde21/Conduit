@@ -1,12 +1,13 @@
 {
   "name": "conductore-host",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
-  "description": "Host companion daemon and Claude Code hook client for Conductore Mobile",
+  "description": "Host companion daemon and Claude Code hook/statusline clients (sh) for Conductore Mobile",
   "license": "MIT",
   "bin": {
     "conductore-hostd": "bin/conductore-hostd",
-    "conductore-hook": "bin/conductore-hook"
+    "conductore-hook": "bin/conductore-hook",
+    "conductore-statusline": "bin/conductore-statusline"
   },
   "engines": { "node": ">=18" },
   "scripts": {
