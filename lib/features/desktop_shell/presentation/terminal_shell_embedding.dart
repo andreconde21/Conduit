@@ -130,8 +130,19 @@ class TerminalShellSync {
   /// Most recently focused views first.
   final List<String> recent = [];
 
-  /// The layout as the page renders it now.
-  ShellLayout get rendered => controller.layout.value.pruned(viewIds().toSet());
+  /// The layout as the page renders it now: panes of views that are gone
+  /// drop out, and an empty focused pane shows the focused view (the
+  /// saved layout is still held, or nothing was saved yet).
+  ShellLayout get rendered {
+    final layout = controller.layout.value.pruned(viewIds().toSet());
+    final active = activeViewId();
+    if (layout.focusedView == null &&
+        active != null &&
+        !layout.visibleViews.contains(active)) {
+      return layout.reveal(active);
+    }
+    return layout;
+  }
 
   /// The next view opened goes into a new pane at [edge] of the focused one.
   void requestSplit(ShellEdge edge) => _pendingSplit = edge;
