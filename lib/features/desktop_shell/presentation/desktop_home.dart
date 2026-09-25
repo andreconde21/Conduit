@@ -467,6 +467,10 @@ class DesktopHomeState extends State<DesktopHome> {
 
   void _rebuildTree() {
     if (!mounted) return;
+    final self = widget.hostsController.hiddenSelfMachine;
+    _controller.machineAlias = self == null
+        ? null
+        : (from: self.id, to: thisComputerHostId);
     _tree = SidebarTreeBuilder.build(_inputs(), _controller.prefs);
     _refreshListedWindows();
     _feedUnread();

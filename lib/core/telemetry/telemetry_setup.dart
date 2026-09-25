@@ -24,7 +24,8 @@ void startTelemetry({
     store: SecureTelemetryPreferencesStore(storage),
     scrubber: TelemetryScrubber(
       sensitiveTerms: () => [
-        ...savedHostTerms(hosts.machines),
+        // Every saved machine, one hidden as "This computer" included.
+        ...savedHostTerms([?hosts.thisComputer, ...hosts.hosts]),
         ...deviceTerms(),
         for (final snippet in theme.terminalSnippets) ...[
           snippet.label,

@@ -105,6 +105,8 @@ bool _lock(SettingsServices s) => s.onLockNow != null;
 bool _sessionViews(SettingsServices s) => s.hasSessionViews;
 bool _sync(SettingsServices s) => s.hasSync;
 bool _desktop(SettingsServices _) => PlatformFeatures.isDesktop;
+bool _selfMachine(SettingsServices s) =>
+    s.hostsController != null && showsSelfMachineSetting(s.hostsController!);
 bool _windowsShell(SettingsServices s) =>
     s.hostsController != null && showsWindowsShellSetting(s.hostsController!);
 
@@ -308,6 +310,12 @@ const List<SettingsEntry> settingsCatalog = [
     availableWhen: _homeWidget,
   ),
   // Sync & Backup
+  SettingsEntry(
+    SettingsSection.syncBackup,
+    SelfMachineCard.title,
+    keywords: ['this computer', 'ssh to itself', 'duplicate', 'same machine'],
+    availableWhen: _selfMachine,
+  ),
   SettingsEntry(
     SettingsSection.syncBackup,
     'Device sync',

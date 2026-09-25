@@ -1,3 +1,4 @@
+import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
 import 'package:flutter/foundation.dart';
 
 /// A user-made section of the sidebar ("Clients", "Infra") holding
@@ -273,6 +274,59 @@ class SidebarPrefs {
       result.insert(index, key);
     }
     return result;
+  }
+
+  /// These prefs with machine [from]'s order, rows, pins, group and open
+  /// rows applied to machine [to] where [to] has none of its own: a saved
+  /// machine that is this device shows as "This computer" in the sidebar,
+  /// with what the user arranged for it.
+  SidebarPrefs withMachineAlias(String from, String to) {
+    if (from == to) return this;
+    final fromPrefix = SidebarKeys.machine(from);
+    final toPrefix = SidebarKeys.machine(to);
+    final fromSession = '/s/${Uri.encodeComponent(from)}';
+    final toSession = '/s/${Uri.encodeComponent(to)}';
+    String alias(String key) {
+      if (!SidebarKeys.isUnder(key, fromPrefix)) return key;
+      var rest = key.substring(fromPrefix.length);
+      if (rest.startsWith(fromSession)) {
+        rest = '$toSession${rest.substring(fromSession.length)}';
+      }
+      return '$toPrefix$rest';
+    }
+
+    final toGrouped = groups.any((group) => group.machineIds.contains(to));
+    return copyWith(
+      machineOrder: machineOrder.contains(to)
+          ? [
+              for (final id in machineOrder)
+                if (id != from) id,
+            ]
+          : [for (final id in machineOrder) id == from ? to : id],
+      childOrder: {
+        ...childOrder,
+        if (!childOrder.containsKey(to) && childOrder[from] != null)
+          to: [for (final key in childOrder[from]!) alias(key)],
+      },
+      pinned: {for (final key in pinned) alias(key)}.toList(),
+      groups: [
+        for (final group in groups)
+          group.copyWith(
+            machineIds: [
+              for (final id in group.machineIds)
+                if (id != from) id else if (!toGrouped) to,
+            ],
+          ),
+      ],
+      expanded: {
+        for (final MapEntry(:key, :value) in expanded.entries)
+          alias(key): value,
+        ...{
+          for (final MapEntry(:key, :value) in expanded.entries)
+            if (!SidebarKeys.isUnder(key, fromPrefix)) key: value,
+        },
+      },
+    );
   }
 
   Map<String, Object?> toJson() => {

@@ -77,6 +77,8 @@ import 'package:conduit/features/this_computer/data/host_channels.dart';
 import 'package:conduit/features/this_computer/data/local_agent_command_runner.dart';
 import 'package:conduit/features/this_computer/data/local_file_repository.dart';
 import 'package:conduit/features/this_computer/data/secure_this_computer_store.dart';
+import 'package:conduit/features/this_computer/data/self_machine_matcher.dart';
+import 'package:conduit/features/this_computer/presentation/self_machine_watcher.dart';
 import 'package:conduit/features/usage/data/usage_preferences.dart';
 import 'package:conduit/features/usage/presentation/usage_controller.dart';
 import 'package:conduit/features/usage/presentation/usage_widgets.dart';
@@ -240,7 +242,7 @@ void main() {
     workspace: workspaceController,
     repository: const SecureSessionSnapshotRepository(secureStorage),
     findHost: (hostId) async {
-      await hostsController.firstLoad;
+      await hostsController.selfMachineKnown();
       return hostsController.findById(hostId);
     },
     ready: themeLoaded.then((_) {
@@ -253,6 +255,19 @@ void main() {
   // Backup imports and sync pulls announce here; the home page reloads
   // what it cached (trusted keys, machine filter) and its boards.
   final localDataChanges = LocalDataChanges();
+  // Desktops: a saved machine that is this device (the phone's SSH entry
+  // for this PC, synced here) folds into "This computer". Phones skip it.
+  if (PlatformFeatures.thisComputer) {
+    unawaited(
+      SelfMachineWatcher(
+        hosts: hostsController,
+        matcher: SelfMachineMatcher(),
+        trustedKeys: hostKeyVerifier.loadTrustedKeys,
+        networkChanges: ConnectivityPlusNetwork().onNetworkChanged,
+        dataChanges: localDataChanges,
+      ).start(),
+    );
+  }
   // This device's data as sync records: file backups and device sync
   // (Settings › Sync) read and write the app through it.
   final localSyncStore = AppLocalSyncStore(
@@ -316,6 +331,9 @@ void main() {
   final sessionViews = SessionViewController(
     const SecureSessionViewPreferencesRepository(secureStorage),
   );
+  // "This computer" follows the choices made for the synced machine that
+  // is this device, until it has its own.
+  sessionViews.fallbackHostOf = hostsController.fallbackHostIdFor;
   loadSessionViews(sessionViews);
 
   // Settings from any route (the terminal's ⋮ menu): the same services
@@ -586,7 +604,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
     return AgentNotificationOpenListener(
       source: PlatformAgentOpenRequests.instance,
       findHost: (hostId) async {
-        await widget.hostsController.firstLoad;
+        await widget.hostsController.selfMachineKnown();
         return widget.hostsController.findById(hostId);
       },
       onOpen: (host, agent) async {
@@ -672,7 +690,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
                     source: PlatformAgentPermissionActions.instance,
                     agentAttention: widget.agentAttention,
                     findHost: (hostId) async {
-                      await widget.hostsController.firstLoad;
+                      await widget.hostsController.selfMachineKnown();
                       return widget.hostsController.findById(hostId);
                     },
                     child: _wrapNotificationOpen(home),
