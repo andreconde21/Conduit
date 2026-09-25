@@ -53,6 +53,9 @@ import 'package:conduit/features/terminal/presentation/terminal_page.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:conduit/features/this_computer/domain/this_computer_settings.dart';
+import 'package:conduit/features/usage/data/usage_preferences.dart';
+import 'package:conduit/features/usage/presentation/usage_controller.dart';
+import 'package:conduit/features/usage/presentation/usage_widgets.dart';
 import 'package:conduit/features/voice/presentation/dictation_controller.dart';
 import 'package:conduit/features/voice/presentation/voice_settings_scope.dart';
 import 'package:flutter/foundation.dart';
@@ -66,6 +69,7 @@ import '../features/hosts/home_board_fakes.dart';
 import '../features/sync/fake_sync_hub.dart';
 import '../features/sync/sync_test_support.dart';
 import '../features/terminal/herdr/fake_herdr_runner.dart';
+import '../features/usage/usage_fakes.dart';
 import '../features/voice/fake_speech_recognizer.dart';
 import '../features/voice/fake_tts.dart';
 import '../support/test_doubles.dart';
@@ -371,6 +375,55 @@ Future<SyncController> demoSyncDevice(
   return sync;
 }
 
+Widget _withUsage(UsageController? usage, Widget page) =>
+    usage == null ? page : UsageScope(controller: usage, child: page);
+
+/// Usage on the workstation: the 5-hour limit at 62 %, the week at 31 %,
+/// today's tokens and cost.
+UsageController demoUsage() {
+  final now = DateTime.now();
+  String day(int back) {
+    final d = now.subtract(Duration(days: back));
+    return '${d.year}-${'${d.month}'.padLeft(2, '0')}-'
+        '${'${d.day}'.padLeft(2, '0')}';
+  }
+
+  final runner = FakeUsageRunner(
+    () => FakeUsageRunner.ok(
+      usageReplyJson(
+        machine: 'workstation',
+        today: day(0),
+        from: day(6),
+        limits: [
+          {
+            'label': '5h',
+            'usedPct': 62,
+            'resetsAt': now
+                .add(const Duration(hours: 2, minutes: 14))
+                .millisecondsSinceEpoch,
+          },
+          {
+            'label': '7d',
+            'usedPct': 31,
+            'resetsAt': now.add(const Duration(days: 3)).millisecondsSinceEpoch,
+          },
+        ],
+        rows: [
+          usageRow(day(0), output: 1840000, costUsd: 6.4),
+          usageRow(day(1), project: 'todo-web', output: 920000, costUsd: 3.1),
+        ],
+      ),
+    ),
+  );
+  final controller = UsageController(
+    source: FakeUsageSource([workstation], {'workstation': runner}),
+    preferences: MemoryUsagePreferencesStore(),
+    observeLifecycle: false,
+  );
+  addTearDown(controller.dispose);
+  return controller;
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   WakelockPlusPlatformInterface.instance = _NoopWakelock();
@@ -401,6 +454,7 @@ void main() {
     bool? shellMode,
     AgentAttentionController? attention,
     void Function(TerminalWorkspaceController workspace)? onWorkspace,
+    UsageController? usage,
   }) async {
     if (desktop) {
       useDesktopView(tester);
@@ -487,30 +541,33 @@ void main() {
     final verifier = NoopVerifier();
     await tester.pumpWidget(
       shotApp(
-        home: HostsPage(
-          hostsController: hostsController,
-          lockController: AppLockController(AlwaysAuthenticates()),
-          terminalRepository: NoNetworkTerminalRepository(),
-          workspaceController: workspace,
-          localShellController: LocalShellController(),
-          themeController: theme,
-          hostKeyVerifier: verifier,
-          promptCoordinator: HostKeyPromptCoordinator(),
-          sftpRepository: NoNetworkSftpRepository(),
-          sftpBookmarksRepository: InMemorySftpBookmarks(),
-          agentAttention: agentAttention,
-          backupService: AppBackupService(
+        home: _withUsage(
+          usage,
+          HostsPage(
             hostsController: hostsController,
+            lockController: AppLockController(AlwaysAuthenticates()),
+            terminalRepository: NoNetworkTerminalRepository(),
+            workspaceController: workspace,
+            localShellController: LocalShellController(),
             themeController: theme,
             hostKeyVerifier: verifier,
+            promptCoordinator: HostKeyPromptCoordinator(),
+            sftpRepository: NoNetworkSftpRepository(),
+            sftpBookmarksRepository: InMemorySftpBookmarks(),
+            agentAttention: agentAttention,
+            backupService: AppBackupService(
+              hostsController: hostsController,
+              themeController: theme,
+              hostKeyVerifier: verifier,
+            ),
+            fileExport: RecordingFileExport(),
+            homeBoards: boards,
+            homePreferences: InMemoryHomePreferencesRepository(),
+            connectFlow: homeFlow,
+            previewRefreshInterval: const Duration(days: 1),
+            desktopShell: shell,
+            shellMode: shellMode,
           ),
-          fileExport: RecordingFileExport(),
-          homeBoards: boards,
-          homePreferences: InMemoryHomePreferencesRepository(),
-          connectFlow: homeFlow,
-          previewRefreshInterval: const Duration(days: 1),
-          desktopShell: shell,
-          shellMode: shellMode,
         ),
         systemBars: !desktop,
       ),
@@ -1201,6 +1258,7 @@ void main() {
     WidgetTester tester, {
     AgentAttentionController? attention,
     void Function(TerminalWorkspaceController workspace)? onWorkspace,
+    UsageController? usage,
   }) async {
     final shell = DesktopShellController(store: InMemoryDesktopShellStore());
     addTearDown(shell.dispose);
@@ -1212,6 +1270,7 @@ void main() {
       shell: shell,
       attention: attention,
       onWorkspace: onWorkspace,
+      usage: usage,
     );
     await tester.runAsync(pumpEventQueue);
     await pumpFrames(tester, 6);
@@ -1220,7 +1279,7 @@ void main() {
 
   testWidgets('22 desktop shell dashboard', (tester) async {
     await asDesktop(() async {
-      final shell = await pumpShellHome(tester);
+      final shell = await pumpShellHome(tester, usage: demoUsage());
       shell.updatePrefs(
         (prefs) => prefs.setExpanded('m/workstation/h/w1', true),
       );
