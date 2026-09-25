@@ -30,6 +30,7 @@ abstract final class AppSettingsCodec {
     'terminalPillItems',
     'menuButtonsEnabled',
     'remoteClipboardEnabled',
+    'pasteImagesAsFiles',
     'restoreSessionsOnLaunch',
     'terminalGestures',
     'speechLanguage',
@@ -60,6 +61,7 @@ abstract final class AppSettingsCodec {
       'terminalPillItems': TerminalPillItem.encodeList(theme.terminalPillItems),
       'menuButtonsEnabled': theme.menuButtonsEnabled,
       'remoteClipboardEnabled': theme.remoteClipboardEnabled,
+      'pasteImagesAsFiles': theme.pasteImagesAsFiles,
       'restoreSessionsOnLaunch': theme.restoreSessionsOnLaunch,
       'terminalGestures': theme.terminalGestures.toJson(),
       'speechLanguage': theme.speechLanguage,
@@ -141,6 +143,8 @@ abstract final class AppSettingsCodec {
     if (remoteClipboard is bool) {
       await theme.setRemoteClipboardEnabled(remoteClipboard);
     }
+    final pasteImages = json['pasteImagesAsFiles'];
+    if (pasteImages is bool) await theme.setPasteImagesAsFiles(pasteImages);
     final restoreSessions = json['restoreSessionsOnLaunch'];
     if (restoreSessions is bool) {
       await theme.setRestoreSessionsOnLaunch(restoreSessions);

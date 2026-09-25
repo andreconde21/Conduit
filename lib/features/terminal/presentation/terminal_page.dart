@@ -53,6 +53,7 @@ import 'package:conduit/features/share_target/presentation/share_target_controll
 import 'package:conduit/features/share_target/presentation/share_target_scope.dart';
 import 'package:conduit/features/terminal/data/platform_prompt_image_source.dart';
 import 'package:conduit/features/terminal/data/prompt_image_preparer.dart';
+import 'package:conduit/features/terminal/domain/clipboard_image_paste.dart';
 import 'package:conduit/features/terminal/domain/herdr_remote_control.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:conduit/features/terminal/domain/prompt_image.dart';
@@ -101,6 +102,7 @@ class TerminalPage extends StatefulWidget {
     this.speechRecognizer,
     this.promptImageSource,
     this.previewWatcherFactory,
+    this.promptImagePreparer,
     this.homeBoards,
     super.key,
   });
@@ -134,6 +136,10 @@ class TerminalPage extends StatefulWidget {
   /// polling over an extra SSH connection (needs [hostKeyVerifier]).
   final PreviewReadyController Function(TerminalSessionController session)?
   previewWatcherFactory;
+
+  /// Names and copies images before upload (Chat mode's image button and
+  /// image paste). Null means the default under the app's temp directory.
+  final PromptImagePreparer? promptImagePreparer;
 
   /// The home page's boards (tmux sessions and Herdr workspaces per
   /// machine), for the quick switcher's other workspaces.
@@ -181,6 +187,9 @@ class _TerminalPageState extends State<TerminalPage>
   _previewWatchers = {};
   AppLifecycleListener? _lifecycle;
   bool _appResumed = true;
+
+  /// "Uploading image…" while a pasted image goes to the host.
+  String? _pasteStatus;
 
   @override
   void initState() {
@@ -628,6 +637,8 @@ class _TerminalPageState extends State<TerminalPage>
         onOpenTerminal: () => _showAgentTerminal(attention, host, agent),
         accessoryBuilder: _chatPreviewChip(host),
         initialDraft: draft,
+        imageAttacher: _promptImageAttacher(host),
+        pasteImages: widget.themeController.pasteImagesAsFiles,
       ),
     );
   }
@@ -829,7 +840,8 @@ class _TerminalPageState extends State<TerminalPage>
       isConnected: () => session.isConnected,
       bracketedPasteSupported: () => session.bracketedPasteSupported,
       dictation: _dictation,
-      imageAttacher: _promptImageAttacher(session),
+      imageAttacher: _promptImageAttacher(session.host),
+      pasteImages: widget.themeController.pasteImagesAsFiles,
     );
     if (!mounted) {
       return;
@@ -842,8 +854,8 @@ class _TerminalPageState extends State<TerminalPage>
 
   /// Images go to the same per-host inbox as files shared into the app,
   /// and the composer inserts the uploaded path for the agent to read.
-  PromptImageAttacher _promptImageAttacher(TerminalSessionController session) {
-    final preparer = PromptImagePreparer();
+  PromptImageAttacher _promptImageAttacher(SavedHost host) {
+    final preparer = widget.promptImagePreparer ?? PromptImagePreparer();
     return PromptImageAttacher(
       source: widget.promptImageSource ?? PlatformPromptImageSource(),
       crop: (image) => showImageCropPage(context, image),
@@ -851,10 +863,50 @@ class _TerminalPageState extends State<TerminalPage>
       upload: (image) async {
         final paths = await SftpShareUploader(
           widget.sftpRepository,
-        ).upload(session.host, [image]);
+        ).upload(host, [image]);
         return paths.single;
       },
     );
+  }
+
+  /// Paste with an image on the clipboard: uploads it to the host's share
+  /// inbox and pastes its path (bracketed when the program asked for it, no
+  /// Enter), which Claude Code reads as an image. Resolves to false when
+  /// there is no image, or the setting is off, so the text is pasted.
+  Future<bool> _pasteImageInto(TerminalSessionController session) async {
+    if (!widget.themeController.pasteImagesAsFiles) return false;
+    final paster = ClipboardImagePaster.fromAttacher(
+      _promptImageAttacher(session.host),
+    );
+    try {
+      final path = await paster.paste(
+        onUploading: () {
+          if (mounted) setState(() => _pasteStatus = 'Uploading image…');
+        },
+      );
+      if (path == null) return false;
+      if (mounted) session.paste(path);
+      return true;
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              key: const ValueKey('paste-image-failed'),
+              content: Text(
+                'Could not paste the image: '
+                '${error is AppFailure ? error.userMessage : error}',
+              ),
+            ),
+          );
+      }
+      return true;
+    } finally {
+      if (mounted && _pasteStatus != null) {
+        setState(() => _pasteStatus = null);
+      }
+    }
   }
 
   /// "cd to…" from the Tmux+ menu or the Herdr navigator: the machine's
@@ -1005,6 +1057,8 @@ class _TerminalPageState extends State<TerminalPage>
       dictation: _dictation,
       onOpenTerminal: () => _showAgentTerminal(attention, host, agent),
       accessoryBuilder: _chatPreviewChip(host),
+      imageAttacher: _promptImageAttacher(host),
+      pasteImages: widget.themeController.pasteImagesAsFiles,
     );
   }
 
@@ -1555,6 +1609,12 @@ class _TerminalPageState extends State<TerminalPage>
                                       accessoryBuilder: _chatPreviewChip(
                                         activeSession.host,
                                       ),
+                                      imageAttacher: _promptImageAttacher(
+                                        activeSession.host,
+                                      ),
+                                      pasteImages: widget
+                                          .themeController
+                                          .pasteImagesAsFiles,
                                       onOpenTerminal: (agent) =>
                                           _showAgentTerminal(
                                             attention,
@@ -1734,6 +1794,8 @@ class _TerminalPageState extends State<TerminalPage>
                                                             url,
                                                             line,
                                                           ),
+                                                  onPasteImage: () =>
+                                                      _pasteImageInto(session),
                                                 ),
                                               ),
                                             for (final tab in fileTabs)
@@ -1747,6 +1809,12 @@ class _TerminalPageState extends State<TerminalPage>
                                       ),
                               ),
                             ),
+                            if (_pasteStatus case final status?)
+                              Positioned(
+                                top: 8,
+                                left: 8,
+                                child: _PasteStatusChip(text: status),
+                              ),
                             if (activeFileTab == null &&
                                 activeSession != null &&
                                 _previewWatchers[activeSession] != null)
@@ -1884,6 +1952,7 @@ class _TerminalPageState extends State<TerminalPage>
                           },
                           onRemoteMouseTrackingActivated:
                               _maybeShowTouchModeHint,
+                          onPasteImage: () => _pasteImageInto(activeSession),
                           onOpenRecentDirectories:
                               widget.connectFlow?.recentDirectories == null
                               ? null
@@ -2160,4 +2229,47 @@ class _BorrowedRunner implements AgentCommandRunner {
 
   @override
   Future<void> close() async {}
+}
+
+/// A small progress pill over the terminal ("Uploading image…").
+class _PasteStatusChip extends StatelessWidget {
+  const _PasteStatusChip({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      key: const ValueKey('paste-status-chip'),
+      color: scheme.secondaryContainer,
+      elevation: 3,
+      shape: const StadiumBorder(),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: scheme.onSecondaryContainer,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              text,
+              style: TextStyle(
+                color: scheme.onSecondaryContainer,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

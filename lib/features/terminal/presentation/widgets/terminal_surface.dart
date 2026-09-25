@@ -8,6 +8,7 @@ import 'package:conduit/features/terminal/presentation/terminal_session_controll
 import 'package:conduit_vt/conduit_vt.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 class TerminalSurface extends StatefulWidget {
   const TerminalSurface({
@@ -28,6 +29,7 @@ class TerminalSurface extends StatefulWidget {
     this.onKeyEvent,
     this.dragScrollsRemote = true,
     this.onEnterScrollMode,
+    this.onPasteImage,
     super.key,
   });
 
@@ -73,6 +75,12 @@ class TerminalSurface extends StatefulWidget {
   /// has no other way to reach history. Null when the session is not a
   /// tmux or Herdr session: such drags send arrow keys instead.
   final VoidCallback? onEnterScrollMode;
+
+  /// Tried first when the paste shortcut (Ctrl+V, Cmd+V on Apple) is
+  /// pressed: pastes the clipboard's image as an uploaded file path and
+  /// resolves to true, or to false so the text is pasted. Null keeps the
+  /// terminal's own text paste.
+  final Future<bool> Function()? onPasteImage;
 
   @override
   State<TerminalSurface> createState() => _TerminalSurfaceState();
@@ -441,8 +449,36 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
     widget.onExitTmuxScrollMode();
   }
 
+  /// The terminal's shortcuts with paste routed to [_pasteClipboard].
+  static Map<ShortcutActivator, Intent> _imageAwareShortcuts() => {
+    for (final entry in defaultTerminalShortcuts.entries)
+      entry.key: entry.value is PasteTextIntent
+          ? const _PasteClipboardIntent()
+          : entry.value,
+  };
+
+  Future<void> _pasteClipboard() async {
+    if (await widget.onPasteImage?.call() ?? false) return;
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text;
+    if (text != null && text.isNotEmpty && mounted) {
+      widget.session.paste(text);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    return Actions(
+      actions: {
+        _PasteClipboardIntent: CallbackAction<_PasteClipboardIntent>(
+          onInvoke: (_) => _pasteClipboard(),
+        ),
+      },
+      child: _buildSurface(context),
+    );
+  }
+
+  Widget _buildSurface(BuildContext context) {
     return ClipRect(
       child: Stack(
         children: [
@@ -459,6 +495,9 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
                 return TerminalView(
                   widget.session.terminal,
                   key: _viewKey,
+                  shortcuts: widget.onPasteImage == null
+                      ? null
+                      : _imageAwareShortcuts(),
                   controller: _terminalController,
                   onTapUp: _handleTapUp,
                   focusNode: widget.focusNode,
@@ -560,4 +599,10 @@ class _RemoteScrollDragRecognizer extends VerticalDragGestureRecognizer {
       resolve(GestureDisposition.rejected);
     }
   }
+}
+
+/// Paste from a key shortcut, handled by [TerminalSurface] so an image on
+/// the clipboard can be uploaded instead of ignored.
+class _PasteClipboardIntent extends Intent {
+  const _PasteClipboardIntent();
 }

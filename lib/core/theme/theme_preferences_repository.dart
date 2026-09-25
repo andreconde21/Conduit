@@ -31,6 +31,7 @@ class ThemePreferences {
     this.speechLanguage = '',
     this.voice = VoicePreferences.defaults,
     this.remoteClipboardEnabled = true,
+    this.pasteImagesAsFiles = true,
     this.restoreSessionsOnLaunch = true,
     this.omarchySyncHostId,
     this.omarchySyncedTheme,
@@ -80,6 +81,11 @@ class ThemePreferences {
   /// clipboard. On by default, like most desktop terminals.
   final bool remoteClipboardEnabled;
 
+  /// Whether pasting an image uploads it to the host's share inbox and
+  /// pastes its path (what Claude Code reads as an image). Off: paste text
+  /// only, as before. On by default.
+  final bool pasteImagesAsFiles;
+
   /// Whether the open sessions come back after the app restarts (their
   /// list is kept in secure storage). On by default.
   final bool restoreSessionsOnLaunch;
@@ -128,6 +134,7 @@ class ThemePreferencesRepository {
   static const _voiceKey = 'conductore.voice.v1';
   static const _remoteClipboardEnabledKey =
       'conduit.remote_clipboard_enabled.v1';
+  static const _pasteImagesAsFilesKey = 'conductore.paste_images_as_files.v1';
   static const _restoreSessionsOnLaunchKey =
       'conductore.restore_sessions_on_launch.v1';
 
@@ -192,6 +199,9 @@ class ThemePreferencesRepository {
     final rawRestoreSessionsOnLaunch = await _storage.read(
       key: _restoreSessionsOnLaunchKey,
     );
+    final rawPasteImagesAsFiles = await _storage.read(
+      key: _pasteImagesAsFilesKey,
+    );
     final terminalFontSize = double.tryParse(rawTerminalFontSize ?? '');
     final terminalKeyboardRows = _appendUnseenBuiltIns(
       _parseTerminalKeyboardRows(
@@ -238,6 +248,8 @@ class ThemePreferencesRepository {
       restoreSessionsOnLaunch:
           rawRestoreSessionsOnLaunch == null ||
           rawRestoreSessionsOnLaunch == 'true',
+      pasteImagesAsFiles:
+          rawPasteImagesAsFiles == null || rawPasteImagesAsFiles == 'true',
       omarchySyncHostId: (rawOmarchySyncHost?.trim().isEmpty ?? true)
           ? null
           : rawOmarchySyncHost!.trim(),
@@ -357,6 +369,10 @@ class ThemePreferencesRepository {
     await _storage.write(
       key: _restoreSessionsOnLaunchKey,
       value: preferences.restoreSessionsOnLaunch.toString(),
+    );
+    await _storage.write(
+      key: _pasteImagesAsFilesKey,
+      value: preferences.pasteImagesAsFiles.toString(),
     );
     await _storage.write(
       key: _omarchySyncHostKey,
