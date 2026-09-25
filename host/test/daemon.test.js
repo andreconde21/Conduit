@@ -351,6 +351,12 @@ test('doctor reports checks as JSON, with hook latency and daemon memory', async
   assert.match(d.json.checks.find(c => c.name === 'daemon memory').detail, /MB RSS/)
 })
 
+test('version matches package.json', async () => {
+  const v = await cli('version')
+  assert.equal(v.json.version, require('../package.json').version)
+  assert.equal(v.json.protocol, 1)
+})
+
 test('a PermissionRequest with no daemon that can start gives up after 5 s, printing nothing', async () => {
   const lone = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-lone-'))
   fs.writeFileSync(path.join(lone, 'node'), '/bin/false\n')

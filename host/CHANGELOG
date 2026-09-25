@@ -1,5 +1,14 @@
 # Changelog — host companion
 
+## 0.4.0 (2026-09-25)
+
+- perf: the hook (`conductore-hook`) and the statusline (new `conductore-statusline`) are POSIX sh scripts: no Node start per event. An event is spooled as one file (`cat` + `ln`) in `~/.conductore/spool`, which the daemon watches; 2.4 ms and 1.9 MB peak per event instead of 34 ms and 46 MB. PermissionRequest waits on a FIFO the daemon answers (same decision JSON, same "always" rules, same timeout behaviour).
+- perf: statusline reports wake the daemon at most once per 10 s per session (hold + parked reports, the last value is never lost); the default line is built without Node.
+- perf: daemon diet: `--max-old-space-size=16 --max-semi-space-size=1 --lite-mode --v8-pool-size=1` (4 threads instead of 7, 47 MB RSS / 7.4 MB private instead of 54 / 8.8), no periodic timers (the 5 min prune interval is now a one-shot at the next deadline), snapshot debounce 1 s, per-event log lines only with `CONDUCTORE_LOG=debug`, idle exit after 6 h (`CONDUCTORE_IDLE_EXIT_S`).
+- feat: tmux location is resolved by the daemon (cached 5 s per pane); `install` records the node path for the sh clients and migrates 0.3 settings (Node hook entries, `conductore-hostd statusline --chain`); `doctor` reports hook latency and daemon memory; `host/bench.sh`.
+- fix: a starting daemon never takes over a socket another live daemon serves, and a custom `CONDUCTORE_HOME` keeps its socket inside it (a test daemon could unlink the real one).
+- The phone's CLI contract (`status`, `events`, `transcript`, `send`, `interrupt`, `decide`, `focus`, `version`, `doctor`) is unchanged; `status` now also applies events still waiting in the spool.
+
 ## 0.3.0 (2026-09-25)
 
 - feat: `statusline [--chain '<cmd>']` records context and rate-limit usage per session (`usage` on each agent, throttled `reason: usage` changes); `install` wires or wraps `statusLine`, `uninstall` restores it, `doctor` reports it.
