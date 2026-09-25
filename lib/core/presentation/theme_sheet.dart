@@ -516,6 +516,61 @@ class _TerminalAppearanceControls extends StatelessWidget {
         ),
         const SizedBox(height: 14),
         const SessionViewSettingsTile(),
+        Material(
+          key: const ValueKey('multiplexer-tabs-setting'),
+          color: colorScheme.surface,
+          shape: RoundedRectangleBorder(
+            side: BorderSide(color: colorScheme.outlineVariant),
+            borderRadius: AppTheme.borderRadius,
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.tab_rounded, size: 20),
+                    const SizedBox(width: 10),
+                    Text(
+                      'Multiplexer tabs on phone',
+                      style: theme.textTheme.titleSmall,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Herdr tabs and tmux windows. Compact names the current one '
+                  'in the session tab (tap it for the list) and costs no '
+                  'screen space; Strip adds a row, for tablets. A computer '
+                  'always shows the strip.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: SegmentedButton<MultiplexerTabsMode>(
+                    segments: [
+                      for (final value in MultiplexerTabsMode.values)
+                        ButtonSegment<MultiplexerTabsMode>(
+                          value: value,
+                          label: Text(value.label),
+                        ),
+                    ],
+                    selected: {controller.multiplexerTabs},
+                    onSelectionChanged: (selection) {
+                      controller.setMultiplexerTabs(selection.single);
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
         Container(
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
           decoration: BoxDecoration(

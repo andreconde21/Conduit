@@ -83,6 +83,11 @@ enum AgentNotifyLevel {
 const defaultTmuxPrefixKey = MultiplexerPrefixKey.defaultKey;
 const defaultTmuxSessionName = 'conduit';
 
+/// Id of the "This computer" machine on a desktop: the device the app runs
+/// on, reached through a local PTY instead of SSH. It is never saved in the
+/// machine list nor synced; its per-device settings live apart.
+const thisComputerHostId = 'this-computer';
+
 bool _parseStartTmuxOnConnect(Map<String, Object?> json) {
   return json['startTmuxOnConnect'] as bool? ?? false;
 }
@@ -238,6 +243,24 @@ class SavedHost {
     );
   }
 
+  /// The desktop's own "This computer" machine (see [thisComputerHostId]),
+  /// with the default [name] and the local account as [username].
+  factory SavedHost.thisComputer({
+    String name = 'This computer',
+    String hostname = 'localhost',
+    String username = '',
+  }) {
+    return SavedHost(
+      id: thisComputerHostId,
+      name: name,
+      host: hostname,
+      port: 22,
+      username: username,
+      authMethod: SshAuthMethod.external,
+      agentAttentionEnabled: true,
+    );
+  }
+
   final String id;
   final String name;
   final String host;
@@ -290,6 +313,11 @@ class SavedHost {
   final DateTime? lastConnectedAt;
   final bool isLocal;
 
+  /// The desktop's own machine, or a session opened on it (a derived
+  /// `this-computer#<target>` id).
+  bool get isThisComputer =>
+      id == thisComputerHostId || id.startsWith('$thisComputerHostId#');
+
   bool get isValid =>
       id.isNotEmpty &&
       name.trim().isNotEmpty &&
@@ -327,6 +355,11 @@ class SavedHost {
   }
 
   String get endpoint {
+    if (isThisComputer) {
+      final machine = host.trim().isEmpty ? 'localhost' : host.trim();
+      final user = username.trim();
+      return user.isEmpty ? '$machine (local)' : '$user@$machine (local)';
+    }
     final trimmedUsername = username.trim();
     final trimmedHost = host.trim();
     if (trimmedUsername.isEmpty) {

@@ -232,7 +232,7 @@ class _HostChooser extends StatelessWidget {
     return ListenableBuilder(
       listenable: hostsController,
       builder: (context, _) {
-        final hosts = hostsController.sortedHosts
+        final hosts = hostsController.sortedMachines
             .where((host) => !host.isLocal)
             .toList();
         return ListView(
@@ -257,7 +257,11 @@ class _HostChooser extends StatelessWidget {
             else
               for (final host in hosts)
                 ListTile(
-                  leading: const Icon(Icons.dns_rounded),
+                  leading: Icon(
+                    host.isThisComputer
+                        ? Icons.computer_rounded
+                        : Icons.dns_rounded,
+                  ),
                   title: Text(
                     host.name,
                     maxLines: 1,

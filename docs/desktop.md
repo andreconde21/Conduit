@@ -145,7 +145,8 @@ Windows `.ico`, the macOS AppIcon set and the Linux window icon).
 | Secret storage | libsecret | Credential Manager | login keychain | flutter_secure_storage |
 | Attach image to a prompt | file picker | file picker | file picker | image_picker's desktop implementations pick files. No camera |
 | Hardware security keys (`sk-` SSH keys) | no | no | no | FIDO runs over NFC (flutter_nfc_kit) or Android USB. Use a regular OpenSSH key on desktop. Connecting with an `sk-` key says so |
-| Local shell | no | no | no | The local shell section is Android's proot Linux (arm64 binaries). flutter_pty works on all three desktops, so a native local terminal running the user's shell is the natural follow-up |
+| This computer (local terminal) | yes | yes | yes | The machine list starts with *This computer*: the login shell in a flutter_pty PTY (`$SHELL -l`; PowerShell, cmd or WSL on Windows, from the machine menu's *Shell…*). Local tmux sessions and Herdr workspaces, the companion (Agent hooks installs it locally), git diff, files and live preview (127.0.0.1 directly) all work without SSH. Commands run with `sh -c` and the usual tool directories on PATH; on Windows only through WSL. Per device: never backed up or synced |
+| Proot local shell | no | no | no | Android's proot Linux section (arm64 binaries) |
 | Dictation, read-aloud (Talk) | no | no | no | Android `conduit/speech` and `conduit/tts` channels |
 | Live preview screenshot to Claude | no | no | yes | Needs the embedded page. Android uses PixelCopy |
 | Paste a clipboard image as a file | no | no | no | Android `conduit/clipboard_image` bridge. Paste falls back to text |
