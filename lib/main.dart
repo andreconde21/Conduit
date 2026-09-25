@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_theme.dart';
@@ -295,6 +296,9 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
   }
 
   void _syncBackgroundKeepalive() {
+    if (!PlatformFeatures.backgroundKeepalive) {
+      return;
+    }
     final sessionCount = widget.workspaceController.liveSessionCount;
     _maybeRequestNotificationPermission(sessionCount);
     final shouldRun =
@@ -339,7 +343,9 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
     widget.workspaceController.removeListener(_syncBackgroundKeepalive);
     widget.themeController.removeListener(_syncTerminalPreferences);
     widget.lockController.removeListener(_syncShareTargetGate);
-    unawaited(_backgroundKeepalive.stop());
+    if (PlatformFeatures.backgroundKeepalive) {
+      unawaited(_backgroundKeepalive.stop().catchError((_) {}));
+    }
     super.dispose();
   }
 

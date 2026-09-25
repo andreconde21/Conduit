@@ -1,0 +1,175 @@
+name: Promote
+
+# Moves a build that release.yml already uploaded to a wider audience.
+# Android: internal -> alpha (closed testing) -> beta (open testing) ->
+# production, optionally as a staged rollout; from = to = production changes
+# the rollout of the live release. iOS: TestFlight internal -> an external
+# TestFlight group, or submit for App Store review.
+# Production and App Store review run in the "production" environment, which
+# asks a required reviewer to approve first. See docs/release-pipeline.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform
+        type: choice
+        options: [android, ios, both]
+        default: android
+      build_number:
+        description: Build number to promote (Android versionCode = iOS build; see the Release run summary)
+        type: string
+        required: true
+      android_from:
+        description: 'Android: from track'
+        type: choice
+        options: [internal, alpha, beta, production]
+        default: internal
+      android_to:
+        description: 'Android: to track (alpha = closed testing, beta = open testing)'
+        type: choice
+        options: [alpha, beta, production]
+        default: alpha
+      android_rollout:
+        description: 'Android production: rollout fraction, e.g. 0.2 (empty = 100%)'
+        type: string
+        default: ''
+      ios_action:
+        description: 'iOS: what to do with the build'
+        type: choice
+        options: [testflight-external, app-store-review]
+        default: testflight-external
+      ios_version:
+        description: 'iOS: app version of the build, e.g. 0.1.0'
+        type: string
+        default: ''
+      ios_group:
+        description: 'iOS testflight-external: external group name'
+        type: string
+        default: ''
+      ios_changelog:
+        description: "iOS testflight-external: What to Test text (optional)"
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: promote
+  cancel-in-progress: false
+
+env:
+  PLAY_PACKAGE_NAME: ${{ vars.PLAY_PACKAGE_NAME || 'com.outsmartis.conductore' }}
+  IOS_BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID || 'com.outsmartis.conductore' }}
+
+jobs:
+  android-testing:
+    name: 'Android: ${{ inputs.android_from }} -> ${{ inputs.android_to }}'
+    if: ${{ inputs.platform != 'ios' && inputs.android_to != 'production' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+      - name: Promote on Google Play
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          FROM: ${{ inputs.android_from }}
+          TO: ${{ inputs.android_to }}
+          BUILD_NUMBER: ${{ inputs.build_number }}
+        run: |
+          if [[ -z "${PLAY_SERVICE_ACCOUNT_JSON}" ]]; then
+            echo "::error::PLAY_SERVICE_ACCOUNT_JSON is not set. See docs/release-pipeline.md."
+            exit 1
+          fi
+          bundle exec fastlane android promote "from:${FROM}" "to:${TO}" "version_code:${BUILD_NUMBER}"
+
+  android-production:
+    name: 'Android: ${{ inputs.android_from }} -> production'
+    if: ${{ inputs.platform != 'ios' && inputs.android_to == 'production' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+      - name: Promote on Google Play
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          FROM: ${{ inputs.android_from }}
+          BUILD_NUMBER: ${{ inputs.build_number }}
+          ROLLOUT: ${{ inputs.android_rollout }}
+        run: |
+          if [[ -z "${PLAY_SERVICE_ACCOUNT_JSON}" ]]; then
+            echo "::error::PLAY_SERVICE_ACCOUNT_JSON is not set. See docs/release-pipeline.md."
+            exit 1
+          fi
+          bundle exec fastlane android promote "from:${FROM}" to:production \
+            "version_code:${BUILD_NUMBER}" "rollout:${ROLLOUT}"
+
+  ios-testflight-external:
+    name: 'iOS: TestFlight group ${{ inputs.ios_group }}'
+    if: ${{ inputs.platform != 'android' && inputs.ios_action == 'testflight-external' }}
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+      - name: Distribute to the external group
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          GROUP: ${{ inputs.ios_group }}
+          IOS_VERSION: ${{ inputs.ios_version }}
+          BUILD_NUMBER: ${{ inputs.build_number }}
+          CHANGELOG: ${{ inputs.ios_changelog }}
+        run: |
+          for name in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8_BASE64 GROUP IOS_VERSION; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::${name} is empty (secrets: see docs/release-pipeline.md; GROUP and IOS_VERSION are inputs)."
+              exit 1
+            fi
+          done
+          bundle exec fastlane ios distribute_external "group:${GROUP}" \
+            "app_version:${IOS_VERSION}" "build_number:${BUILD_NUMBER}" "changelog:${CHANGELOG}"
+
+  ios-app-store-review:
+    name: 'iOS: submit ${{ inputs.ios_version }} (${{ inputs.build_number }}) for App Store review'
+    if: ${{ inputs.platform != 'android' && inputs.ios_action == 'app-store-review' }}
+    runs-on: macos-latest
+    timeout-minutes: 30
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+      - name: Submit for review
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          IOS_VERSION: ${{ inputs.ios_version }}
+          BUILD_NUMBER: ${{ inputs.build_number }}
+        run: |
+          for name in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8_BASE64 IOS_VERSION; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::${name} is empty (secrets: see docs/release-pipeline.md; IOS_VERSION is an input)."
+              exit 1
+            fi
+          done
+          bundle exec fastlane ios submit_review "app_version:${IOS_VERSION}" "build_number:${BUILD_NUMBER}"

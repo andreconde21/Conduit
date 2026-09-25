@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Conduit</string>
+	<string>$(APP_DISPLAY_NAME)</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -15,23 +15,23 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Conduit</string>
+	<string>Conductore</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Conduit connects to computers you choose over SSH.</string>
+	<string>Conductore connects to computers you choose over SSH and Mosh.</string>
 	<key>NFCReaderUsageDescription</key>
-	<string>Conduit uses NFC to authenticate SSH sessions with hardware security keys.</string>
+	<string>Conductore uses NFC to authenticate SSH sessions with hardware security keys.</string>
 	<key>com.apple.developer.nfc.readersession.iso7816.select-identifiers</key>
 	<array>
 		<string>A0000006472F0001</string>
 	</array>
 	<key>NSFaceIDUsageDescription</key>
-	<string>Conduit uses Face ID to protect saved SSH machines and credentials.</string>
+	<string>Conductore uses Face ID to protect saved SSH machines and credentials.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Conduit lets you choose files and photos to upload to remote machines over SFTP.</string>
+	<string>Conductore lets you choose files and photos to upload to your machines over SFTP or attach to a coding agent prompt.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Conduit lets you capture files or photos to upload to remote machines over SFTP.</string>
+	<string>Conductore lets you take a photo to upload to your machines over SFTP or attach to a coding agent prompt.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Conduit does not use your location, but file selection providers may require this permission.</string>
+	<string>Conductore does not use your location, but file selection providers may require this permission.</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

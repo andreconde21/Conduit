@@ -233,6 +233,11 @@ tools/build-release.sh [previous-release.apk]
 
 Release builds do not include the local Arch Linux shell's native binaries.
 
+Tagged releases (`v*`) are built by GitHub Actions and go to Google Play
+internal testing, TestFlight and a GitHub prerelease; see
+[docs/release-pipeline.md](docs/release-pipeline.md). The privacy policy is
+[docs/privacy-policy.md](docs/privacy-policy.md).
+
 ## Credits
 
 - Based on [Conduit](https://github.com/gwitko/Conduit) by

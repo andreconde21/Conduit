@@ -6,6 +6,7 @@ import 'package:conduit/features/terminal/data/prompt_image_preparer.dart';
 import 'package:conduit/features/terminal/domain/prompt_image.dart';
 import 'package:conduit/features/terminal/presentation/widgets/image_crop_page.dart';
 import 'package:conduit/features/terminal/presentation/widgets/prompt_composer_sheet.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
@@ -244,6 +245,30 @@ void main() {
       await tester.pumpAndSettle();
       expect(source.picked.last, PromptImageOrigin.camera);
       expect(uploads, 0);
+    });
+
+    testWidgets('iOS has no clipboard image bridge, so no Paste image', (
+      tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      try {
+        await pumpComposer(
+          tester,
+          PromptImageAttacher(
+            source: _FakeSource(null),
+            crop: (image) async => fullImageCrop,
+            prepare: (image, crop) async => image,
+            upload: (image) async => '/x.png',
+          ),
+        );
+        await tester.tap(find.byTooltip('Attach image'));
+        await tester.pumpAndSettle();
+        expect(find.text('Gallery'), findsOneWidget);
+        expect(find.text('Camera'), findsOneWidget);
+        expect(find.text('Paste image'), findsNothing);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
     });
 
     testWidgets('upload failures stay inside the sheet', (tester) async {
