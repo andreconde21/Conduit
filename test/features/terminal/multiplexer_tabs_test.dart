@@ -81,7 +81,7 @@ void main() {
       expect(parsed.knowsActive, isTrue);
       expect(
         [for (final tab in parsed.tabs) tab.label],
-        ['Infrastructure', 'review', '3'],
+        ['Infrastructure', 'review', 'Tab 3'],
       );
       expect([for (final tab in parsed.tabs) tab.active], [false, true, false]);
       expect(parsed.tabs.first.status, AgentAttentionState.needsInput);
@@ -301,7 +301,7 @@ void main() {
         expect(controller.tabs.map((tab) => tab.label), [
           'Infrastructure',
           'review',
-          '3',
+          'Tab 3',
         ]);
         // The companion's agent state is merged in.
         expect(controller.tabs[2].status, AgentAttentionState.needsInput);

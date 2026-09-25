@@ -101,11 +101,21 @@ class RemoteSessionLister {
           timeout: _timeout,
         );
         if (tabs.exitCode == 0) {
+          var parsed = RemoteSessionListing.parseHerdrTabs(tabs.stdout);
+          // What each tab shows, so no row has to fall back on an id.
+          try {
+            final panes = await _runner.run(
+              RemoteSessionListing.herdrPaneListFor(session),
+              timeout: _timeout,
+            );
+            if (panes.exitCode == 0) {
+              parsed = RemoteSessionListing.attachPanes(parsed, panes.stdout);
+            }
+          } catch (_) {
+            // Tabs keep their labels and pane counts.
+          }
           return RemoteListingAvailable(
-            RemoteSessionListing.attachTabs(
-              listing.items,
-              RemoteSessionListing.parseHerdrTabs(tabs.stdout),
-            ),
+            RemoteSessionListing.attachTabs(listing.items, parsed),
           );
         }
       } catch (_) {

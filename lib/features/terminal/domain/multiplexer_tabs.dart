@@ -231,7 +231,7 @@ HerdrWorkspaceTabs? parseHerdrWorkspaceTabs(
       for (final (i, (_, tab)) in inWorkspace.indexed)
         MultiplexerTab(
           id: tab.id,
-          label: tab.label.isEmpty ? '${i + 1}' : tab.label,
+          label: tab.displayLabel(i + 1),
           index: tab.number ?? i + 1,
           active: tab.focused,
           status: herdrStatusToState(tab.agentStatus),
