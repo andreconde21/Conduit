@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/sessions/domain/connect_target.dart';
+import 'package:conduit/features/terminal/domain/herdr_keymap.dart';
 import 'package:conduit/features/terminal/domain/network_connectivity.dart';
 import 'package:conduit/features/terminal/domain/osc52_clipboard.dart';
 import 'package:conduit/features/terminal/domain/predictive_echo.dart';
@@ -486,18 +488,96 @@ class TerminalSessionController extends ChangeNotifier {
       return;
     }
     try {
-      if (host.startTmuxOnConnect) {
-        await session.send(_tmuxDetachBytes());
-        await Future<void>.delayed(_tmuxDetachExitDelay);
-        await session.send(utf8.encode('exit\r'));
-      } else {
-        await session.send(const [0x04]);
+      switch (moshCloseKeystrokes()) {
+        case MoshCloseTmux(:final detach):
+          await session.send(detach);
+          await Future<void>.delayed(_tmuxDetachExitDelay);
+          await session.send(utf8.encode('exit\r'));
+        case MoshCloseHerdr(:final detach):
+          // No "exit" after it: if the detach did not land, it would be
+          // typed into the focused pane (Claude Code reads it as a command).
+          await session.send(detach);
+        case MoshCloseShell():
+          await session.send(const [0x04]);
+        case MoshCloseNothing():
+          return;
       }
       await session.done.timeout(_gracefulMoshCloseTimeout);
     } catch (_) {
       // Fall back to the transport close below if the remote side ignores the
       // graceful exit sequence or the session is already gone.
     }
+  }
+
+  /// What is typed into a Mosh session before its transport closes (Close,
+  /// Reconnect, the pill's reconnect), so the remote side ends cleanly
+  /// instead of leaving mosh-server behind.
+  ///
+  /// Only a plain shell gets Ctrl-D. A session attached to a multiplexer
+  /// never does: the multiplexer's client is the foreground app, so Ctrl-D
+  /// would reach its focused pane and could end Claude Code or a shell
+  /// there. tmux gets its detach (prefix, d); Herdr gets the machine's own
+  /// `detach` binding from its keymap (prefix+q by default) once that keymap
+  /// has been read, and nothing at all before that.
+  @visibleForTesting
+  MoshCloseKeystrokes moshCloseKeystrokes() {
+    final target = ConnectTarget.fromSessionHostId(host.id);
+    if (host.startTmuxOnConnect || target?.kind == ConnectTargetKind.tmux) {
+      return MoshCloseTmux(_tmuxDetachBytes());
+    }
+    if (target?.kind == ConnectTargetKind.herdr ||
+        _startsHerdr(startupCommand)) {
+      final bytes = herdrDetachBytes(
+        baseHostId(host.id),
+        hostPrefix: host.tmuxPrefixKey,
+      );
+      return bytes == null ? const MoshCloseNothing() : MoshCloseHerdr(bytes);
+    }
+    return const MoshCloseShell();
+  }
+
+  static final _herdrCommand = RegExp(r'(^|[;&|\s])herdr(\s|$)');
+
+  static bool _startsHerdr(String? command) =>
+      command != null && _herdrCommand.hasMatch(command);
+
+  /// The bytes of the `detach` binding in [hostId]'s Herdr keymap, behind
+  /// its prefix (the config's `keys.prefix`, else [hostPrefix]); null when
+  /// the keymap has not been read from the machine or `detach` is unbound.
+  static List<int>? herdrDetachBytes(
+    String hostId, {
+    required MultiplexerPrefixKey hostPrefix,
+  }) {
+    final cache = HerdrKeymapCache.instance;
+    if (!cache.has(hostId)) {
+      return null;
+    }
+    final keymap = cache.of(hostId);
+    final binding = keymap.bindingFor('detach');
+    if (binding == null) {
+      return null;
+    }
+    // Encoded exactly as a key press on the terminal would be.
+    final out = <int>[];
+    final encoder = Terminal()
+      ..onOutput = (data) => out.addAll(utf8.encode(data));
+    void control(TerminalKey key) => encoder.keyInput(key, ctrl: true);
+    HerdrKeySender.send(
+      binding,
+      prefix: keymap.prefix ?? hostPrefix,
+      sendPrefix: (prefix) {
+        final key = prefix.controlKey;
+        if (key != null) {
+          control(key);
+        } else {
+          encoder.textInput(prefix.sequence);
+        }
+      },
+      sendText: encoder.textInput,
+      sendKey: encoder.keyInput,
+      sendControl: control,
+    );
+    return out.isEmpty ? null : out;
   }
 
   List<int> _tmuxDetachBytes() => [...host.tmuxPrefixKey.bytes, 0x64];
@@ -805,4 +885,34 @@ class TerminalSessionController extends ChangeNotifier {
     unawaited(_workingDirectoryReports.close());
     super.dispose();
   }
+}
+
+/// What [TerminalSessionController] types into a Mosh session before
+/// closing it.
+sealed class MoshCloseKeystrokes {
+  const MoshCloseKeystrokes();
+}
+
+/// tmux: its detach, then `exit` for the shell it returns to.
+class MoshCloseTmux extends MoshCloseKeystrokes {
+  const MoshCloseTmux(this.detach);
+
+  final List<int> detach;
+}
+
+/// Herdr: the machine's detach binding.
+class MoshCloseHerdr extends MoshCloseKeystrokes {
+  const MoshCloseHerdr(this.detach);
+
+  final List<int> detach;
+}
+
+/// A plain shell: Ctrl-D.
+class MoshCloseShell extends MoshCloseKeystrokes {
+  const MoshCloseShell();
+}
+
+/// Nothing is typed; only the transport closes.
+class MoshCloseNothing extends MoshCloseKeystrokes {
+  const MoshCloseNothing();
 }
