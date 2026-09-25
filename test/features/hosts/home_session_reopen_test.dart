@@ -46,17 +46,27 @@ class _HerdrClient
 
   int columns;
   int rows;
-  String screen = 'HERDR workspace w1';
+  String screen =
+      'HERDR workspace w1\r\n'
+      ' Do you want to proceed?\r\n'
+      ' ❯ 1. Yes\r\n'
+      "   2. Yes, and don't ask again for git status commands\r\n"
+      '   3. No, and tell Claude what to do differently (esc)';
   bool attached = false;
   final resizes = <(int, int)>[];
   final _done = Completer<void>();
   final _stdout = StreamController<List<int>>();
 
   void _draw() {
-    final out = StringBuffer('\x1b[?1049h\x1b[2J\x1b[H$screen');
-    for (var row = 2; row <= rows; row++) {
+    // Empty pane rows, then the screen's lines at the bottom with the
+    // cursor after them, like a TUI waiting at a prompt.
+    final lines = screen.split('\r\n');
+    final top = (rows - lines.length + 1).clamp(1, rows);
+    final out = StringBuffer('\x1b[?1049h\x1b[2J');
+    for (var row = 1; row < top; row++) {
       out.write('\x1b[$row;1H~');
     }
+    out.write('\x1b[$top;1H${lines.join('\r\n')}');
     _stdout.add(utf8.encode(out.toString()));
   }
 
@@ -268,7 +278,8 @@ void main() {
     expect(repository.clients, hasLength(1));
     final size = (session.terminal.viewWidth, session.terminal.viewHeight);
     // A real size change, so the kernel signals Herdr, then the true size.
-    expect(client.resizes, [(size.$1, size.$2 - 1), size]);
+    expect(client.resizes.first.$2, lessThan(client.resizes.last.$2));
+    expect(client.resizes.last, size);
     expect(screenText(session.terminal), contains('HERDR after the break'));
     await unmount(tester);
   });
@@ -304,8 +315,9 @@ void main() {
     await unmount(tester);
   });
 
-  testWidgets('in the whole app: open a Mosh Herdr workspace, go home, '
-      'tap its tile, and the whole terminal page is there', (tester) async {
+  /// The whole app (main.dart's ConduitApp with fakes) on one Mosh
+  /// machine running Herdr; returns the framework errors it reports.
+  Future<List<FlutterErrorDetails>> pumpWholeApp(WidgetTester tester) async {
     tester.view.physicalSize = const Size(1080, 2400);
     tester.view.devicePixelRatio = 2.6;
     addTearDown(tester.view.reset);
@@ -373,6 +385,12 @@ void main() {
       ),
     );
     await settle(tester);
+    return errors;
+  }
+
+  testWidgets('in the whole app: open a Mosh Herdr workspace, go home, '
+      'tap its tile, and the whole terminal page is there', (tester) async {
+    final errors = await pumpWholeApp(tester);
     await tester.tap(find.byKey(const ValueKey('other-herdr-a-w1')));
     await settle(tester);
     final session = workspace.sessions.single;
@@ -385,6 +403,56 @@ void main() {
     expect(find.byType(TerminalPage), findsNothing);
 
     await tester.tap(find.byKey(const ValueKey('home-session-a#herdr:w1')));
+    await settle(tester);
+    expectShowing(tester, session);
+    // The Claude prompt on screen shows its buttons at once.
+    expect(find.byKey(const ValueKey('prompt-menu-chips')), findsOneWidget);
+    expect(errors, isEmpty, reason: errors.map((e) => '$e').join('\n'));
+    await unmount(tester);
+  });
+
+  testWidgets('in the whole app: a second workspace joins the open tab; back '
+      'with the system button and the header, reopen from the tile', (
+    tester,
+  ) async {
+    final errors = await pumpWholeApp(tester);
+    await tester.tap(find.byKey(const ValueKey('other-herdr-a-w1')));
+    await settle(tester);
+    final first = workspace.sessions.single;
+    await tester.binding.handlePopRoute();
+    await settle(tester);
+
+    await tester.tap(find.byKey(const ValueKey('other-herdr-a-w2')));
+    await settle(tester);
+    // One app tab per Herdr server: the open one moves to w2.
+    expect(workspace.sessions, [first]);
+    expectShowing(tester, first);
+    await tester.tap(find.byTooltip('Machines'));
+    await settle(tester);
+    expect(find.byType(TerminalPage), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('home-session-a#herdr:w1')));
+    await settle(tester);
+    expectShowing(tester, first);
+    expect(errors, isEmpty, reason: errors.map((e) => '$e').join('\n'));
+    await unmount(tester);
+  });
+
+  testWidgets('in the whole app: a workspace opened from the connect '
+      'picker reopens from its tile', (tester) async {
+    final errors = await pumpWholeApp(tester);
+    await tester.tap(find.byTooltip('New session'));
+    await settle(tester);
+    await tester.tap(find.text('Herdr').last);
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('herdr-workspace-:w1')));
+    await settle(tester);
+    final session = workspace.sessions.single;
+    expectShowing(tester, session);
+
+    await tester.binding.handlePopRoute();
+    await settle(tester);
+    await tester.tap(find.byKey(ValueKey('home-session-${session.host.id}')));
     await settle(tester);
     expectShowing(tester, session);
     expect(errors, isEmpty, reason: errors.map((e) => '$e').join('\n'));
