@@ -107,6 +107,8 @@ class AgentInfo {
     this.stateSequence,
     this.pendingRequests = const [],
     this.lastMessage,
+    this.project,
+    this.usage,
   });
 
   /// Stable identity across polls (provider-specific; e.g. pane id or a
@@ -140,6 +142,31 @@ class AgentInfo {
   /// the provider; shown in the dashboard and notification bodies.
   final String? lastMessage;
 
+  /// Provider-reported project label (e.g. the git repository name), when
+  /// it knows one. See [projectLabel] for the fallback the inbox uses.
+  final String? project;
+
+  /// Context and rate-limit usage, when the provider reports it (the
+  /// companion's optional `usage` field). Null means "not reported".
+  final AgentUsage? usage;
+
+  /// The project the inbox groups this agent under: the provider's
+  /// [project], else the basename of a path-like [workspace] (the
+  /// companion puts the agent's cwd there). Herdr's opaque workspace ids
+  /// are not projects, so those agents have none.
+  String? get projectLabel {
+    final explicit = project?.trim();
+    if (explicit != null && explicit.isNotEmpty) {
+      return explicit;
+    }
+    final raw = workspace?.trim();
+    if (raw == null || !raw.contains('/')) {
+      return null;
+    }
+    final parts = raw.split('/').where((part) => part.isNotEmpty);
+    return parts.isEmpty ? raw : parts.last;
+  }
+
   /// A copy with [pendingRequests] and optionally [state] replaced.
   AgentInfo copyWith({
     AgentAttentionState? state,
@@ -157,6 +184,8 @@ class AgentInfo {
       stateSequence: stateSequence,
       pendingRequests: pendingRequests ?? this.pendingRequests,
       lastMessage: lastMessage,
+      project: project,
+      usage: usage,
     );
   }
 
@@ -173,6 +202,8 @@ class AgentInfo {
         other.stateChangedAt == stateChangedAt &&
         other.stateSequence == stateSequence &&
         other.lastMessage == lastMessage &&
+        other.project == project &&
+        other.usage == usage &&
         _sameRequests(other.pendingRequests, pendingRequests);
   }
 
@@ -203,8 +234,87 @@ class AgentInfo {
     stateChangedAt,
     stateSequence,
     lastMessage,
+    project,
+    usage,
     Object.hashAll(pendingRequests),
   );
+}
+
+/// How much of an agent's budget is used, as far as the provider knows.
+/// Every field is optional: a provider reports what it can see (Claude
+/// Code's statusline input carries all of it; hooks carry none).
+class AgentUsage {
+  const AgentUsage({
+    this.contextUsedPct,
+    this.contextTokens,
+    this.windowLabel,
+    this.limits = const [],
+  });
+
+  /// Share of the context window in use, 0 to 100.
+  final double? contextUsedPct;
+
+  /// Tokens currently in the context window.
+  final int? contextTokens;
+
+  /// Human label for the context window (e.g. `200k`, `1M`).
+  final String? windowLabel;
+
+  /// Account rate-limit windows (e.g. the 5-hour and 7-day windows).
+  final List<AgentRateLimit> limits;
+
+  bool get isEmpty =>
+      contextUsedPct == null && contextTokens == null && limits.isEmpty;
+
+  @override
+  bool operator ==(Object other) {
+    if (other is! AgentUsage ||
+        other.contextUsedPct != contextUsedPct ||
+        other.contextTokens != contextTokens ||
+        other.windowLabel != windowLabel ||
+        other.limits.length != limits.length) {
+      return false;
+    }
+    for (var i = 0; i < limits.length; i++) {
+      if (other.limits[i] != limits[i]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    contextUsedPct,
+    contextTokens,
+    windowLabel,
+    Object.hashAll(limits),
+  );
+}
+
+/// One rate-limit window (e.g. `5h` at 23.5 %, resetting at [resetsAt]).
+class AgentRateLimit {
+  const AgentRateLimit({
+    required this.label,
+    required this.usedPct,
+    this.resetsAt,
+  });
+
+  final String label;
+
+  /// 0 to 100 (a spend limit may exceed 100).
+  final double usedPct;
+  final DateTime? resetsAt;
+
+  @override
+  bool operator ==(Object other) =>
+      other is AgentRateLimit &&
+      other.label == label &&
+      other.usedPct == usedPct &&
+      other.resetsAt == resetsAt;
+
+  @override
+  int get hashCode => Object.hash(label, usedPct, resetsAt);
 }
 
 /// One poll's worth of agent information for a host.

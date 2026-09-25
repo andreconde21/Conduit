@@ -41,6 +41,7 @@ void main() {
     PillCommandRunnerFactory? runnerFactory,
     List<TerminalKeyboardItem> extraRowItems = const [],
     MultiplexerPrefixKey prefix = MultiplexerPrefixKey.controlB,
+    VoidCallback? onOpenRecentDirectories,
   }) {
     return MaterialApp(
       home: Scaffold(
@@ -79,6 +80,7 @@ void main() {
               onExitTmuxScrollMode: () {},
               tmuxPrefixKey: prefix,
               tmuxScrollMode: false,
+              onOpenRecentDirectories: onOpenRecentDirectories,
             ).withToolbarStyle(
               style,
               onReconnect: onReconnect,
@@ -778,6 +780,54 @@ void main() {
       await tester.pump();
       expect(find.text('reviewer'), findsOneWidget);
       await tester.pumpAndSettle();
+    });
+
+    testWidgets('"cd to…" appears in the Herdr navigator and the Tmux+ '
+        'menu only when the page offers it', (tester) async {
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 2.625;
+      addTearDown(tester.view.reset);
+      HerdrPaneListingCache.instance.clear();
+      final controller = _RecordingTerminalSessionController();
+      final focusNode = FocusNode();
+      addTearDown(focusNode.dispose);
+      addTearDown(controller.dispose);
+      var opened = 0;
+
+      await tester.pumpWidget(
+        buildToolbar(controller: controller, focusNode: focusNode),
+      );
+      await tester.tap(find.byKey(const ValueKey('toolbar-herdr')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('herdr-cd-to')), findsNothing);
+      await tester.tapAt(const Offset(10, 10));
+      await tester.pumpAndSettle();
+
+      await tester.pumpWidget(
+        buildToolbar(
+          controller: controller,
+          focusNode: focusNode,
+          onOpenRecentDirectories: () => opened++,
+          pillItems: const [
+            TerminalPillItem.button(TerminalPillButton.herdr),
+            TerminalPillItem.button(TerminalPillButton.tmux),
+          ],
+        ),
+      );
+      await tester.tap(find.byKey(const ValueKey('toolbar-herdr')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('herdr-cd-to')));
+      await tester.pumpAndSettle();
+      expect(opened, 1);
+
+      await tester.tap(find.byKey(const ValueKey('toolbar-tmux')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('cd to…'));
+      await tester.pumpAndSettle();
+      expect(opened, 2);
+      // Neither entry types anything into the session.
+      expect(controller.sentText, isEmpty);
+      expect(controller.sentControlKeys, isEmpty);
     });
 
     testWidgets('Herdr navigator says Herdr is not found and its shortcuts '

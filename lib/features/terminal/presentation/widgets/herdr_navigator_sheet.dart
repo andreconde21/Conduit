@@ -18,6 +18,11 @@ class HerdrPanePick extends HerdrNavigatorPick {
   final HerdrPaneEntry entry;
 }
 
+/// "cd to…": open the recent-directories sheet.
+class HerdrCdToPick extends HerdrNavigatorPick {
+  const HerdrCdToPick();
+}
+
 class HerdrShortcutPick extends HerdrNavigatorPick {
   const HerdrShortcutPick(this.shortcut);
 
@@ -46,6 +51,7 @@ Future<HerdrNavigatorPick?> showHerdrNavigatorSheet({
   HerdrPaneListing? cached,
   Future<HerdrPaneListing> Function()? load,
   String? paneListUnavailableReason,
+  bool showCdTo = false,
 }) {
   return showModalBottomSheet<HerdrNavigatorPick>(
     context: context,
@@ -59,6 +65,7 @@ Future<HerdrNavigatorPick?> showHerdrNavigatorSheet({
       cached: cached,
       load: load,
       paneListUnavailableReason: paneListUnavailableReason,
+      showCdTo: showCdTo,
     ),
   );
 }
@@ -71,6 +78,7 @@ class HerdrNavigatorSheet extends StatefulWidget {
     this.cached,
     this.load,
     this.paneListUnavailableReason,
+    this.showCdTo = false,
     super.key,
   });
 
@@ -80,6 +88,9 @@ class HerdrNavigatorSheet extends StatefulWidget {
   final HerdrPaneListing? cached;
   final Future<HerdrPaneListing> Function()? load;
   final String? paneListUnavailableReason;
+
+  /// Adds a "cd to…" chip that resolves to [HerdrCdToPick].
+  final bool showCdTo;
 
   @override
   State<HerdrNavigatorSheet> createState() => _HerdrNavigatorSheetState();
@@ -173,6 +184,20 @@ class _HerdrNavigatorSheetState extends State<HerdrNavigatorSheet> {
                   ),
               ],
             ),
+            if (widget.showCdTo)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: ActionChip(
+                    key: const ValueKey('herdr-cd-to'),
+                    avatar: const Icon(Icons.folder_open_rounded, size: 16),
+                    label: const Text('cd to…'),
+                    onPressed: () =>
+                        Navigator.of(context).pop(const HerdrCdToPick()),
+                  ),
+                ),
+              ),
             const SizedBox(height: 12),
             _sectionLabel(theme, 'Panes'),
             const SizedBox(height: 6),

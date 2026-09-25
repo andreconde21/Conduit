@@ -85,4 +85,38 @@ void main() {
     expect(find.text('Companion check'), findsOneWidget);
     expect(find.textContaining('hooks: installed'), findsOneWidget);
   });
+
+  testWidgets('the notification level picker writes both notify flags', (
+    tester,
+  ) async {
+    SavedHost? probed;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: HostFormPage(
+          host: buildHost('h'),
+          companionDoctor: (draft) async {
+            probed = draft;
+            return 'ok';
+          },
+        ),
+      ),
+    );
+    await revealAgentSection(tester);
+    final picker = find.byKey(const ValueKey('agent-notify-level'));
+    await scrollTo(tester, picker);
+    expect(find.text('All'), findsOneWidget);
+
+    await tester.tap(picker);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Approvals and errors').last);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('update the inbox quietly'), findsOneWidget);
+
+    await scrollTo(tester, find.text('Set up companion'));
+    await tester.tap(find.text('Set up companion'));
+    await tester.pumpAndSettle();
+    expect(probed?.agentNotifyLevel, AgentNotifyLevel.approvalsAndErrors);
+    expect(probed?.agentNotifyInput, isTrue);
+    expect(probed?.agentNotifyFinished, isFalse);
+  });
 }
