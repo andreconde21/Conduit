@@ -390,7 +390,7 @@ class TalkController extends ChangeNotifier {
     _timer?.cancel();
     _timer = Timer(turnStartTimeout, () {
       // Claude never visibly started: listen again rather than hang.
-      if (_phase == TalkPhase.waiting && !_sawWork) _listen();
+      if (_phase == TalkPhase.waiting && !_sawWork) _afterReading(_listen);
     });
   }
 
@@ -411,7 +411,14 @@ class TalkController extends ChangeNotifier {
     _afterSpeech = null;
     _timer?.cancel();
     _timer = Timer(afterSpeechPause, () {
-      if (_phase == TalkPhase.speaking) next();
+      if (_phase != TalkPhase.speaking) return;
+      if (_readAloud.busy) {
+        // Something new started in the pause (the answer landed a poll
+        // after the turn ended): opening the mic would cut it off.
+        _afterSpeech = next;
+        return;
+      }
+      next();
     });
   }
 

@@ -145,6 +145,55 @@ void main() {
     talk.stop();
   });
 
+  testWidgets('an answer arriving just after the turn ended is heard out '
+      'before the mic opens', (tester) async {
+    await setUpTalk(tester);
+    talk.start();
+    await settle(tester);
+    mic.say('run the tests');
+    await settle(tester, const Duration(seconds: 5));
+    expect(sent, ['run the tests']);
+    final working = [
+      prompt('u0', 'hi'),
+      reply('a0', 'Hello.'),
+      prompt('u1', 'run the tests'),
+      ChatToolCall(
+        't1',
+        name: 'Bash',
+        input: const {'command': 'npm test'},
+        kind: ChatToolKind.bash,
+      ),
+    ];
+    poll(working, const [], 'working');
+    await settle(tester);
+
+    // The agent reports the turn over one poll before its final text
+    // reaches the transcript: nothing to read yet, so the loop schedules
+    // the mic...
+    final startsBefore = mic.starts.length;
+    poll(working);
+    await settle(tester, const Duration(milliseconds: 100));
+    // ...and the answer lands before the mic opened.
+    poll([...working, reply('a1', 'All green.')]);
+    await settle(tester);
+    expect(tts.spoken, ['All green.']);
+
+    await settle(tester, const Duration(milliseconds: 500));
+    expect(
+      mic.starts,
+      hasLength(startsBefore),
+      reason: 'the mic must not open over the voice',
+    );
+    expect(tts.stops, 0);
+    expect(readAloud.speaking, isTrue);
+
+    tts.done();
+    await settle(tester, const Duration(milliseconds: 500));
+    expect(talk.phase, TalkPhase.listening);
+    expect(mic.starts, hasLength(startsBefore + 1));
+    talk.stop();
+  });
+
   testWidgets('cancelling in the countdown keeps the text unsent', (
     tester,
   ) async {
