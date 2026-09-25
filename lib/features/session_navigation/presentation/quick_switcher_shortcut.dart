@@ -1,19 +1,28 @@
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
-/// Ctrl+K (Cmd+K on a Mac keyboard) on a hardware keyboard: the quick
-/// switcher's shortcut.
+/// Ctrl+Shift+K, or Cmd+K on a Mac keyboard: the quick switcher's shortcut.
+///
+/// Plain Ctrl+K stays with the terminal: shells and Claude Code use it to
+/// delete to the end of the line.
 bool isQuickSwitcherShortcut(KeyEvent event) {
   if (event is KeyUpEvent || event.logicalKey != LogicalKeyboardKey.keyK) {
     return false;
   }
   final keyboard = HardwareKeyboard.instance;
-  return (keyboard.isControlPressed || keyboard.isMetaPressed) &&
-      !keyboard.isAltPressed &&
+  if (keyboard.isAltPressed) return false;
+  final ctrlShift =
+      keyboard.isControlPressed &&
+      keyboard.isShiftPressed &&
+      !keyboard.isMetaPressed;
+  final cmd =
+      keyboard.isMetaPressed &&
+      !keyboard.isControlPressed &&
       !keyboard.isShiftPressed;
+  return ctrlShift || cmd;
 }
 
-/// Runs [onInvoke] on Ctrl+K while this page is the top route. It listens
+/// Runs [onInvoke] on the switcher shortcut while this page is the top route. It listens
 /// to the hardware keyboard directly, so it works whatever has the focus
 /// (or nothing). A focused terminal still sees the key too: the terminal
 /// page also keeps it from the session (see [isQuickSwitcherShortcut]).

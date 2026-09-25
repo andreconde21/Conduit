@@ -129,7 +129,9 @@ void main() {
 
   Future<void> pressCtrlK(WidgetTester tester) async {
     await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pumpAndSettle();
   }
@@ -169,7 +171,7 @@ void main() {
       expect(switcher, findsOneWidget);
     });
 
-    testWidgets('Ctrl+K opens it, focused on the search, and the session '
+    testWidgets('Ctrl+Shift+K opens it, focused on the search, and the session '
         'never gets the key', (tester) async {
       final (_, remote) = await pumpTerminal(tester);
       await tester.pump(const Duration(seconds: 1));
@@ -183,6 +185,22 @@ void main() {
       );
       expect(search.focusNode!.hasFocus, isTrue);
       expect(remote.sent.expand((bytes) => bytes), isNot(contains(0x0b)));
+    });
+
+    testWidgets('plain Ctrl+K stays with the terminal (kill to end of line)', (
+      tester,
+    ) async {
+      final (_, remote) = await pumpTerminal(tester);
+      await tester.pump(const Duration(seconds: 1));
+      remote.sent.clear();
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pumpAndSettle();
+
+      expect(switcher, findsNothing);
+      expect(remote.sent.expand((bytes) => bytes), contains(0x0b));
     });
   });
 
