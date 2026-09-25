@@ -782,6 +782,50 @@ void main() {
     expect(find.byKey(const ValueKey('new-session-a')), findsOneWidget);
     expect(find.byKey(const ValueKey('new-session-b')), findsOneWidget);
   });
+
+  testWidgets('the machine sheet ends above the 3-button navigation bar', (
+    tester,
+  ) async {
+    tester.view.padding = const FakeViewPadding(bottom: 125);
+    tester.view.viewPadding = const FakeViewPadding(bottom: 125);
+    await pumpHome(
+      tester,
+      hosts: [
+        for (final id in ['a', 'b', 'c', 'd', 'e', 'f']) host(id),
+      ],
+    );
+    addTearDown(tester.view.resetPadding);
+    addTearDown(tester.view.resetViewPadding);
+    await tester.tap(find.byKey(const ValueKey('machine-chip')));
+    await tester.pumpAndSettle();
+    await tester.drag(
+      find.byKey(const ValueKey('machine-sheet')),
+      const Offset(0, -2000),
+    );
+    await tester.pumpAndSettle();
+    final screen = tester.view.physicalSize / tester.view.devicePixelRatio;
+    final navBar = 125 / tester.view.devicePixelRatio;
+    final last = tester.getRect(
+      find.byKey(const ValueKey('machine-filter-local')),
+    );
+    expect(last.bottom, lessThan(screen.height - navBar));
+  });
+
+  testWidgets('with every machine shown, never-connected ones stay quiet '
+      'until picked', (tester) async {
+    await pumpHome(tester, hosts: [host('a'), buildHost('n')]);
+    expect(find.text('Not connected yet'), findsNothing);
+    expect(runnerHosts, ['a']);
+
+    await tester.tap(find.byKey(const ValueKey('machine-chip')));
+    await tester.pumpAndSettle();
+    await tester.longPress(find.byKey(const ValueKey('machine-row-n')));
+    await tester.pumpAndSettle();
+    Navigator.of(tester.element(find.text('Machines'))).pop();
+    await tester.pumpAndSettle();
+    expect(find.text('Not connected yet'), findsOneWidget);
+    expect(runnerHosts, ['a']);
+  });
 }
 
 class _TrustedVerifier extends NoopVerifier {
