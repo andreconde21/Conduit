@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/features/companion_setup/data/companion_probe.dart';
 import 'package:conduit/features/companion_setup/domain/companion_status.dart';
@@ -206,6 +208,76 @@ void main() {
       expect(status.state, CompanionState.error);
       expect(status.errorDetail, 'Connection refused');
     });
+  });
+
+  test('output shaped like a real 0.1.0 install with a running daemon '
+      'classifies as active', () {
+    // Mirrors the shape of conductore-hostd 0.1.0 on a live host (checked
+    // 2026-09-25): 14 doctor checks, all passing, and three agents.
+    const names = [
+      'node',
+      'hook client',
+      'conductore-hostd on PATH',
+      'conductore-hook on PATH',
+      'settings.json',
+      'hooks registered',
+      'daemon',
+      'socket mode',
+      'state file',
+      'log file',
+      'tmux',
+      'herdr',
+      'claude',
+    ];
+    final doctor = jsonEncode({
+      'ok': true,
+      'user': 'user',
+      'checks': [
+        for (final name in names) {'name': name, 'ok': true, 'detail': '-'},
+        {'name': 'log file', 'ok': true, 'detail': '-'},
+      ],
+    });
+    final checkedAt = DateTime(2026, 9, 25, 12);
+    final result = classifyCompanionStatus(
+      CompanionProbeResults(
+        version: ok('{"version":"0.1.0","protocol":1,"node":"22.23.1"}\n'),
+        doctor: ok('$doctor\n'),
+        status: ok(
+          statusJson(
+            source: 'daemon',
+            seq: 893,
+            agents: [
+              agent(
+                'a',
+                updatedAt: checkedAt.subtract(const Duration(minutes: 1)),
+              ),
+              agent(
+                'b',
+                state: 'waiting_input',
+                updatedAt: checkedAt.subtract(const Duration(minutes: 2)),
+              ),
+              agent(
+                'c',
+                state: 'ended',
+                updatedAt: checkedAt.subtract(const Duration(minutes: 20)),
+              ),
+            ],
+          ),
+        ),
+        node: ok('v22.23.1\n'),
+        claude: ok('2.1.280 (Claude Code)\n'),
+      ),
+      now: checkedAt,
+    );
+    expect(result.state, CompanionState.active);
+    expect(result.installedVersion, '0.1.0');
+    expect(result.installedProtocol, 1);
+    expect(result.daemonRunning, isTrue);
+    expect(result.checks, hasLength(14));
+    expect(result.agentCount, 3);
+    expect(result.liveAgentCount, 2);
+    expect(result.nodeSupported, isTrue);
+    expect(result.claudeVersion, '2.1.280 (Claude Code)');
   });
 
   test('compareCompanionVersions compares numerically', () {
