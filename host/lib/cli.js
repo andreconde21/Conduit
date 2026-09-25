@@ -19,6 +19,7 @@ const paneMod = lazy('./pane')
 const statuslineMod = lazy('./statusline')
 const spoolMod = lazy('./spool')
 const portsMod = lazy('./ports')
+const usageMod = lazy('./usage')
 
 const USAGE = `usage: conductore-hostd <command>
 
@@ -37,6 +38,10 @@ const USAGE = `usage: conductore-hostd <command>
   ports [--since <seq>]           TCP ports your own processes listen on
                                   (dev servers), each with the seq it
                                   first appeared at; --since: only newer
+  usage [--days 7] [--since <iso>] [--max-bytes N] [--max-ms N]
+                                  Claude Code / Codex limits, context per
+                                  session, tokens and estimated cost per
+                                  day, project and model (incremental scan)
   statusline [--chain '<cmd>']    legacy Node statusLine command (install
                                   now registers bin/conductore-statusline)
   install | uninstall             register / remove the Claude Code hooks
@@ -269,6 +274,41 @@ async function interrupt (args) {
   return out({ ok: true, sessionId, via: r.via, paneId: r.paneId, key: 'Escape' })
 }
 
+// The agents the daemon knows (their statusline usage), without starting
+// it: the daemon when it runs, else the last snapshot.
+async function knownAgents () {
+  try {
+    const [res] = await client.request({ op: 'status' }, { timeoutMs: 2000 })
+    if (res && !res.error) return res.agents || []
+  } catch {}
+  try { return readSnapshotFile().agents || [] } catch { return [] }
+}
+
+async function usageCmd (args) {
+  const { flags } = parseFlags(args)
+  const opts = {}
+  for (const [flag, key] of [['days', 'days'], ['max-bytes', 'maxBytes'], ['max-ms', 'maxMs']]) {
+    const n = optNumber(flags, flag)
+    if (Number.isNaN(n) || n === 0) return fail(`--${flag} must be a positive number`)
+    if (n !== undefined) opts[key] = n
+  }
+  if (flags.since !== undefined) {
+    const since = Date.parse(flags.since)
+    if (!Number.isFinite(since)) return fail('--since must be an ISO date or time')
+    opts.since = since
+  }
+  // Scanning is background work: never compete with the agents.
+  try { os.setPriority(0, 10) } catch {}
+  try {
+    paths.ensureDirs()
+    opts.agents = await knownAgents()
+    opts.cacheFile = paths.usageCachePath()
+    return out({ version: paths.VERSION, ...usageMod().compute(opts) })
+  } catch (err) {
+    return fail(`usage failed: ${err.message}`)
+  }
+}
+
 async function portsCmd (args) {
   const { flags } = parseFlags(args)
   const since = optNumber(flags, 'since')
@@ -494,6 +534,7 @@ async function main (argv) {
     case 'send': return send(args)
     case 'interrupt': return interrupt(args)
     case 'ports': return portsCmd(args)
+    case 'usage': return usageCmd(args)
     case 'statusline': return statuslineCmd(args)
     case 'install': return install()
     case 'uninstall': return uninstall()
