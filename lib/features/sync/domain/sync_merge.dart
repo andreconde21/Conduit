@@ -111,6 +111,10 @@ class SyncMergeResult {
 /// Records of disabled or unknown categories pass through untouched, so a
 /// device never drops what it does not show.
 ///
+/// Local edits are stamped [editTime] (when the app first noticed a
+/// change since the last sync; defaults to [now]), so an edit made offline
+/// keeps its age against edits other devices made meanwhile.
+///
 /// A category syncing for the first time on this device ([initialized]
 /// lacks it) while the hub has data stamps the local copies with
 /// [SyncClock.unknown]: the hub's version wins on overlap, and the local
@@ -124,8 +128,10 @@ SyncMergeResult mergeSync({
   required String deviceId,
   required int now,
   required int counter,
+  int? editTime,
   Duration tombstoneLifetime = const Duration(days: 180),
 }) {
+  final stampTime = editTime ?? now;
   var lamport = counter;
   for (final entry in base.values) {
     if (entry.record.clock.counter > lamport) {
@@ -147,7 +153,7 @@ SyncMergeResult mergeSync({
     return SyncClock(
       // An edit always beats the version it replaces, even when this
       // device's clock went backwards since.
-      time: now > previous ? now : previous + 1,
+      time: stampTime > previous ? stampTime : previous + 1,
       counter: lamport,
       device: deviceId,
     );

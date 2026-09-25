@@ -18,6 +18,7 @@ class SyncConfig {
     this.unpushed = false,
     this.devicePublicKey,
     this.pendingRevocations = const [],
+    this.dirtySince,
   });
 
   final String vaultId;
@@ -47,6 +48,10 @@ class SyncConfig {
   /// Device ids removed here, for the next push to record in the meta.
   final List<String> pendingRevocations;
 
+  /// When the app first noticed a local change not merged yet: the time
+  /// its edits are stamped with.
+  final DateTime? dirtySince;
+
   SyncConfig copyWith({
     String? hubHostId,
     String? deviceName,
@@ -58,6 +63,8 @@ class SyncConfig {
     bool? unpushed,
     String? devicePublicKey,
     List<String>? pendingRevocations,
+    DateTime? dirtySince,
+    bool clearDirtySince = false,
   }) {
     return SyncConfig(
       vaultId: vaultId,
@@ -72,6 +79,7 @@ class SyncConfig {
       unpushed: unpushed ?? this.unpushed,
       devicePublicKey: devicePublicKey ?? this.devicePublicKey,
       pendingRevocations: pendingRevocations ?? this.pendingRevocations,
+      dirtySince: clearDirtySince ? null : dirtySince ?? this.dirtySince,
     );
   }
 
@@ -88,6 +96,7 @@ class SyncConfig {
     'unpushed': unpushed,
     if (devicePublicKey != null) 'devicePublicKey': devicePublicKey,
     'pendingRevocations': pendingRevocations,
+    if (dirtySince != null) 'dirtySince': dirtySince!.toUtc().toIso8601String(),
   };
 
   static SyncConfig? fromJson(Object? json) {
@@ -121,6 +130,7 @@ class SyncConfig {
         for (final id in (json['pendingRevocations'] as List?) ?? const [])
           if (id is String) id,
       ],
+      dirtySince: DateTime.tryParse(json['dirtySince'] as String? ?? ''),
     );
   }
 }
