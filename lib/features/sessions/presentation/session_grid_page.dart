@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:conduit/core/presentation/conduit_brand.dart';
+import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
@@ -418,13 +419,21 @@ class SessionTile extends StatelessWidget {
                             target.kind != ConnectTargetKind.shell)
                           Padding(
                             padding: const EdgeInsets.only(right: 4),
-                            child: Icon(
-                              target.kind == ConnectTargetKind.herdr
-                                  ? Icons.pets_rounded
-                                  : Icons.terminal_rounded,
-                              size: 12,
-                              color: accent,
-                            ),
+                            child: target.kind == ConnectTargetKind.herdr
+                                ? const MultiplexerIcon(
+                                    MultiplexerKind.herdr,
+                                    size: 12,
+                                  )
+                                : target.kind == ConnectTargetKind.tmux
+                                ? const MultiplexerIcon(
+                                    MultiplexerKind.tmux,
+                                    size: 12,
+                                  )
+                                : Icon(
+                                    Icons.folder_outlined,
+                                    size: 12,
+                                    color: accent,
+                                  ),
                           ),
                         Expanded(
                           child: Text(

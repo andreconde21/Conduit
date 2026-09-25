@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:conduit/core/presentation/conduit_brand.dart';
+import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/presentation/theme_sheet.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
@@ -10,6 +11,8 @@ import 'package:conduit/features/agent_attention/presentation/agent_attention_co
 import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_page.dart';
+import 'package:conduit/features/hosts/data/secure_home_preferences_repository.dart';
+import 'package:conduit/features/hosts/domain/home_preferences.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/home_board_controller.dart';
 import 'package:conduit/features/hosts/presentation/host_form_page.dart';
@@ -23,8 +26,8 @@ import 'package:conduit/features/local_shell/domain/local_shell_instance.dart';
 import 'package:conduit/features/local_shell/presentation/local_shell_controller.dart';
 import 'package:conduit/features/local_shell/presentation/local_shell_instance_page.dart';
 import 'package:conduit/features/local_shell/presentation/local_shell_setup_page.dart';
-import 'package:conduit/features/local_shell/presentation/widgets/local_shell_section.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
+import 'package:conduit/features/sessions/domain/remote_session_listing.dart';
 import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
 import 'package:conduit/features/sessions/presentation/session_grid_page.dart'
     show summarizeAgentState;
@@ -43,13 +46,18 @@ import 'package:conduit/features/terminal/presentation/terminal_workspace_contro
 import 'package:conduit/features/terminal/presentation/trusted_keys_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:uuid/uuid.dart';
 
-/// The home page, Moshi-style: a slim bar (lock, machine chip, settings),
-/// then a two-column grid of large live previews of every open session,
-/// followed by the selected machine's Herdr workspaces that are not open in
-/// the app yet (or one notice saying why they cannot be listed). The local
-/// shell and counters sit in a collapsed "More" area at the bottom.
+/// The home page, Moshi-style: a slim bar (lock, machine filter chip,
+/// settings), the open sessions of the filtered machines as large live
+/// previews or compact rows, then their other workspaces (tmux sessions and
+/// Herdr workspaces not open in the app yet), grouped by machine, with one
+/// notice per machine that cannot be listed.
+///
+/// The machine chip opens the machine sheet: pick one or more machines
+/// (all by default), each machine's actions, "Add machine" and the local
+/// shells.
 class HostsPage extends StatefulWidget {
   const HostsPage({
     required this.hostsController,
@@ -66,7 +74,10 @@ class HostsPage extends StatefulWidget {
     required this.backupService,
     required this.fileExport,
     this.connectFlow,
-    this.homeBoard,
+    this.homeBoards,
+    this.homePreferences = const SecureHomePreferencesRepository(
+      FlutterSecureStorage(),
+    ),
     this.previewRefreshInterval = const Duration(seconds: 2),
     this.paneRefocusDelay = const Duration(seconds: 4),
     super.key,
@@ -90,12 +101,15 @@ class HostsPage extends StatefulWidget {
   /// shell like before.
   final SessionConnectFlow? connectFlow;
 
-  /// Live Herdr board for the selected machine. When null the page builds
-  /// one from [connectFlow]'s runner factory (and hides the board without
-  /// a connect flow).
-  final HomeBoardController? homeBoard;
+  /// Live boards (tmux sessions, Herdr workspaces) of the filtered
+  /// machines. When null the page builds them from [connectFlow]'s runner
+  /// factory (and shows none without a connect flow).
+  final HomeBoards? homeBoards;
 
-  /// How often session preview tiles are re-captured while visible.
+  /// Remembers the machine filter and the view modes.
+  final HomePreferencesRepository homePreferences;
+
+  /// How often session previews are re-captured while visible.
   final Duration previewRefreshInterval;
 
   /// After opening a new session for a pane, the pane is focused again
@@ -106,43 +120,74 @@ class HostsPage extends StatefulWidget {
   State<HostsPage> createState() => _HostsPageState();
 }
 
+/// One tmux session or Herdr workspace that is not open in the app.
+sealed class _OtherItem {
+  const _OtherItem(this.host);
+
+  final SavedHost host;
+}
+
+class _OtherHerdr extends _OtherItem {
+  const _OtherHerdr(super.host, this.workspace);
+
+  final HomeBoardWorkspace workspace;
+}
+
+class _OtherTmux extends _OtherItem {
+  const _OtherTmux(super.host, this.session);
+
+  final TmuxSessionInfo session;
+}
+
+/// A machine's part of "Other workspaces": its items and its notice.
+class _MachineGroup {
+  const _MachineGroup(this.host, this.items, this.notice);
+
+  final SavedHost host;
+  final List<_OtherItem> items;
+  final HomeBoardNotice? notice;
+}
+
 class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
   bool _terminalPageOpen = false;
   bool _showingHostKeyPrompt = false;
   bool _appResumed = true;
   bool _routeVisible = true;
-  bool? _moreExpanded;
-  bool _largeTiles = false;
-  String? _selectedHostId;
+  HomePreferences _preferences = const HomePreferences();
 
   /// `host:port` of every trusted host key: machines reached before list
-  /// their Herdr workspaces without asking.
+  /// their workspaces without asking.
   Set<String> _trustedEndpoints = const {};
-  HomeBoardController? _ownedBoard;
+  HomeBoards? _ownedBoards;
   Timer? _previewTimer;
   Timer? _refocusTimer;
 
-  HomeBoardController? get _board => widget.homeBoard ?? _ownedBoard;
+  HomeBoards? get _boards => widget.homeBoards ?? _ownedBoards;
+
+  MachineFilter get _filter => MachineFilter(
+    _preferences.machineFilter,
+  ).validFor(widget.hostsController.hosts);
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     final flow = widget.connectFlow;
-    if (widget.homeBoard == null && flow != null) {
-      _ownedBoard = HomeBoardController(
+    if (widget.homeBoards == null && flow != null) {
+      _ownedBoards = HomeBoards(
         runnerFactory: flow.runnerFactory,
         provider: widget.agentAttention.provider,
       );
     }
-    widget.hostsController.addListener(_syncSelection);
-    widget.workspaceController.addListener(_syncSelection);
+    widget.hostsController.addListener(_syncBoards);
+    widget.workspaceController.addListener(_syncBoards);
     flow?.terminalRequests.addListener(_handleTerminalRequest);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(widget.hostsController.load());
       unawaited(widget.localShellController.refresh());
+      unawaited(_loadPreferences());
       _handlePromptChanged();
-      _syncSelection();
+      _syncBoards();
       _syncVisibility();
       unawaited(_loadTrustedEndpoints());
     });
@@ -170,22 +215,40 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    widget.hostsController.removeListener(_syncSelection);
-    widget.workspaceController.removeListener(_syncSelection);
+    widget.hostsController.removeListener(_syncBoards);
+    widget.workspaceController.removeListener(_syncBoards);
     widget.connectFlow?.terminalRequests.removeListener(_handleTerminalRequest);
     widget.promptCoordinator.removeListener(_handlePromptChanged);
     widget.promptCoordinator.rejectAll();
     _previewTimer?.cancel();
     _refocusTimer?.cancel();
-    widget.homeBoard?.setVisible(false);
-    _ownedBoard?.dispose();
+    widget.homeBoards?.setVisible(false);
+    _ownedBoards?.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadPreferences() async {
+    final loaded = await widget.homePreferences.load();
+    if (!mounted) return;
+    setState(() => _preferences = loaded);
+    _syncBoards();
+  }
+
+  void _savePreferences(HomePreferences next) {
+    if (next == _preferences) return;
+    setState(() => _preferences = next);
+    unawaited(widget.homePreferences.save(next));
+  }
+
+  void _setFilter(MachineFilter filter) {
+    _savePreferences(_preferences.copyWith(machineFilter: filter.keys));
+    _syncBoards();
   }
 
   void _syncVisibility() {
     if (!mounted) return;
     final visible = _appResumed && _routeVisible;
-    _board?.setVisible(visible);
+    _boards?.setVisible(visible);
     if (visible) {
       // Back from the terminal a first connection may have trusted a key.
       unawaited(_loadTrustedEndpoints());
@@ -200,43 +263,37 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     }
   }
 
-  /// The machine the page shows: the one picked in the switcher, else the
-  /// active session's machine, else the most recently connected one.
-  SavedHost? get _selectedHost {
-    final hosts = widget.hostsController.hosts;
-    if (hosts.isEmpty) return null;
-    final picked = _selectedHostId;
-    if (picked != null) {
-      final match = hosts.where((host) => host.id == picked).firstOrNull;
-      if (match != null) return match;
-    }
-    final active = widget.workspaceController.activeSession;
-    if (active != null) {
-      final id = baseHostId(active.host.id);
-      final match = hosts.where((host) => host.id == id).firstOrNull;
-      if (match != null) return match;
-    }
-    SavedHost? latest;
-    for (final host in hosts) {
-      final at = host.lastConnectedAt;
-      if (at == null) continue;
-      if (latest == null || at.isAfter(latest.lastConnectedAt!)) {
-        latest = host;
-      }
-    }
-    return latest ?? widget.hostsController.sortedHosts.first;
+  /// Saved machines the filter shows, in the machine list's order.
+  List<SavedHost> get _shownHosts {
+    final filter = _filter;
+    return [
+      for (final host in widget.hostsController.sortedHosts)
+        if (!host.isLocal && filter.includes(host.id)) host,
+    ];
   }
 
-  void _syncSelection() {
+  /// Filter key of a session: its saved machine, or the device for local
+  /// shells.
+  static String _filterKey(TerminalSessionController session) =>
+      session.host.isLocal ||
+          localShellInstanceIdFromHostId(session.host.id) != null
+      ? localMachineFilterKey
+      : baseHostId(session.host.id);
+
+  List<TerminalSessionController> get _shownSessions {
+    final filter = _filter;
+    return [
+      for (final session in widget.workspaceController.sessions)
+        if (filter.includes(_filterKey(session))) session,
+    ];
+  }
+
+  void _syncBoards() {
     if (!mounted) return;
-    final host = _selectedHost;
-    if (host == null && _selectedHostId != null) {
-      _selectedHostId = null;
-    }
-    _board?.selectHost(
-      host,
-      connectedBefore: host != null && _connectedBefore(host),
-    );
+    _boards?.sync([
+      for (final host in _shownHosts)
+        HomeBoardEntry(host, connectedBefore: _connectedBefore(host)),
+    ]);
   }
 
   bool _connectedBefore(SavedHost host) =>
@@ -248,7 +305,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
       final records = await widget.hostKeyVerifier.loadTrustedKeys();
       if (!mounted) return;
       _trustedEndpoints = {for (final record in records) record.key};
-      _syncSelection();
+      _syncBoards();
     } catch (_) {
       // Unreadable key store: never-connected machines just wait for a tap.
     }
@@ -258,6 +315,9 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     for (final session in widget.workspaceController.sessions)
       if (baseHostId(session.host.id) == host.id) session,
   ];
+
+  SavedHost? _hostById(String id) =>
+      widget.hostsController.hosts.where((host) => host.id == id).firstOrNull;
 
   void _handlePromptChanged() {
     if (_showingHostKeyPrompt || !mounted) return;
@@ -287,13 +347,13 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
 
   Future<void> _refreshAll() async {
     await widget.hostsController.load();
-    await _board?.refresh();
+    await _boards?.refresh();
   }
 
   @override
   Widget build(BuildContext context) {
     final palette = widget.themeController.palette;
-    final board = _board;
+    final boards = _boards;
     return Scaffold(
       body: ConduitBackdrop(
         palette: palette,
@@ -308,10 +368,9 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
                 widget.workspaceController,
                 widget.themeController,
                 widget.agentAttention,
-                ?board,
+                ?boards,
               ]),
               builder: (context, _) {
-                final host = _selectedHost;
                 return CustomScrollView(
                   key: const ValueKey('home-scroll'),
                   physics: const AlwaysScrollableScrollPhysics(),
@@ -319,13 +378,14 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
                     SliverToBoxAdapter(
                       child: HomeTopBar(
                         onLock: _lock,
-                        onSettings: () => _openSettings(host),
-                        machine: host == null ? null : _machineChip(host),
+                        onSettings: _openSettings,
+                        machine: _machineChip(),
                       ),
                     ),
-                    ..._buildMain(context, host),
-                    SliverToBoxAdapter(child: _buildMore(context)),
-                    const SliverToBoxAdapter(child: SizedBox(height: 24)),
+                    ..._buildMain(context),
+                    const SliverToBoxAdapter(
+                      child: SizedBox(key: ValueKey('home-end'), height: 24),
+                    ),
                   ],
                 );
               },
@@ -336,18 +396,20 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     );
   }
 
-  Widget _machineChip(SavedHost host) {
+  Widget _machineChip() {
+    final filter = _filter;
+    final hosts = widget.hostsController.hosts;
     return MachineChip(
-      host: host,
-      sessionCount: _sessionsFor(host).length,
-      hostCount: widget.hostsController.hosts.length,
-      otherAttentionCount: _otherAttentionCount(host),
-      onSwitch: _switchMachine,
-      onMenu: (choice) => _handleMenu(choice, host),
+      label: hosts.isEmpty && filter.isAll
+          ? 'Machines'
+          : filter.label(widget.hostsController.sortedHosts),
+      live: _shownSessions.isNotEmpty,
+      otherAttentionCount: _hiddenAttentionCount(filter),
+      onTap: _openMachineSheet,
     );
   }
 
-  List<Widget> _buildMain(BuildContext context, SavedHost? host) {
+  List<Widget> _buildMain(BuildContext context) {
     final controller = widget.hostsController;
     if (controller.isLoading && controller.hosts.isEmpty) {
       return const [
@@ -372,62 +434,82 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
         ),
       ];
     }
-    if (host == null) {
-      return [
-        SliverPadding(
-          padding: const EdgeInsets.fromLTRB(18, 8, 18, 24),
-          sliver: SliverList(
-            delegate: SliverChildListDelegate.fixed([
-              const _MachineSectionHeader(),
-              const SizedBox(height: 24),
-              MessageState(
-                icon: Icons.dns_outlined,
-                title: 'No saved machines yet',
-                message:
-                    'Add an SSH or Mosh server and Conductore will keep its '
-                    'credentials in your device’s secure storage.',
-                actionLabel: 'Add machine',
-                onAction: _openForm,
-              ),
-            ]),
-          ),
-        ),
-      ];
+    if (controller.hosts.isEmpty && !widget.workspaceController.hasSessions) {
+      return [_buildNoMachines(context)];
     }
+    return [..._buildSessions(context), ..._buildOtherWorkspaces(context)];
+  }
 
+  Widget _buildNoMachines(BuildContext context) {
+    final showLocal =
+        widget.themeController.showLocalShell &&
+        !widget.localShellController.isUnsupported;
+    return SliverPadding(
+      padding: const EdgeInsets.fromLTRB(18, 8, 18, 24),
+      sliver: SliverList(
+        delegate: SliverChildListDelegate.fixed([
+          const _MachineSectionHeader(),
+          const SizedBox(height: 24),
+          MessageState(
+            icon: Icons.dns_outlined,
+            title: 'No saved machines yet',
+            message:
+                'Add an SSH or Mosh server and Conductore will keep its '
+                'credentials in your device’s secure storage.',
+            actionLabel: 'Add machine',
+            onAction: _openForm,
+          ),
+          if (showLocal)
+            Center(
+              child: TextButton.icon(
+                onPressed: _openLocalShellSetup,
+                icon: const Icon(Icons.phone_android_rounded),
+                label: const Text('Or set up a local shell'),
+              ),
+            ),
+        ]),
+      ),
+    );
+  }
+
+  List<Widget> _buildSessions(BuildContext context) {
     final palette = widget.themeController.palette;
     final brightness = Theme.of(context).brightness;
     final fontFamily = widget.themeController.terminalFont.fontFamily;
     final width = MediaQuery.sizeOf(context).width;
-    final metrics = HomeGridMetrics.of(width, large: _largeTiles);
-    final sessions = widget.workspaceController.sessions;
+    final view = _preferences.sessionsView;
+    final metrics = HomeGridMetrics.of(
+      width,
+      large: view == HomeSessionsView.large,
+    );
+    final sessions = _shownSessions;
     final active = widget.workspaceController.activeSession;
-    final board = _board;
-    final boardState = board?.state;
-    final boardWorkspaces = boardState?.workspaces ?? const [];
-    final hostSessions = _sessionsFor(host);
-    final attached = _attachedWorkspaceIds(hostSessions);
-    final dormant = [
-      for (final workspace in boardWorkspaces)
-        if (!attached.contains(workspace.id)) workspace,
-    ];
-    final notice = boardState == null
-        ? null
-        : HomeBoardNotice.of(
-            boardState,
-            requestReason: board!.requestReason,
-            hasOpenHerdrSession: hostSessions.any(
-              (session) =>
-                  ConnectTarget.fromSessionHostId(session.host.id)?.kind ==
-                  ConnectTargetKind.herdr,
-            ),
-          );
     const gutter = HomeGridMetrics.horizontalPadding;
+
+    HomeSessionInfo infoFor(TerminalSessionController session) {
+      final hostId = baseHostId(session.host.id);
+      final board = _boards?[hostId];
+      final machine = _hostById(hostId);
+      return HomeSessionInfo.of(
+        session,
+        workspaces: board?.state.workspaces ?? const [],
+        agentState: summarizeAgentState(
+          widget.agentAttention.statusFor(session.host.id),
+          session.host.id,
+        ),
+        machineName: session.host.isLocal ? 'This device' : machine?.name ?? '',
+      );
+    }
+
+    void open(TerminalSessionController session) {
+      widget.workspaceController.activate(session);
+      unawaited(_openTerminalWorkspace());
+    }
+
     // The "+" tile fills the last row's gap (or stands alone when nothing
     // is open); otherwise the header's "+" opens the picker.
     final showAddTile =
         sessions.isEmpty || sessions.length % metrics.columns != 0;
-    void newSession() => unawaited(_connect(host, forcePicker: true));
 
     return [
       SliverToBoxAdapter(
@@ -440,118 +522,267 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
               IconButton(
                 tooltip: 'New session',
                 icon: const Icon(Icons.add_rounded),
-                onPressed: newSession,
+                onPressed: _newSession,
               ),
-              IconButton(
-                tooltip: _largeTiles ? 'Two columns' : 'Large tiles',
-                icon: Icon(
-                  _largeTiles
-                      ? Icons.grid_view_rounded
-                      : Icons.view_agenda_outlined,
-                ),
-                onPressed: () => setState(() => _largeTiles = !_largeTiles),
+              _SessionsViewMenu(
+                value: view,
+                onChanged: (next) =>
+                    _savePreferences(_preferences.copyWith(sessionsView: next)),
               ),
             ],
           ),
         ),
       ),
-      SliverPadding(
-        padding: const EdgeInsets.fromLTRB(gutter, 4, gutter, 8),
-        sliver: SliverGrid(
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: metrics.columns,
-            mainAxisSpacing: 18,
-            crossAxisSpacing: HomeGridMetrics.spacing,
-            mainAxisExtent: metrics.sessionExtent,
-          ),
-          delegate: SliverChildBuilderDelegate((context, index) {
-            if (index == sessions.length) {
-              return HomeAddTile(
-                palette: palette,
-                brightness: brightness,
-                label: sessions.isEmpty ? 'Connect' : 'New session',
-                onTap: newSession,
-              );
-            }
-            final session = sessions[index];
-            final sameMachine = baseHostId(session.host.id) == host.id;
-            return HomeSessionTile(
-              key: ValueKey('home-session-${session.host.id}'),
-              session: session,
-              info: HomeSessionInfo.of(
-                session,
-                workspaces: sameMachine ? boardWorkspaces : const [],
-                agentState: summarizeAgentState(
-                  widget.agentAttention.statusFor(session.host.id),
-                  session.host.id,
-                ),
-              ),
-              palette: palette,
-              brightness: brightness,
-              fontFamily: fontFamily,
-              selected: session == active,
-              onTap: () {
-                widget.workspaceController.activate(session);
-                unawaited(_openTerminalWorkspace());
-              },
-              onLongPress: () => _showSessionActions(session),
-            );
-          }, childCount: sessions.length + (showAddTile ? 1 : 0)),
-        ),
-      ),
-      if (notice != null)
+      if (view == HomeSessionsView.list && sessions.isNotEmpty)
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(gutter, 4, gutter, 8),
-          sliver: SliverToBoxAdapter(
-            child: HomeBoardNoticeTile(
-              notice: notice,
-              palette: palette,
-              brightness: brightness,
-              onAction: notice.action == null
-                  ? null
-                  : () => _handleNoticeAction(host, notice.action!),
-            ),
+          sliver: SliverList.separated(
+            itemCount: sessions.length,
+            separatorBuilder: (_, _) => const SizedBox(height: 8),
+            itemBuilder: (context, index) {
+              final session = sessions[index];
+              return HomeSessionRow(
+                key: ValueKey('home-session-${session.host.id}'),
+                session: session,
+                info: infoFor(session),
+                palette: palette,
+                brightness: brightness,
+                fontFamily: fontFamily,
+                selected: session == active,
+                onTap: () => open(session),
+                onLongPress: () => _showSessionActions(session),
+              );
+            },
           ),
-        ),
-      if (dormant.isNotEmpty) ...[
-        SliverToBoxAdapter(
-          child: _SectionHeader(
-            label: 'HERDR',
-            detail: dormant.length == 1
-                ? '1 workspace not open'
-                : '${dormant.length} workspaces not open',
-          ),
-        ),
+        )
+      else
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(gutter, 4, gutter, 8),
           sliver: SliverGrid(
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: metrics.columns,
-              mainAxisSpacing: HomeGridMetrics.spacing,
+              mainAxisSpacing: 18,
               crossAxisSpacing: HomeGridMetrics.spacing,
-              mainAxisExtent: metrics.dormantExtent,
+              mainAxisExtent: metrics.sessionExtent,
             ),
-            delegate: SliverChildListDelegate([
-              for (final workspace in dormant)
-                DormantWorkspaceTile(
-                  key: ValueKey('dormant-${workspace.id}'),
-                  workspace: workspace,
+            delegate: SliverChildBuilderDelegate((context, index) {
+              if (index == sessions.length) {
+                return HomeAddTile(
                   palette: palette,
                   brightness: brightness,
-                  onTap: () => _openPane(host, workspace, null),
-                  onLongPress: workspace.panes.isEmpty
-                      ? null
-                      : () => _showWorkspacePanes(host, workspace),
-                ),
-            ]),
+                  label: sessions.isEmpty ? 'Connect' : 'New session',
+                  onTap: _newSession,
+                );
+              }
+              final session = sessions[index];
+              return HomeSessionTile(
+                key: ValueKey('home-session-${session.host.id}'),
+                session: session,
+                info: infoFor(session),
+                palette: palette,
+                brightness: brightness,
+                fontFamily: fontFamily,
+                selected: session == active,
+                onTap: () => open(session),
+                onLongPress: () => _showSessionActions(session),
+              );
+            }, childCount: sessions.length + (showAddTile ? 1 : 0)),
           ),
         ),
+    ];
+  }
+
+  /// Per shown machine: the tmux sessions and Herdr workspaces that are
+  /// not open in the app, and the notice explaining what cannot be listed.
+  List<_MachineGroup> _otherWorkspaceGroups() {
+    final boards = _boards;
+    if (boards == null) return const [];
+    final shown = _shownHosts;
+    // With every machine shown, machines never reached stay quiet instead
+    // of each asking to be listed; picking them (or having only one) asks.
+    final quietWaiting = _filter.isAll && shown.length > 1;
+    final groups = <_MachineGroup>[];
+    for (final host in shown) {
+      final board = boards[host.id];
+      if (board == null) continue;
+      final state = board.state;
+      final sessions = _sessionsFor(host);
+      final openHerdr = <String>{};
+      final openTmux = <String>{};
+      var hasOpenHerdrSession = false;
+      for (final session in sessions) {
+        final target = ConnectTarget.fromSessionHostId(session.host.id);
+        if (target?.kind == ConnectTargetKind.herdr) {
+          hasOpenHerdrSession = true;
+          if (target!.name.isNotEmpty) openHerdr.add(target.name);
+        }
+        final tmux = HomeSessionInfo.tmuxSessionOf(session);
+        if (tmux != null) openTmux.add(tmux);
+      }
+      final items = <_OtherItem>[
+        for (final workspace in state.workspaces)
+          if (!openHerdr.contains(workspace.id)) _OtherHerdr(host, workspace),
+        for (final tmux in state.tmuxSessions)
+          if (!openTmux.contains(tmux.name)) _OtherTmux(host, tmux),
+      ];
+      final reason = board.requestReason;
+      final notice =
+          quietWaiting &&
+              reason == HomeBoardRequestReason.neverConnected &&
+              state.phase == HomeBoardPhase.awaitingRequest
+          ? null
+          : HomeBoardNotice.of(
+              state,
+              requestReason: reason,
+              hasOpenHerdrSession: hasOpenHerdrSession,
+            );
+      if (items.isEmpty && notice == null) continue;
+      groups.add(_MachineGroup(host, items, notice));
+    }
+    return groups;
+  }
+
+  List<Widget> _buildOtherWorkspaces(BuildContext context) {
+    final groups = _otherWorkspaceGroups();
+    if (groups.isEmpty) return const [];
+    final palette = widget.themeController.palette;
+    final brightness = Theme.of(context).brightness;
+    final width = MediaQuery.sizeOf(context).width;
+    final metrics = HomeGridMetrics.of(width);
+    final view = _preferences.workspacesView;
+    final count = groups.fold(0, (sum, group) => sum + group.items.length);
+    final grouped = groups.length > 1;
+    const gutter = HomeGridMetrics.horizontalPadding;
+
+    Widget tileFor(_OtherItem item) => switch (item) {
+      _OtherHerdr(:final host, :final workspace) =>
+        view == HomeWorkspacesView.list
+            ? OtherWorkspaceRow(
+                key: ValueKey('other-herdr-${host.id}-${workspace.id}'),
+                kind: MultiplexerKind.herdr,
+                title: workspace.label,
+                details: herdrDetails(workspace),
+                chips: herdrStateChips(workspace),
+                attention: workspace.summary,
+                palette: palette,
+                brightness: brightness,
+                onTap: () => _openPane(host, workspace, null),
+                onLongPress: workspace.panes.isEmpty
+                    ? null
+                    : () => _showWorkspacePanes(host, workspace),
+              )
+            : DormantWorkspaceTile(
+                key: ValueKey('other-herdr-${host.id}-${workspace.id}'),
+                workspace: workspace,
+                palette: palette,
+                brightness: brightness,
+                onTap: () => _openPane(host, workspace, null),
+                onLongPress: workspace.panes.isEmpty
+                    ? null
+                    : () => _showWorkspacePanes(host, workspace),
+              ),
+      _OtherTmux(:final host, :final session) =>
+        view == HomeWorkspacesView.list
+            ? OtherWorkspaceRow(
+                key: ValueKey('other-tmux-${host.id}-${session.name}'),
+                kind: MultiplexerKind.tmux,
+                title: session.name,
+                details: tmuxDetails(session),
+                chips: [if (session.isAttached) const AttachedChip()],
+                palette: palette,
+                brightness: brightness,
+                onTap: () => _openTmux(host, session.name),
+                onLongPress: () => _showTmuxWindows(host, session),
+              )
+            : DormantTmuxTile(
+                key: ValueKey('other-tmux-${host.id}-${session.name}'),
+                session: session,
+                palette: palette,
+                brightness: brightness,
+                onTap: () => _openTmux(host, session.name),
+                onLongPress: () => _showTmuxWindows(host, session),
+              ),
+    };
+
+    return [
+      SliverToBoxAdapter(
+        child: _SectionHeader(
+          label: 'OTHER WORKSPACES',
+          detail: count == 0 ? null : '$count not open',
+          trailing: IconButton(
+            key: const ValueKey('workspaces-view-toggle'),
+            tooltip: view == HomeWorkspacesView.list
+                ? 'Show as grid'
+                : 'Show as list',
+            icon: Icon(
+              view == HomeWorkspacesView.list
+                  ? Icons.grid_view_rounded
+                  : Icons.view_list_rounded,
+            ),
+            onPressed: () => _savePreferences(
+              _preferences.copyWith(
+                workspacesView: view == HomeWorkspacesView.list
+                    ? HomeWorkspacesView.grid
+                    : HomeWorkspacesView.list,
+              ),
+            ),
+          ),
+        ),
+      ),
+      for (final group in groups) ...[
+        if (grouped)
+          SliverToBoxAdapter(
+            child: _MachineGroupHeader(
+              key: ValueKey('other-group-${group.host.id}'),
+              name: group.host.name,
+            ),
+          ),
+        if (group.notice != null)
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(gutter, 4, gutter, 8),
+            sliver: SliverToBoxAdapter(
+              child: HomeBoardNoticeTile(
+                key: ValueKey('home-board-notice-${group.host.id}'),
+                notice: group.notice!,
+                palette: palette,
+                brightness: brightness,
+                onAction: group.notice!.action == null
+                    ? null
+                    : () => _handleNoticeAction(
+                        group.host,
+                        group.notice!.action!,
+                      ),
+              ),
+            ),
+          ),
+        if (group.items.isNotEmpty)
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(gutter, 4, gutter, 8),
+            sliver: view == HomeWorkspacesView.list
+                ? SliverList.separated(
+                    itemCount: group.items.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 6),
+                    itemBuilder: (context, index) =>
+                        tileFor(group.items[index]),
+                  )
+                : SliverGrid(
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: metrics.columns,
+                      mainAxisSpacing: HomeGridMetrics.spacing,
+                      crossAxisSpacing: HomeGridMetrics.spacing,
+                      mainAxisExtent: metrics.dormantExtent,
+                    ),
+                    delegate: SliverChildListDelegate([
+                      for (final item in group.items) tileFor(item),
+                    ]),
+                  ),
+          ),
       ],
     ];
   }
 
   void _handleNoticeAction(SavedHost host, HomeBoardNoticeAction action) {
-    final board = _board;
+    final board = _boards?[host.id];
     switch (action) {
       case HomeBoardNoticeAction.request:
         board?.requestLoad();
@@ -566,8 +797,8 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     }
   }
 
-  /// Lists a dormant workspace's agent panes; tapping one opens the
-  /// workspace focused on that pane.
+  /// Lists a workspace's agent panes; tapping one opens the workspace
+  /// focused on that pane.
   Future<void> _showWorkspacePanes(
     SavedHost host,
     HomeBoardWorkspace workspace,
@@ -585,7 +816,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
             shrinkWrap: true,
             children: [
               ListTile(
-                leading: const Icon(herdrIcon, color: herdrGreen),
+                leading: const MultiplexerIcon(MultiplexerKind.herdr, size: 24),
                 title: Text(
                   workspace.label,
                   style: const TextStyle(fontWeight: FontWeight.w800),
@@ -619,10 +850,115 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     await _openPane(host, workspace, pane);
   }
 
-  Future<void> _openSettings(SavedHost? host) async {
+  /// Lists a tmux session's windows; tapping one opens the session there.
+  Future<void> _showTmuxWindows(SavedHost host, TmuxSessionInfo session) async {
+    final board = _boards?[host.id];
+    final windows = board == null
+        ? Future.value(const <TmuxWindowInfo>[])
+        : board.listTmuxWindows(session.name);
+    final picked = await showModalBottomSheet<TmuxWindowInfo>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (context) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * 0.7,
+          ),
+          child: FutureBuilder<List<TmuxWindowInfo>>(
+            future: windows,
+            builder: (context, snapshot) {
+              final list = snapshot.data;
+              return ListView(
+                shrinkWrap: true,
+                children: [
+                  ListTile(
+                    leading: const MultiplexerIcon(
+                      MultiplexerKind.tmux,
+                      size: 24,
+                    ),
+                    title: Text(
+                      session.name,
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    subtitle: const Text('Open the session at a window'),
+                  ),
+                  const Divider(height: 1),
+                  if (list == null)
+                    const Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Center(child: CircularProgressIndicator()),
+                    )
+                  else if (list.isEmpty)
+                    const ListTile(
+                      title: Text('Could not list the windows'),
+                      subtitle: Text('Tap the session to attach to it.'),
+                    )
+                  else
+                    for (final window in list)
+                      ListTile(
+                        key: ValueKey('tmux-window-${window.index}'),
+                        leading: Text(
+                          '${window.index}',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 16,
+                          ),
+                        ),
+                        title: Text(
+                          window.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: Text(
+                          window.panes == 1
+                              ? '1 pane'
+                              : '${window.panes} panes',
+                        ),
+                        trailing: window.active ? const Text('current') : null,
+                        onTap: () => Navigator.of(context).pop(window),
+                      ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    await _openTmux(host, session.name, window: picked.index);
+  }
+
+  /// Attaches to tmux [sessionName] on [host] (activating an open session
+  /// for it), at [window] when given.
+  Future<void> _openTmux(
+    SavedHost host,
+    String sessionName, {
+    int? window,
+  }) async {
+    final board = _boards?[host.id];
+    if (window != null && board != null) {
+      // tmux shows the session's current window on attach.
+      await board.selectTmuxWindow(sessionName, window);
+      if (!mounted) return;
+    }
+    final existing = _sessionsFor(
+      host,
+    ).where((s) => HomeSessionInfo.tmuxSessionOf(s) == sessionName).firstOrNull;
+    if (existing != null) {
+      widget.workspaceController.activate(existing);
+      await _openTerminalWorkspace();
+      return;
+    }
+    await _openTarget(host, ConnectTarget.tmux(sessionName));
+  }
+
+  Future<void> _openSettings() async {
+    final shown = _shownHosts;
+    final single = shown.length == 1 ? shown.single : null;
     final choice = await showHomeSettingsSheet(
       context,
-      machineName: host?.name,
+      machineName: single?.name,
     );
     if (!mounted || choice == null) return;
     switch (choice) {
@@ -635,29 +971,18 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
       case HomeSettingsChoice.trustedKeys:
         await _openTrustedKeys();
       case HomeSettingsChoice.agentHooks:
-        if (host != null) await showCompanionSetup(context, host);
+        if (single != null) await showCompanionSetup(context, single);
       case HomeSettingsChoice.lock:
         await _lock();
     }
   }
 
-  static Set<String> _attachedWorkspaceIds(
-    List<TerminalSessionController> sessions,
-  ) {
-    final ids = <String>{};
-    for (final session in sessions) {
-      final target = ConnectTarget.fromSessionHostId(session.host.id);
-      if (target != null && target.kind == ConnectTargetKind.herdr) {
-        ids.add(target.name);
-      }
-    }
-    return ids;
-  }
-
-  int _otherAttentionCount(SavedHost selected) {
+  /// Agents needing input on machines the filter hides.
+  int _hiddenAttentionCount(MachineFilter filter) {
+    if (filter.isAll) return 0;
     var count = 0;
     for (final host in widget.agentAttention.monitoredHosts) {
-      if (baseHostId(host.id) == selected.id) continue;
+      if (filter.includes(baseHostId(host.id))) continue;
       final agents = widget.agentAttention.statusFor(host.id)?.agents;
       if (agents == null) continue;
       count += agents.where((agent) => agent.state.needsAttention).length;
@@ -665,118 +990,95 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     return count;
   }
 
-  Widget _buildMore(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final hasHosts = widget.hostsController.hosts.isNotEmpty;
-    final expanded = _moreExpanded ?? !hasHosts;
-    final showLocalShell = widget.themeController.showLocalShell;
-    final activeInstanceIds = widget.workspaceController.sessions
-        .map((session) => localShellInstanceIdFromHostId(session.host.id))
-        .whereType<String>()
-        .toSet();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 18),
-          child: Divider(height: 24),
-        ),
-        InkWell(
-          onTap: () => setState(() => _moreExpanded = !expanded),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(18, 6, 12, 6),
-            child: Row(
-              children: [
-                Text(
-                  'MORE',
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 1.1,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    showLocalShell
-                        ? 'Local shell and counters'
-                        : 'Machine and session counters',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ),
-                Icon(
-                  expanded
-                      ? Icons.expand_less_rounded
-                      : Icons.expand_more_rounded,
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              ],
-            ),
-          ),
-        ),
-        if (expanded) ...[
-          const SizedBox(height: 8),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
-            child: HomeStats(
-              hostCount: widget.hostsController.hosts.length,
-              activeSessionCount: widget.workspaceController.sessions.length,
-              onOpenSessions: widget.workspaceController.hasSessions
-                  ? _openTerminalWorkspace
-                  : null,
-            ),
-          ),
-          if (showLocalShell)
-            LocalShellSection(
-              controller: widget.localShellController,
-              activeInstanceIds: activeInstanceIds,
-              onAdd: _openLocalShellSetup,
-              onOpenInstance: _openLocalSession,
-              onManageInstance: _openLocalShellInstance,
-            ),
-        ],
-      ],
-    );
-  }
-
-  Future<void> _switchMachine() async {
-    final result = await showMachinePicker(
+  Future<void> _openMachineSheet() async {
+    final showLocal = widget.themeController.showLocalShell;
+    final result = await showMachineSheet(
       context: context,
       hostsController: widget.hostsController,
-      selectedHostId: _selectedHost?.id,
-      liveHostIds: {
+      filter: _filter,
+      onFilterChanged: _setFilter,
+      liveKeys: {
         for (final session in widget.workspaceController.sessions)
-          baseHostId(session.host.id),
+          _filterKey(session),
       },
+      localShellController: showLocal ? widget.localShellController : null,
+      activeLocalInstanceIds: widget.workspaceController.sessions
+          .map((session) => localShellInstanceIdFromHostId(session.host.id))
+          .whereType<String>()
+          .toSet(),
     );
     if (!mounted || result == null) return;
     switch (result) {
-      case MachinePicked(:final host):
-        setState(() => _selectedHostId = host.id);
-        _syncSelection();
       case MachineAddRequested():
         await _openForm();
-      case MachineActionRequested(:final host, :final action):
-        await _handleHostAction(action, host);
+      case MachineMenuRequested(:final host, :final choice):
+        await _handleMenu(choice, host);
+      case LocalShellSetupRequested():
+        await _openLocalShellSetup();
+      case LocalShellOpenRequested(:final instance):
+        await _openLocalSession(instance);
+      case LocalShellManageRequested(:final instance):
+        _openLocalShellInstance(instance);
     }
   }
 
   Future<void> _handleMenu(MachineMenuChoice choice, SavedHost host) async {
-    if (choice == MachineMenuChoice.agentHooks) {
+    final action = choice.hostAction;
+    if (action == null) {
       await showCompanionSetup(context, host);
       return;
     }
-    final action = choice.hostAction;
-    if (action == null) {
+    await _handleHostAction(action, host);
+  }
+
+  /// "+": the connect picker for the one shown machine, or a machine
+  /// chooser first when several (or none) are shown.
+  Future<void> _newSession() async {
+    final shown = _shownHosts;
+    if (shown.length == 1) {
+      await _connect(shown.single, forcePicker: true);
+      return;
+    }
+    final candidates = shown.isEmpty
+        ? widget.hostsController.sortedHosts
+        : shown;
+    if (candidates.isEmpty) {
       await _openForm();
       return;
     }
-    await _handleHostAction(action, host);
+    final host = await showModalBottomSheet<SavedHost>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (context) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * 0.7,
+          ),
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              const ListTile(
+                title: Text(
+                  'New session on',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+              for (final host in candidates)
+                ListTile(
+                  key: ValueKey('new-session-${host.id}'),
+                  leading: const Icon(Icons.dns_outlined),
+                  title: Text(host.name),
+                  subtitle: Text(host.endpoint),
+                  onTap: () => Navigator.of(context).pop(host),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (host == null || !mounted) return;
+    await _connect(host, forcePicker: true);
   }
 
   /// Opens (or activates) the Herdr session for [workspace] and focuses
@@ -801,7 +1103,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
       await _openTerminalWorkspace();
       return;
     }
-    final board = _board;
+    final board = _boards?[host.id];
     final existing = _herdrSessionFor(host, workspace.id);
     if (existing != null) {
       widget.workspaceController.activate(existing);
@@ -1083,10 +1385,10 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     );
     if (savedHost != null) {
       await widget.hostsController.upsert(savedHost);
-      if (host == null && mounted) {
-        // A newly added machine becomes the one on screen.
-        setState(() => _selectedHostId = savedHost.id);
-        _syncSelection();
+      final filter = _filter;
+      if (host == null && mounted && !filter.isAll) {
+        // A newly added machine joins the machines on screen.
+        _setFilter(MachineFilter({...filter.keys, savedHost.id}));
       }
     }
   }
@@ -1172,9 +1474,9 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     );
     if (shouldDelete ?? false) {
       await widget.hostsController.remove(host);
-      if (_selectedHostId == host.id && mounted) {
-        setState(() => _selectedHostId = null);
-        _syncSelection();
+      final keys = _preferences.machineFilter;
+      if (keys.contains(host.id) && mounted) {
+        _setFilter(MachineFilter({...keys}..remove(host.id)));
       }
     }
   }
@@ -1252,6 +1554,89 @@ class _SectionHeader extends StatelessWidget {
           ] else
             const Spacer(),
           ?trailing,
+        ],
+      ),
+    );
+  }
+}
+
+/// The sessions' layout menu: two-column tiles, large tiles, or rows.
+class _SessionsViewMenu extends StatelessWidget {
+  const _SessionsViewMenu({required this.value, required this.onChanged});
+
+  final HomeSessionsView value;
+  final ValueChanged<HomeSessionsView> onChanged;
+
+  static IconData iconFor(HomeSessionsView view) => switch (view) {
+    HomeSessionsView.grid => Icons.grid_view_rounded,
+    HomeSessionsView.large => Icons.view_agenda_outlined,
+    HomeSessionsView.list => Icons.view_list_rounded,
+  };
+
+  static String labelFor(HomeSessionsView view) => switch (view) {
+    HomeSessionsView.grid => 'Grid',
+    HomeSessionsView.large => 'Large tiles',
+    HomeSessionsView.list => 'List',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<HomeSessionsView>(
+      key: const ValueKey('sessions-view-menu'),
+      tooltip: 'Layout: ${labelFor(value)}',
+      initialValue: value,
+      icon: Icon(iconFor(value)),
+      onSelected: onChanged,
+      itemBuilder: (context) => [
+        for (final view in HomeSessionsView.values)
+          PopupMenuItem(
+            value: view,
+            child: Row(
+              children: [
+                Icon(iconFor(view), size: 18),
+                const SizedBox(width: 10),
+                Text(labelFor(view)),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// Machine name above its part of "Other workspaces" when several
+/// machines are shown.
+class _MachineGroupHeader extends StatelessWidget {
+  const _MachineGroupHeader({required this.name, super.key});
+
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        HomeGridMetrics.horizontalPadding + 2,
+        8,
+        16,
+        2,
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.dns_outlined, size: 15, color: muted),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: theme.colorScheme.onSurface,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
         ],
       ),
     );

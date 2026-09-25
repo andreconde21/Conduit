@@ -3,6 +3,7 @@ import 'package:conduit/features/companion_setup/presentation/companion_setup_co
 import 'package:conduit/features/companion_setup/presentation/companion_setup_page.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_status_chip.dart';
 import 'package:conduit/features/hosts/presentation/host_form_page.dart';
+import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/hosts/presentation/widgets/machine_switcher.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -405,25 +406,31 @@ void main() {
     });
 
     testWidgets('the machine menu has Agent hooks', (tester) async {
-      MachineMenuChoice? chosen;
+      MachineSheetResult? result;
+      final hosts = HostsController(FakeHostsRepository()..persisted = [host]);
+      await hosts.load();
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: MachineChip(
-              host: host,
-              sessionCount: 0,
-              hostCount: 1,
-              onSwitch: () {},
-              onMenu: (choice) => chosen = choice,
+            body: MachineSheet(
+              hostsController: hosts,
+              filter: const MachineFilter({}),
+              onFilterChanged: (_) {},
+              liveKeys: const {},
+              onResult: (value) => result = value,
             ),
           ),
         ),
       );
-      await tester.tap(find.byTooltip('Machine actions'));
+      await tester.tap(find.byKey(const ValueKey('machine-menu-box')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Agent hooks'));
       await tester.pumpAndSettle();
-      expect(chosen, MachineMenuChoice.agentHooks);
+      expect(result, isA<MachineMenuRequested>());
+      expect(
+        (result! as MachineMenuRequested).choice,
+        MachineMenuChoice.agentHooks,
+      );
       expect(MachineMenuChoice.agentHooks.hostAction, isNull);
     });
 
