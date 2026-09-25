@@ -375,8 +375,16 @@ void main() {
     AppErrorLog.instance.recordError(StateError('boom'), null);
     addTearDown(AppErrorLog.instance.clear);
     await tester.pump();
-    await tester.ensureVisible(find.text('Recent errors (1)'));
-    await tester.tap(find.text('Recent errors (1)'));
+    // Let the entry settle into view before tapping: on slower machines the
+    // scroll from ensureVisible is still animating and the tap misses.
+    final entry = find.text('Recent errors (1)');
+    await tester.scrollUntilVisible(
+      entry,
+      80,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(entry);
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('recent-errors')), findsOneWidget);
     expect(find.text('Bad state: boom'), findsOneWidget);
