@@ -4,6 +4,7 @@ import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/terminal/domain/herdr_remote_control.dart';
 import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
+import 'package:conduit/features/terminal/presentation/gestures/desktop_wheel_zoom.dart';
 import 'package:conduit/features/terminal/presentation/gestures/terminal_gesture_recognizers.dart';
 import 'package:conduit/features/terminal/presentation/herdr_shortcuts.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
@@ -653,7 +654,11 @@ class _TerminalGestureLayerState extends State<TerminalGestureLayer> {
             _swipe.handlePointerCancel(event);
             _twoFinger.handlePointerCancel(event);
           },
-          child: widget.child,
+          child: DesktopWheelZoom(
+            fontSize: widget.fontSize,
+            onFontSizeChanged: widget.onFontSizeChanged,
+            child: widget.child,
+          ),
         );
       },
     );
