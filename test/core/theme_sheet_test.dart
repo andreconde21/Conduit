@@ -35,9 +35,10 @@ void main() {
 
     await tester.tap(find.text('Appearance'));
     await tester.pumpAndSettle();
+    // Near the end of a long sheet: big steps stay within the 50-drag cap.
     await tester.scrollUntilVisible(
       find.text('Show local shell'),
-      120,
+      300,
       scrollable: find.byType(Scrollable).last,
     );
     await tester.pumpAndSettle();
@@ -396,5 +397,40 @@ void main() {
     expect(find.byKey(const ValueKey('recent-errors')), findsOneWidget);
     expect(find.text('Bad state: boom'), findsOneWidget);
     expect(find.byKey(const ValueKey('recent-errors-copy')), findsOneWidget);
+  });
+
+  testWidgets('appearance sheet toggles pasting images as files', (
+    tester,
+  ) async {
+    final controller = ThemeController(InMemoryThemePreferences());
+    await controller.load();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: Center(
+              child: FilledButton(
+                onPressed: () =>
+                    showThemeSheet(context: context, controller: controller),
+                child: const Text('Appearance'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Appearance'));
+    await tester.pumpAndSettle();
+    final tile = find.byKey(const ValueKey('paste-images-as-files'));
+    await tester.scrollUntilVisible(
+      tile,
+      300,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.pumpAndSettle();
+    expect(controller.pasteImagesAsFiles, isTrue);
+    await tester.tap(tile);
+    await tester.pumpAndSettle();
+    expect(controller.pasteImagesAsFiles, isFalse);
   });
 }
