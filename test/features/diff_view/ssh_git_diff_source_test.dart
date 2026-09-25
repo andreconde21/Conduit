@@ -58,11 +58,7 @@ void main() {
 
   test('load runs root, both diffs and status, in that order', () async {
     final runner = ScriptedAgentCommandRunner([
-      const AgentCommandResult(
-        stdout: '/home/u/app\n',
-        stderr: '',
-        exitCode: 0,
-      ),
+      const AgentCommandResult(stdout: '/home/u/app\n', stderr: '', exitCode: 0),
       const AgentCommandResult(stdout: _sampleDiff, stderr: '', exitCode: 0),
       _ok,
       const AgentCommandResult(
@@ -91,8 +87,7 @@ void main() {
     final runner = ScriptedAgentCommandRunner([
       const AgentCommandResult(
         stdout: '',
-        stderr:
-            'fatal: not a git repository (or any of the parent directories)',
+        stderr: 'fatal: not a git repository (or any of the parent directories)',
         exitCode: 128,
       ),
     ]);
@@ -149,9 +144,7 @@ void main() {
 
   test('oversized diffs are flagged and cut at a line boundary', () async {
     final filler = '+${'x' * 99}\n';
-    final buffer = StringBuffer(
-      'diff --git a/big b/big\n--- a/big\n+++ b/big\n@@ -0,0 +1,99999 @@\n',
-    );
+    final buffer = StringBuffer('diff --git a/big b/big\n--- a/big\n+++ b/big\n@@ -0,0 +1,99999 @@\n');
     while (buffer.length <= gitDiffMaxBytes) {
       buffer.write(filler);
     }

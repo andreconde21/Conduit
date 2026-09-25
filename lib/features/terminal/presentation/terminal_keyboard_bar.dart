@@ -46,7 +46,6 @@ class TerminalKeyboardBar extends StatelessWidget {
   final VoidCallback? onToggleCompose;
   final VoidCallback onEnterTmuxScrollMode;
   final VoidCallback onExitTmuxScrollMode;
-
   /// The host's multiplexer prefix, sent by the Tmux key and before every
   /// Tmux+ and Herdr binding.
   final MultiplexerPrefixKey tmuxPrefixKey;

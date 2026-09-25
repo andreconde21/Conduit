@@ -62,10 +62,7 @@ void main() {
       expect(MultiplexerPrefixKey.tryDecode('ctrl+'), isNull);
       expect(MultiplexerPrefixKey.tryDecode('hyper+b'), isNull);
       expect(MultiplexerPrefixKey.tryDecode('ctrl+f12'), isNull);
-      expect(
-        MultiplexerPrefixKey.decode(null),
-        MultiplexerPrefixKey.defaultKey,
-      );
+      expect(MultiplexerPrefixKey.decode(null), MultiplexerPrefixKey.defaultKey);
       expect(
         MultiplexerPrefixKey.decode('nonsense'),
         MultiplexerPrefixKey.defaultKey,
@@ -94,16 +91,9 @@ void main() {
         const MultiplexerPrefixKey(key: '[', ctrl: true).controlKey,
         isNull,
       );
+      expect(const MultiplexerPrefixKey(key: 'a', alt: true).controlKey, isNull);
       expect(
-        const MultiplexerPrefixKey(key: 'a', alt: true).controlKey,
-        isNull,
-      );
-      expect(
-        const MultiplexerPrefixKey(
-          key: 'a',
-          ctrl: true,
-          shift: true,
-        ).controlKey,
+        const MultiplexerPrefixKey(key: 'a', ctrl: true, shift: true).controlKey,
         isNull,
       );
     });
@@ -120,10 +110,10 @@ void main() {
         const MultiplexerPrefixKey(key: 'a', alt: true, shift: true).bytes,
         [0x1b, 0x41],
       );
-      expect(
-        const MultiplexerPrefixKey(key: 'a', ctrl: true, alt: true).bytes,
-        [0x1b, 0x01],
-      );
+      expect(const MultiplexerPrefixKey(key: 'a', ctrl: true, alt: true).bytes, [
+        0x1b,
+        0x01,
+      ]);
       expect(const MultiplexerPrefixKey(key: '[', ctrl: true).bytes, [0x1b]);
       expect(const MultiplexerPrefixKey(key: '`').bytes, [0x60]);
       expect(const MultiplexerPrefixKey(key: ';', ctrl: true).bytes, [0x3b]);
