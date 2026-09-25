@@ -73,7 +73,18 @@ flutter:
     - assets/companion/
     - assets/companion/bin/
     - assets/companion/lib/
+    # Licence texts of the bundled fonts, shown in the app's licence page.
+    - assets/fonts/LICENSE-JetBrainsMonoNerdFont.txt
+    - assets/fonts/README-JetBrainsMonoNerdFont.md
+    - assets/fonts/LICENSE-AtkynsonMono.txt
   fonts:
+    # Omarchy's default monospace font (Nerd Fonts v3.5.1, "Mono" variant so
+    # icons keep one terminal cell), unmodified. SIL OFL 1.1.
+    - family: JetBrainsMonoNerdFontMono
+      fonts:
+        - asset: assets/fonts/JetBrainsMonoNerdFontMono-Regular.ttf
+        - asset: assets/fonts/JetBrainsMonoNerdFontMono-Bold.ttf
+          weight: 700
     - family: AtkynsonMonoNerdFontMono
       fonts:
         - asset: assets/fonts/AtkynsonMonoNerdFontMono-Regular.otf
