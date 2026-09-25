@@ -1494,8 +1494,8 @@ class _AboutControls extends StatelessWidget {
   }
 }
 
-/// Copies the errors the app caught this run, for a bug report; hidden
-/// while there are none.
+/// Settings › About › Recent errors: the errors the app caught this run,
+/// to read and copy into a bug report.
 class _ErrorLogButton extends StatelessWidget {
   const _ErrorLogButton();
 
@@ -1505,26 +1505,87 @@ class _ErrorLogButton extends StatelessWidget {
     return ListenableBuilder(
       listenable: log,
       builder: (context, _) {
-        if (log.isEmpty) return const SizedBox.shrink();
         final count = log.entries.length;
         return Align(
           alignment: Alignment.centerLeft,
           child: TextButton.icon(
-            key: const ValueKey('about-copy-error-log'),
-            onPressed: () async {
-              await log.copyReport();
-              if (!context.mounted) return;
-              ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                const SnackBar(content: Text('Error log copied')),
-              );
-            },
+            key: const ValueKey('about-recent-errors'),
+            onPressed: () => showRecentErrors(context, log),
             icon: const Icon(Icons.bug_report_outlined, size: 18),
             label: Text(
-              'Copy error log ($count ${count == 1 ? 'error' : 'errors'})',
+              count == 0 ? 'Recent errors' : 'Recent errors ($count)',
             ),
           ),
         );
       },
     );
   }
+}
+
+/// Lists [log]'s errors, newest first, each expandable to its details,
+/// with a button that copies them all.
+Future<void> showRecentErrors(BuildContext context, AppErrorLog log) {
+  return showDialog<void>(
+    context: context,
+    builder: (dialogContext) {
+      final entries = log.entries.reversed.toList();
+      return AlertDialog(
+        key: const ValueKey('recent-errors'),
+        title: const Text('Recent errors'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: entries.isEmpty
+              ? const Text('No errors since the app started.')
+              : ListView(
+                  shrinkWrap: true,
+                  children: [
+                    for (final entry in entries)
+                      ExpansionTile(
+                        tilePadding: EdgeInsets.zero,
+                        title: Text(
+                          entry.summary,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                        subtitle: Text(
+                          TimeOfDay.fromDateTime(
+                            entry.time,
+                          ).format(dialogContext),
+                          style: const TextStyle(fontSize: 11),
+                        ),
+                        children: [
+                          SelectableText(
+                            entry.details,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Close'),
+          ),
+          if (entries.isNotEmpty)
+            FilledButton(
+              key: const ValueKey('recent-errors-copy'),
+              onPressed: () async {
+                await log.copyReport();
+                if (!dialogContext.mounted) return;
+                ScaffoldMessenger.maybeOf(
+                  dialogContext,
+                )?.showSnackBar(const SnackBar(content: Text('Errors copied')));
+              },
+              child: const Text('Copy all'),
+            ),
+        ],
+      );
+    },
+  );
 }

@@ -29,7 +29,7 @@ class AppErrorEntry {
 /// build can show and share them (a failed build shows only a blank page
 /// there otherwise).
 class AppErrorLog extends ChangeNotifier {
-  AppErrorLog({this.capacity = 30});
+  AppErrorLog({this.capacity = 20});
 
   static final instance = AppErrorLog();
 
@@ -145,6 +145,17 @@ class AppErrorCard extends StatelessWidget {
   final FlutterErrorDetails details;
   final AppErrorLog log;
 
+  static String? _stackHead(StackTrace? stack) {
+    if (stack == null) return null;
+    final lines = stack
+        .toString()
+        .split('\n')
+        .where((line) => line.trim().isNotEmpty)
+        .take(6)
+        .toList();
+    return lines.isEmpty ? null : lines.join('\n');
+  }
+
   static const _background = Color(0xFF2B1D1F);
   static const _foreground = Color(0xFFF4E4E6);
   static const _accent = Color(0xFFFF8A80);
@@ -187,6 +198,17 @@ class AppErrorCard extends StatelessWidget {
                   fontFamily: 'monospace',
                 ),
               ),
+              if (_stackHead(details.stack) case final stack?) ...[
+                const SizedBox(height: 6),
+                Text(
+                  stack,
+                  style: TextStyle(
+                    color: _foreground.withValues(alpha: 0.7),
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ],
               if (where != null && where.isNotEmpty) ...[
                 const SizedBox(height: 6),
                 Text(
