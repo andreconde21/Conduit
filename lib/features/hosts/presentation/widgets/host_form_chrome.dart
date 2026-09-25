@@ -1,4 +1,5 @@
 import 'package:conduit/core/presentation/conduit_brand.dart';
+import 'package:conduit/core/theme/app_theme.dart';
 import 'package:flutter/material.dart';
 
 class HostFormHeader extends StatelessWidget {
@@ -67,7 +68,7 @@ class HostFormSectionCard extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
       decoration: BoxDecoration(
         color: colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
         border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Column(
@@ -84,7 +85,7 @@ class HostFormSectionCard extends StatelessWidget {
                     colorScheme.primary.withValues(alpha: 0.16),
                     colorScheme.surface,
                   ),
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(AppTheme.radius),
                 ),
                 child: Icon(icon, size: 16, color: colorScheme.primary),
               ),

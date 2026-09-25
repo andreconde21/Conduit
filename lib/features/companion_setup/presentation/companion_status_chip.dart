@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/companion_setup/domain/companion_status.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_controller.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_page.dart';
@@ -142,7 +143,7 @@ class _CompanionInstallBannerState extends State<CompanionInstallBanner>
           child: Material(
             key: const ValueKey('companion-install-banner'),
             color: scheme.secondaryContainer,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(AppTheme.radius),
             clipBehavior: Clip.antiAlias,
             child: InkWell(
               onTap: () => showCompanionSetup(context, widget.host),

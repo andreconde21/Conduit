@@ -1,3 +1,4 @@
+import 'package:conduit/core/theme/app_theme.dart';
 import 'package:flutter/material.dart';
 
 class TagEditor extends StatelessWidget {
@@ -95,7 +96,7 @@ class _EditableTagChip extends StatelessWidget {
           colorScheme.primary.withValues(alpha: 0.14),
           colorScheme.surface,
         ),
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
         border: Border.all(color: colorScheme.primary.withValues(alpha: 0.4)),
       ),
       child: Row(

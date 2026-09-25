@@ -1,3 +1,4 @@
+import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:flutter/material.dart';
 
@@ -80,7 +81,7 @@ class _AuthMethodTile extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
         onTap: () => onChanged(value),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 140),
@@ -92,7 +93,7 @@ class _AuthMethodTile extends StatelessWidget {
                     colorScheme.surface,
                   )
                 : colorScheme.surface,
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(AppTheme.radius),
             border: Border.all(
               color: _selected
                   ? colorScheme.primary
@@ -172,7 +173,7 @@ class AuthExplainer extends StatelessWidget {
           colorScheme.primary.withValues(alpha: 0.08),
           colorScheme.surface,
         ),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
         border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Row(

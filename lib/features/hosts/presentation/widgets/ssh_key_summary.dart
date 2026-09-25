@@ -1,3 +1,4 @@
+import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/hosts/domain/ssh_key.dart';
 import 'package:flutter/material.dart';
 
@@ -57,7 +58,7 @@ class _KeyCard extends StatelessWidget {
           colorScheme.primary.withValues(alpha: 0.07),
           colorScheme.surface,
         ),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
         border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Column(
@@ -136,7 +137,7 @@ class _KeyChecking extends StatelessWidget {
           colorScheme.primary.withValues(alpha: 0.08),
           colorScheme.surface,
         ),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
         border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Row(
@@ -191,7 +192,7 @@ class _KeyNotice extends StatelessWidget {
           accent.withValues(alpha: 0.08),
           colorScheme.surface,
         ),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
         border: Border.all(color: accent.withValues(alpha: 0.4)),
       ),
       child: Row(

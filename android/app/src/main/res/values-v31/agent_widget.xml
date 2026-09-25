@@ -1,12 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Material You: dynamic colours from the wallpaper. -->
-    <color name="agent_widget_surface">@android:color/system_neutral1_50</color>
-    <color name="agent_widget_on_surface">@android:color/system_neutral1_900</color>
-    <color name="agent_widget_on_surface_variant">@android:color/system_neutral2_700</color>
-    <color name="agent_widget_accent">@android:color/system_accent1_600</color>
-    <color name="agent_widget_on_accent">@android:color/system_accent1_0</color>
-    <color name="agent_widget_urgent">@android:color/system_accent3_700</color>
-
+    <!-- Colours come from values/agent_widget.xml (Everforest); only the
+         corner follows the launcher's widget radius. -->
     <dimen name="agent_widget_corner_radius">@android:dimen/system_app_widget_background_radius</dimen>
 </resources>

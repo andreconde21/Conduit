@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:conduit/core/theme/app_palette.dart';
+import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit_vt/conduit_vt.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -229,7 +230,7 @@ class _ToolbarArrowPadState extends State<ToolbarArrowPad> {
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: background,
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(AppTheme.radius),
             ),
             child: Icon(icon, color: foreground, size: 22),
           ),

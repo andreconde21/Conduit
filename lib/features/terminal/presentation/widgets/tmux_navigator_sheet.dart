@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_palette.dart';
+import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/hosts/domain/multiplexer_prefix_key.dart';
 import 'package:conduit/features/terminal/domain/tmux_navigator.dart';
 import 'package:flutter/material.dart';
@@ -294,7 +295,7 @@ class _TmuxNavigatorSheetState extends State<TmuxNavigatorSheet> {
                     _palette.panelElevatedFor(_brightness),
                   )
                 : _palette.panelElevatedFor(_brightness),
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(AppTheme.radius),
             clipBehavior: Clip.antiAlias,
             child: InkWell(
               key: ValueKey('tmux-quick-${action.name}'),
@@ -349,7 +350,7 @@ class _TmuxNavigatorSheetState extends State<TmuxNavigatorSheet> {
                       padding: EdgeInsets.zero,
                       minimumSize: const Size(0, 40),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(AppTheme.radius),
                       ),
                     ),
                     onPressed: () => _pick(TmuxWindowPick(index)),
@@ -486,7 +487,7 @@ class _TmuxNavigatorSheetState extends State<TmuxNavigatorSheet> {
               )
             : _palette.panelElevatedFor(_brightness),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(AppTheme.radius),
           side: current
               ? BorderSide(color: accent.withValues(alpha: 0.7))
               : BorderSide.none,
@@ -538,7 +539,7 @@ class _TmuxNavigatorSheetState extends State<TmuxNavigatorSheet> {
                     ),
                     decoration: BoxDecoration(
                       color: accent.withValues(alpha: 0.16),
-                      borderRadius: BorderRadius.circular(999),
+                      borderRadius: BorderRadius.circular(AppTheme.radius),
                     ),
                     child: Text(
                       'Current',

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_palette.dart';
+import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
@@ -753,7 +754,7 @@ class _Key extends StatelessWidget {
         ),
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(AppTheme.radius),
           border: Border.all(
             color: selected
                 ? palette.accent.withValues(alpha: 0.7)
@@ -891,7 +892,7 @@ class _KeySurfaceState extends State<_KeySurface> {
       padding: const EdgeInsets.symmetric(horizontal: 2),
       child: Material(
         color: widget.color,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
         child: Listener(
           onPointerDown: enabled
               ? (event) => _startPress(event.localPosition)
@@ -902,7 +903,7 @@ class _KeySurfaceState extends State<_KeySurface> {
           onPointerUp: enabled ? (_) => _endPress() : null,
           onPointerCancel: enabled ? (_) => _cancelPress() : null,
           child: InkWell(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(AppTheme.radius),
             onTap: enabled ? () {} : null,
             child: widget.child,
           ),
@@ -948,7 +949,7 @@ class _ToggleKey extends StatelessWidget {
         ),
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(AppTheme.radius),
           border: Border.all(
             color: selected
                 ? accent.withValues(alpha: 0.7)
@@ -1134,7 +1135,7 @@ class _TouchModeKeyState extends State<_TouchModeKey> {
               alignment: Alignment.center,
               decoration: BoxDecoration(
                 color: background,
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(AppTheme.radius),
                 border: Border.all(
                   color: selected
                       ? widget.palette.accent.withValues(alpha: 0.7)
@@ -1278,7 +1279,7 @@ class _MenuKey<T> extends StatelessWidget {
           alignment: Alignment.center,
           decoration: BoxDecoration(
             color: palette.panelFor(brightness),
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(AppTheme.radius),
             border: Border.all(color: palette.hairlineFor(brightness)),
           ),
           child: Text(

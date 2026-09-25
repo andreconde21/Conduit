@@ -1,3 +1,4 @@
+import 'package:conduit/core/theme/app_theme.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -318,7 +319,7 @@ class _ChatMarkdownState extends State<ChatMarkdown> {
           width: double.infinity,
           decoration: BoxDecoration(
             color: theme.colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(AppTheme.radius),
           ),
           padding: const EdgeInsets.all(10),
           child: SingleChildScrollView(

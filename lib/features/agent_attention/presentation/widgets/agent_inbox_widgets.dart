@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_inbox.dart';
 import 'package:flutter/material.dart';
@@ -222,7 +223,7 @@ class AgentStateChip extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
         color: style.color.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
       ),
       child: Text(
         style.label,
@@ -305,7 +306,7 @@ class AgentInboxRow extends StatelessWidget {
       child: Material(
         color: scheme.surface,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(AppTheme.radius),
           side: BorderSide(
             color: agent.pendingRequests.isNotEmpty
                 ? scheme.error.withValues(alpha: 0.5)
@@ -485,7 +486,7 @@ class _PendingRequestCardState extends State<PendingRequestCard> {
               constraints: const BoxConstraints(maxHeight: 220),
               decoration: BoxDecoration(
                 color: theme.colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(AppTheme.radius),
               ),
               padding: const EdgeInsets.all(10),
               child: SingleChildScrollView(

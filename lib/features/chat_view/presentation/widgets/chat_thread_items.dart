@@ -1,3 +1,4 @@
+import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/chat_view/domain/chat_items.dart';
 import 'package:conduit/features/chat_view/domain/chat_tool_summary.dart';
@@ -31,9 +32,9 @@ class ChatUserBubble extends StatelessWidget {
             decoration: BoxDecoration(
               color: scheme.primaryContainer,
               borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(16),
-                topRight: Radius.circular(16),
-                bottomLeft: Radius.circular(16),
+                topLeft: Radius.circular(AppTheme.radius),
+                topRight: Radius.circular(AppTheme.radius),
+                bottomLeft: Radius.circular(AppTheme.radius),
                 bottomRight: Radius.circular(4),
               ),
             ),
@@ -220,7 +221,7 @@ class _ChatToolCardState extends State<ChatToolCard> {
             ? scheme.errorContainer.withValues(alpha: 0.25)
             : scheme.surfaceContainerLow,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(AppTheme.radius),
           side: BorderSide(color: border),
         ),
         clipBehavior: Clip.antiAlias,
@@ -343,7 +344,7 @@ class _DiffPreview extends StatelessWidget {
       padding: const EdgeInsets.all(6),
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
       ),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
@@ -384,7 +385,7 @@ class _Output extends StatelessWidget {
       constraints: const BoxConstraints(maxHeight: 320),
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
       ),
       child: SingleChildScrollView(
         child: Text(
@@ -618,7 +619,7 @@ class ChatApprovalCard extends StatelessWidget {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: scheme.errorContainer.withValues(alpha: 0.3),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
         border: Border.all(color: scheme.error),
       ),
       child: Column(
@@ -709,7 +710,7 @@ class _CardShell extends StatelessWidget {
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: scheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
         border: Border.all(color: scheme.outlineVariant),
       ),
       child: Column(
