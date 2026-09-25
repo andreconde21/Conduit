@@ -59,13 +59,93 @@ function herdrContext (header) {
   }
 }
 
+// --- Herdr's own view: `herdr pane list` ------------------------------------
+//
+// Used only when the hook's environment did not carry the full location
+// (HERDR_* missing, e.g. Claude Code started by a wrapper that drops them,
+// or only HERDR_PANE_ID set). Herdr knows each pane's agent session id, so
+// the Claude session id finds the pane. One call serves every lookup for
+// PANE_LIST_TTL_MS; when herdr is missing or not running, nothing is asked
+// again for HERDR_DOWN_MS. Sessions found in no pane are not asked about
+// again until their next SessionStart.
+
+const PANE_LIST_TTL_MS = 10000
+const HERDR_DOWN_MS = 5 * 60 * 1000
+let paneList = { at: 0, panes: null, pending: null, downUntil: 0 }
+const notInHerdr = new Set()
+
+function parsePaneList (stdout) {
+  let doc
+  try { doc = JSON.parse(stdout) } catch { return null }
+  const panes = doc && doc.result && Array.isArray(doc.result.panes) ? doc.result.panes : null
+  if (!panes) return null
+  return panes.filter(p => p && typeof p.pane_id === 'string').map(p => ({
+    workspaceId: typeof p.workspace_id === 'string' ? p.workspace_id : null,
+    tabId: typeof p.tab_id === 'string' ? p.tab_id : null,
+    paneId: p.pane_id,
+    sessionId: p.agent_session && typeof p.agent_session.value === 'string' ? p.agent_session.value : null
+  }))
+}
+
+function herdrPanes (now = Date.now()) {
+  if (now < paneList.downUntil) return Promise.resolve(null)
+  if (paneList.panes && now - paneList.at < PANE_LIST_TTL_MS) return Promise.resolve(paneList.panes)
+  if (paneList.pending) return paneList.pending
+  paneList.pending = new Promise(resolve => {
+    execFile('herdr', ['pane', 'list'], { timeout: 2000, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => {
+      const panes = err ? null : parsePaneList(stdout)
+      paneList.pending = null
+      if (!panes) {
+        paneList.downUntil = Date.now() + HERDR_DOWN_MS
+        paneList.panes = null
+      } else {
+        paneList.at = Date.now()
+        paneList.panes = panes
+      }
+      resolve(panes)
+    })
+  })
+  return paneList.pending
+}
+
+// The Herdr location of a hook event: the header's, completed (or found)
+// from Herdr's pane list when parts are missing. Never uses the cwd.
+async function herdrLocation (header, event) {
+  const fromEnv = herdrContext(header)
+  if (fromEnv && fromEnv.workspaceId && fromEnv.tabId && fromEnv.paneId) return fromEnv
+  const sid = event.session_id
+  if (event.hook_event_name === 'SessionStart') notInHerdr.delete(sid)
+  if (!fromEnv && (header.tmux || notInHerdr.has(sid))) return null
+  const panes = await herdrPanes()
+  if (!panes) return fromEnv
+  const pane = fromEnv && fromEnv.paneId
+    ? panes.find(p => p.paneId === fromEnv.paneId)
+    : panes.find(p => p.sessionId === sid)
+  if (!pane) {
+    if (!fromEnv) notInHerdr.add(sid)
+    return fromEnv
+  }
+  return {
+    workspaceId: pane.workspaceId,
+    tabId: pane.tabId,
+    paneId: pane.paneId,
+    name: (fromEnv && fromEnv.name) || null
+  }
+}
+
 // Adds `tmux` / `herdr` to a hook event, as the old Node hook did.
 async function enrich (event, header) {
   const tmux = await tmuxContext(header)
-  const herdr = herdrContext(header)
+  const herdr = await herdrLocation(header, event)
   if (tmux) event.tmux = tmux
   if (herdr) event.herdr = herdr
   return event
 }
 
-module.exports = { enrich, tmuxContext, herdrContext, tmuxSocket, _cache: cache }
+function _reset () {
+  paneList = { at: 0, panes: null, pending: null, downUntil: 0 }
+  notInHerdr.clear()
+  cache.clear()
+}
+
+module.exports = { enrich, tmuxContext, herdrContext, herdrLocation, parsePaneList, tmuxSocket, _reset }

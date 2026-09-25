@@ -104,7 +104,12 @@ is documented in `lib/spool.js`.
 The daemon watches the spool (`fs.watch`: inotify on Linux, FSEvents on
 macOS; it also scans it at start and before answering `status` / `events`),
 takes entries oldest first, removes them, and adds the location: `herdr`
-straight from the header, `tmux` by asking the pane's tmux server
+straight from the header when Herdr's variables were set (Herdr exports
+`HERDR_WORKSPACE_ID`, `HERDR_TAB_ID`, `HERDR_PANE_ID`), else completed or
+found from one `herdr pane list` (matched by pane id, or by the Claude
+session id Herdr records per pane; cached 10 s, not retried for 5 min when
+herdr is missing, never used for agents in tmux or already known not to be
+in Herdr); the cwd is never used as a location. `tmux` by asking the pane's tmux server
 (`tmux -S <socket from $TMUX> display-message -p -t <pane>`: session, window
 index, pane id, window name), cached 5 s per pane so bursts of tool events
 cost one `tmux`. It reduces events into one record per `session_id`, bumps a

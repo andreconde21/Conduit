@@ -22,6 +22,17 @@ fs.writeFileSync(path.join(fakeBin, 'tmux'), `#!/bin/sh
 printf '%s\n' "$*" >> '${tmuxLog}'
 printf 'main\t2\t%s\t/work/t\tfixer\n' "$6"
 `, { mode: 0o755 })
+// A fake herdr: `pane list` knows session h1 (pane w3:p2) and pane w3:p9.
+const herdrLog = path.join(fakeBin, 'herdr.log')
+fs.writeFileSync(path.join(fakeBin, 'herdr'), `#!/bin/sh
+printf '%s\n' "$*" >> '${herdrLog}'
+[ "$1 $2" = "pane list" ] || exit 1
+cat <<'JSON'
+{"id":"cli:pane:list","result":{"type":"pane_list","panes":[
+ {"pane_id":"w3:p2","tab_id":"w3:t2","workspace_id":"w3","cwd":"/work/h1","agent_session":{"agent":"claude","kind":"id","value":"h1"}},
+ {"pane_id":"w3:p9","tab_id":"w3:t4","workspace_id":"w3","cwd":"/work/h2"}]}}
+JSON
+`, { mode: 0o755 })
 const env = {
   ...process.env,
   PATH: `${fakeBin}:${process.env.PATH}`,
@@ -138,6 +149,28 @@ test('tmux location is resolved by the daemon from the variables in the spool he
   const b = (await status()).agents.find(a => a.sessionId === 't2')
   assert.deepEqual(b.herdr, { workspaceId: 'w1', tabId: 'w1:t1', paneId: 'w1:p1', name: 'rev' })
   assert.equal(b.name, 'rev')
+})
+
+test('Herdr location without HERDR_* comes from one cached `herdr pane list`, never from the cwd', async () => {
+  fs.writeFileSync(herdrLog, '')
+  // Found by Claude's session id.
+  await hook(ev('h1', 'SessionStart'))
+  // Only the pane id in the environment: workspace and tab are filled in.
+  await hook(ev('h2', 'SessionStart'), { HERDR_PANE_ID: 'w3:p9' })
+  // Not in any Herdr pane: no location, asked once.
+  await hook(ev('n1', 'SessionStart'))
+  for (let i = 0; i < 3; i++) {
+    await hook(ev('h1', 'PreToolUse', { tool_name: 'Read', tool_input: { file_path: '/x' } }))
+    await hook(ev('n1', 'PreToolUse', { tool_name: 'Read', tool_input: { file_path: '/x' } }))
+  }
+  const agents = (await status()).agents
+  const byId = id => agents.find(a => a.sessionId === id)
+  assert.deepEqual(byId('h1').herdr, { workspaceId: 'w3', tabId: 'w3:t2', paneId: 'w3:p2', name: null })
+  assert.deepEqual(byId('h2').herdr, { workspaceId: 'w3', tabId: 'w3:t4', paneId: 'w3:p9', name: null })
+  assert.equal(byId('n1').herdr, null)
+  assert.equal(byId('h1').name, 'h1') // cwd basename is a name, not a location
+  // Nine events, at most one herdr call (none if an earlier test's list is still cached).
+  assert.ok(['', 'pane list\n'].includes(fs.readFileSync(herdrLog, 'utf8')))
 })
 
 test('concurrent hooks do not start two daemons', async () => {

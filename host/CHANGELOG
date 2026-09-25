@@ -7,6 +7,7 @@
 - perf: daemon diet: `--max-old-space-size=16 --max-semi-space-size=1 --lite-mode --v8-pool-size=1` (4 threads instead of 7, 47 MB RSS / 7.4 MB private instead of 54 / 8.8), no periodic timers (the 5 min prune interval is now a one-shot at the next deadline), snapshot debounce 1 s, per-event log lines only with `CONDUCTORE_LOG=debug`, idle exit after 6 h (`CONDUCTORE_IDLE_EXIT_S`).
 - feat: tmux location is resolved by the daemon (cached 5 s per pane); `install` records the node path for the sh clients and migrates 0.3 settings (Node hook entries, `conductore-hostd statusline --chain`); `doctor` reports hook latency and daemon memory; `host/bench.sh`.
 - fix: a starting daemon never takes over a socket another live daemon serves, and a custom `CONDUCTORE_HOME` keeps its socket inside it (a test daemon could unlink the real one).
+- fix: agents in Herdr get `herdr.workspaceId` / `tabId` / `paneId` from Herdr even when the hook's environment lacks some `HERDR_*` variables (one cached `herdr pane list` in the daemon, matched by pane id or Claude session id); the cwd is never a location.
 - The phone's CLI contract (`status`, `events`, `transcript`, `send`, `interrupt`, `decide`, `focus`, `version`, `doctor`) is unchanged; `status` now also applies events still waiting in the spool.
 
 ## 0.3.0 (2026-09-25)
