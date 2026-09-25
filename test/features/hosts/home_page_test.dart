@@ -137,13 +137,28 @@ void main() {
     expect(find.byType(DormantWorkspaceTile), findsNothing);
     expect(find.byType(HomeBoardNoticeTile), findsNothing);
     expect(runnerHosts, isEmpty);
-    // Lock sits in the bar; appearance (with backup) and trusted keys sit
-    // behind the gear.
+    // Lock sits in the bar; the gear opens the full Settings page with
+    // every section (backup under Sync & Backup, trusted keys and "Lock
+    // now" under Security).
     expect(find.byTooltip('Lock'), findsOneWidget);
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
-    expect(find.text('Appearance'), findsOneWidget);
-    expect(find.text('Trusted keys'), findsOneWidget);
+    expect(find.text('Settings'), findsOneWidget);
+    for (final title in [
+      'Appearance',
+      'Terminal',
+      'Input',
+      'Chat & Voice',
+      'Agents',
+      'Sync & Backup',
+      'Security',
+      'About',
+    ]) {
+      expect(find.text(title), findsOneWidget, reason: title);
+    }
+    await tester.tap(find.text('Security'));
+    await tester.pumpAndSettle();
+    expect(find.text('Trusted host keys'), findsOneWidget);
     expect(find.text('Lock now'), findsOneWidget);
   });
 

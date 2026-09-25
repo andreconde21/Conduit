@@ -37,6 +37,7 @@ import 'package:conduit/features/sessions/data/secure_connect_preferences_reposi
 import 'package:conduit/features/sessions/data/secure_session_snapshot_repository.dart';
 import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
 import 'package:conduit/features/sessions/presentation/session_restore_controller.dart';
+import 'package:conduit/features/settings/presentation/settings_services.dart';
 import 'package:conduit/features/sftp/data/dart_ssh_sftp_repository.dart';
 import 'package:conduit/features/sftp/data/file_picker_file_export.dart';
 import 'package:conduit/features/sftp/data/secure_sftp_bookmarks_repository.dart';
@@ -264,34 +265,53 @@ void main() {
   );
   loadSessionViews(sessionViews);
 
+  // Settings from any route (the terminal's ⋮ menu): the same services
+  // the home page's gear passes.
+  final settingsServices = SettingsServices(
+    theme: themeController,
+    backupService: backupService,
+    hostsController: hostsController,
+    hostKeyVerifier: hostKeyVerifier,
+    agentAttention: agentAttention,
+    onLockNow: () async {
+      // Locking closes every session; unlocking brings them back.
+      await sessionRestore.holdForLock();
+      await workspaceController.closeAll();
+      lockController.lock();
+    },
+  );
+
   runApp(
-    SyncScope(
-      controller: syncController,
-      child: VoiceSettingsScope(
-        settings: themeController,
-        child: SessionViewScope(
-          controller: sessionViews,
-          child: CompanionSetupScope(
-            controller: companionSetup,
-            agentAttention: agentAttention,
-            child: ConduitApp(
-              themeController: themeController,
-              lockController: lockController,
-              hostsController: hostsController,
-              terminalRepository: terminalRepository,
-              workspaceController: workspaceController,
-              localShellController: localShellController,
-              hostKeyVerifier: hostKeyVerifier,
-              promptCoordinator: promptCoordinator,
-              sftpRepository: sftpRepository,
-              sftpBookmarksRepository: sftpBookmarksRepository,
+    SettingsScope(
+      services: settingsServices,
+      child: SyncScope(
+        controller: syncController,
+        child: VoiceSettingsScope(
+          settings: themeController,
+          child: SessionViewScope(
+            controller: sessionViews,
+            child: CompanionSetupScope(
+              controller: companionSetup,
               agentAttention: agentAttention,
-              backupService: backupService,
-              fileExport: fileExport,
-              connectFlow: connectFlow,
-              shareTarget: shareTarget,
-              sessionRestore: sessionRestore,
-              localDataChanges: localDataChanges,
+              child: ConduitApp(
+                themeController: themeController,
+                lockController: lockController,
+                hostsController: hostsController,
+                terminalRepository: terminalRepository,
+                workspaceController: workspaceController,
+                localShellController: localShellController,
+                hostKeyVerifier: hostKeyVerifier,
+                promptCoordinator: promptCoordinator,
+                sftpRepository: sftpRepository,
+                sftpBookmarksRepository: sftpBookmarksRepository,
+                agentAttention: agentAttention,
+                backupService: backupService,
+                fileExport: fileExport,
+                connectFlow: connectFlow,
+                shareTarget: shareTarget,
+                sessionRestore: sessionRestore,
+                localDataChanges: localDataChanges,
+              ),
             ),
           ),
         ),

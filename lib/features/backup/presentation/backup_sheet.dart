@@ -16,22 +16,22 @@ Future<void> showBackupSheet({
   );
 }
 
-class _BackupSheet extends StatefulWidget {
+/// What a backup covers, in the words Settings › Sync & Backup shows.
+const backupCoverage =
+    'A backup holds your saved machines and their order, trusted host keys, '
+    'snippets and every setting (appearance, terminal, input, chat and '
+    'voice), connect preferences and the session list. Passwords and '
+    'private keys are only included when you choose so. Every backup is '
+    'encrypted with a password, in the same format as device sync.';
+
+class _BackupSheet extends StatelessWidget {
   const _BackupSheet({required this.backupService});
 
   final AppBackupService backupService;
 
   @override
-  State<_BackupSheet> createState() => _BackupSheetState();
-}
-
-class _BackupSheetState extends State<_BackupSheet> {
-  bool _busy = false;
-
-  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(22, 14, 22, 24),
@@ -45,50 +45,81 @@ class _BackupSheetState extends State<_BackupSheet> {
                 const Spacer(),
                 IconButton(
                   tooltip: 'Close',
-                  onPressed: _busy ? null : () => Navigator.of(context).pop(),
+                  onPressed: () => Navigator.of(context).pop(),
                   icon: const Icon(Icons.close_rounded),
                 ),
               ],
             ),
             const SizedBox(height: 8),
             Text(
-              'Backups include saved machines and their order, trusted host keys, '
-              'snippets, appearance and terminal settings, connect preferences '
-              'and the session list. Every backup is encrypted with a password; '
-              'the file uses the same format as device sync.',
+              backupCoverage,
               style: theme.textTheme.bodySmall?.copyWith(
-                color: colorScheme.onSurfaceVariant,
+                color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: 18),
-            _BackupActionTile(
-              icon: Icons.ios_share_rounded,
-              title: 'Export without credentials',
-              subtitle: 'Passwords and private keys are left out.',
-              onTap: _busy ? null : () => _export(includeSecrets: false),
-            ),
-            const SizedBox(height: 10),
-            _BackupActionTile(
-              icon: Icons.enhanced_encryption_rounded,
-              title: 'Export with credentials',
-              subtitle: 'Also passwords, private keys and hardware-key stubs.',
-              onTap: _busy ? null : () => _export(includeSecrets: true),
-            ),
-            const SizedBox(height: 10),
-            _BackupActionTile(
-              icon: Icons.restore_rounded,
-              title: 'Import backup',
-              subtitle:
-                  'Backup files and sync bundles are merged into this device.',
-              onTap: _busy ? null : _import,
-            ),
-            if (_busy) ...[
-              const SizedBox(height: 16),
-              const LinearProgressIndicator(),
-            ],
+            BackupActions(backupService: backupService),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Export (with or without credentials) and import, as tiles: the backup
+/// sheet and Settings › Sync & Backup both show them.
+class BackupActions extends StatefulWidget {
+  const BackupActions({required this.backupService, super.key});
+
+  final AppBackupService backupService;
+
+  @override
+  State<BackupActions> createState() => _BackupActionsState();
+}
+
+class _BackupActionsState extends State<BackupActions> {
+  bool _busy = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _BackupActionTile(
+          key: const ValueKey('backup-export'),
+          icon: Icons.ios_share_rounded,
+          title: 'Export backup',
+          subtitle:
+              'Machines, snippets and all settings. Passwords and private '
+              'keys are left out.',
+          onTap: _busy ? null : () => _export(includeSecrets: false),
+        ),
+        const SizedBox(height: 10),
+        _BackupActionTile(
+          key: const ValueKey('backup-export-credentials'),
+          icon: Icons.enhanced_encryption_rounded,
+          title: 'Export backup with credentials',
+          subtitle:
+              'Also passwords, private keys and hardware-key stubs. Keep '
+              'this file safe.',
+          onTap: _busy ? null : () => _export(includeSecrets: true),
+        ),
+        const SizedBox(height: 10),
+        _BackupActionTile(
+          key: const ValueKey('backup-import'),
+          icon: Icons.restore_rounded,
+          title: 'Import backup',
+          subtitle:
+              'Merges machines, keys, snippets and settings from a backup '
+              'file or sync bundle into this device. Nothing else is removed.',
+          onTap: _busy ? null : _import,
+        ),
+        if (_busy) ...[
+          const SizedBox(height: 16),
+          const LinearProgressIndicator(),
+        ],
+      ],
     );
   }
 
@@ -198,6 +229,7 @@ class _BackupSheetState extends State<_BackupSheet> {
 class _BackupActionTile extends StatelessWidget {
   const _BackupActionTile({
     required this.icon,
+    super.key,
     required this.title,
     required this.subtitle,
     required this.onTap,

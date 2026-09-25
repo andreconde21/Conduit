@@ -1,0 +1,227 @@
+import 'package:conduit/core/diagnostics/app_error_log.dart';
+import 'package:conduit/core/presentation/theme_sheet.dart';
+import 'package:conduit/core/theme/terminal_appearance.dart';
+import 'package:conduit/core/theme/theme_controller.dart';
+import 'package:conduit/features/settings/presentation/settings_catalog.dart';
+import 'package:conduit/features/settings/presentation/settings_page.dart';
+import 'package:conduit/features/settings/presentation/settings_services.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import '../../support/test_doubles.dart';
+
+/// The settings that used to live in the Appearance sheet, each on its
+/// Settings section page now.
+void main() {
+  late ThemeController controller;
+
+  setUp(() async {
+    controller = ThemeController(InMemoryThemePreferences());
+    await controller.load();
+  });
+
+  Future<void> openSection(WidgetTester tester, SettingsSection section) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsSectionPage(
+          section: section,
+          services: SettingsServices(theme: controller),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+  }
+
+  Finder body(SettingsSection section) => find.descendant(
+    of: find.byKey(ValueKey('settings-body-${section.name}')),
+    matching: find.byType(Scrollable),
+  );
+
+  Future<void> reveal(
+    WidgetTester tester,
+    SettingsSection section,
+    Finder finder,
+  ) async {
+    await tester.scrollUntilVisible(
+      finder,
+      200,
+      scrollable: body(section).first,
+    );
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('Appearance toggles local shell visibility', (tester) async {
+    await openSection(tester, SettingsSection.appearance);
+    await reveal(
+      tester,
+      SettingsSection.appearance,
+      find.text('Show local shell'),
+    );
+    expect(controller.showLocalShell, isTrue);
+    await tester.tap(find.text('Show local shell'));
+    await tester.pumpAndSettle();
+    expect(controller.showLocalShell, isFalse);
+  });
+
+  for (final (title, read) in <(String, bool Function(ThemeController))>[
+    ('Send mouse taps', (c) => c.terminalMouseInput),
+    ('Menu buttons', (c) => c.menuButtonsEnabled),
+    ('Restore sessions on launch', (c) => c.restoreSessionsOnLaunch),
+    ('Paste images as uploaded files', (c) => c.pasteImagesAsFiles),
+    ('Remote clipboard', (c) => c.remoteClipboardEnabled),
+  ]) {
+    testWidgets('Terminal toggles "$title"', (tester) async {
+      await openSection(tester, SettingsSection.terminal);
+      await reveal(tester, SettingsSection.terminal, find.text(title));
+      final before = read(controller);
+      await tester.tap(find.text(title));
+      await tester.pumpAndSettle();
+      expect(read(controller), !before);
+    });
+  }
+
+  testWidgets('Terminal changes the enter sequence', (tester) async {
+    await openSection(tester, SettingsSection.terminal);
+    expect(controller.terminalEnterSequence, TerminalEnterSequence.cr);
+    await tester.tap(find.text('CRLF'));
+    await tester.pumpAndSettle();
+    expect(controller.terminalEnterSequence, TerminalEnterSequence.crlf);
+  });
+
+  testWidgets('Input switches the toolbar style', (tester) async {
+    await openSection(tester, SettingsSection.input);
+    expect(controller.terminalToolbarStyle, TerminalToolbarStyle.floatingPill);
+    await tester.tap(
+      find.descendant(
+        of: find.byType(SegmentedButton<TerminalToolbarStyle>),
+        matching: find.text('Key rows'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(controller.terminalToolbarStyle, TerminalToolbarStyle.keyRows);
+  });
+
+  testWidgets('Input shows the gestures and toggles pinch to zoom', (
+    tester,
+  ) async {
+    await openSection(tester, SettingsSection.input);
+    await reveal(tester, SettingsSection.input, find.text('Gestures'));
+    await reveal(tester, SettingsSection.input, find.text('Pinch to zoom'));
+    expect(controller.terminalGestures.pinchZoom, isTrue);
+    await tester.tap(find.text('Pinch to zoom'));
+    await tester.pumpAndSettle();
+    expect(controller.terminalGestures.pinchZoom, isFalse);
+  });
+
+  testWidgets('Chat & Voice toggles pressing Enter after inserting', (
+    tester,
+  ) async {
+    await openSection(tester, SettingsSection.chatVoice);
+    expect(controller.composeSubmitEnter, isFalse);
+    await tester.tap(find.text('Press Enter after inserting'));
+    await tester.pumpAndSettle();
+    expect(controller.composeSubmitEnter, isTrue);
+    // Android (the test platform) has dictation and read aloud.
+    await reveal(
+      tester,
+      SettingsSection.chatVoice,
+      find.text('Keep listening until I tap stop'),
+    );
+  });
+
+  testWidgets('the key row editor adds and saves a custom text key', (
+    tester,
+  ) async {
+    await openSection(tester, SettingsSection.input);
+    await reveal(
+      tester,
+      SettingsSection.input,
+      find.byKey(const ValueKey('key-rows-edit')),
+    );
+    final initialCount = controller.terminalKeyboardRows.first.items.length;
+    await tester.tap(find.byKey(const ValueKey('key-rows-edit')));
+    await tester.pumpAndSettle();
+    expect(find.text('Key Rows (1)'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Edit keys'));
+    await tester.pumpAndSettle();
+    expect(find.text('Row 1 Keys ($initialCount)'), findsOneWidget);
+
+    await tester.drag(
+      find.byType(ReorderableListView).last,
+      const Offset(0, -500),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ActionChip, 'Custom'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField).at(0), 'gs');
+    await tester.enterText(find.byType(TextField).at(1), 'git status');
+    await tester.tap(find.widgetWithText(FilledButton, 'Add'));
+    await tester.pumpAndSettle();
+    expect(find.text('gs'), findsOneWidget);
+    expect(find.text('Row 1 Keys (${initialCount + 1})'), findsOneWidget);
+    expect(
+      controller.terminalKeyboardRows.first.items.length,
+      initialCount + 1,
+    );
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Done').last);
+    await tester.pumpAndSettle();
+
+    final custom = controller.terminalKeyboardRows.first.items.first;
+    expect(custom.kind, TerminalKeyboardItemKind.customText);
+    expect(custom.label, 'gs');
+    expect(custom.text, 'git status');
+  });
+
+  testWidgets('About credits upstream Conduit and lists recent errors', (
+    tester,
+  ) async {
+    addTearDown(AppErrorLog.instance.clear);
+    AppErrorLog.instance.clear();
+    await openSection(tester, SettingsSection.about);
+
+    expect(find.text('Conductore'), findsOneWidget);
+    expect(find.byKey(const ValueKey('about-upstream-credit')), findsOneWidget);
+    expect(
+      find.text('Based on Conduit by gwitko (Apache-2.0)'),
+      findsOneWidget,
+    );
+    expect(find.text('Recent errors'), findsOneWidget);
+
+    AppErrorLog.instance.recordError(StateError('boom'), null);
+    await tester.pump();
+    await tester.tap(find.text('Recent errors (1)'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('recent-errors')), findsOneWidget);
+    expect(find.text('Bad state: boom'), findsOneWidget);
+    expect(find.byKey(const ValueKey('recent-errors-copy')), findsOneWidget);
+  });
+
+  testWidgets('the lock screen theme sheet shows only the look', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: Center(
+              child: FilledButton(
+                onPressed: () =>
+                    showThemeSheet(context: context, controller: controller),
+                child: const Text('Open'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    expect(find.text('Appearance'), findsOneWidget);
+    expect(find.text('Dark'), findsOneWidget);
+    expect(find.text('Send mouse taps'), findsNothing);
+    expect(find.text('Import backup'), findsNothing);
+  });
+}

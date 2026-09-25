@@ -4,7 +4,6 @@ import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/desktop_layout.dart';
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
-import 'package:conduit/core/presentation/theme_sheet.dart';
 import 'package:conduit/core/secure_storage.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
@@ -40,12 +39,13 @@ import 'package:conduit/features/sessions/presentation/session_connect_flow.dart
 import 'package:conduit/features/sessions/presentation/session_grid_page.dart'
     show summarizeAgentState;
 import 'package:conduit/features/sessions/presentation/session_restore_controller.dart';
+import 'package:conduit/features/settings/presentation/settings_page.dart';
+import 'package:conduit/features/settings/presentation/settings_services.dart';
 import 'package:conduit/features/sftp/domain/file_export.dart';
 import 'package:conduit/features/sftp/domain/sftp_bookmarks_repository.dart';
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
 import 'package:conduit/features/sftp/presentation/sftp_browser_page.dart';
 import 'package:conduit/features/sync/domain/local_data_changes.dart';
-import 'package:conduit/features/sync/presentation/sync_scope.dart';
 import 'package:conduit/features/terminal/domain/host_key_prompt.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:conduit/features/terminal/domain/ssh_terminal_repository.dart';
@@ -54,7 +54,6 @@ import 'package:conduit/features/terminal/presentation/host_key_prompt_dialog.da
 import 'package:conduit/features/terminal/presentation/terminal_page.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
-import 'package:conduit/features/terminal/presentation/trusted_keys_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
@@ -1061,31 +1060,18 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     await _openTarget(host, ConnectTarget.tmux(sessionName));
   }
 
-  Future<void> _openSettings() async {
-    final shown = _shownHosts;
-    final single = shown.length == 1 ? shown.single : null;
-    final choice = await showHomeSettingsSheet(
-      context,
-      machineName: single?.name,
-    );
-    if (!mounted || choice == null) return;
-    switch (choice) {
-      case HomeSettingsChoice.appearance:
-        await showThemeSheet(
-          context: context,
-          controller: widget.themeController,
-          backupService: widget.backupService,
-        );
-      case HomeSettingsChoice.sync:
-        await showSyncPage(context);
-      case HomeSettingsChoice.trustedKeys:
-        await _openTrustedKeys();
-      case HomeSettingsChoice.agentHooks:
-        if (single != null) await showCompanionSetup(context, single);
-      case HomeSettingsChoice.lock:
-        await _lock();
-    }
-  }
+  /// The gear: the full-screen Settings page.
+  Future<void> _openSettings() => showSettings(
+    context,
+    services: SettingsServices(
+      theme: widget.themeController,
+      backupService: widget.backupService,
+      hostsController: widget.hostsController,
+      hostKeyVerifier: widget.hostKeyVerifier,
+      agentAttention: widget.agentAttention,
+      onLockNow: _lock,
+    ),
+  );
 
   /// Agents needing input on machines the filter hides.
   int _hiddenAttentionCount(MachineFilter filter) {
@@ -1477,17 +1463,6 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     for (final session in List.of(sessions)) {
       await widget.workspaceController.close(session);
     }
-  }
-
-  Future<void> _openTrustedKeys() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => TrustedKeysPage(
-          verifier: widget.hostKeyVerifier,
-          themeController: widget.themeController,
-        ),
-      ),
-    );
   }
 
   Future<void> _openFiles(SavedHost host) async {

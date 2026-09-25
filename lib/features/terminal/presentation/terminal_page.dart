@@ -46,6 +46,8 @@ import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/presentation/herdr_session_focus.dart';
 import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
 import 'package:conduit/features/sessions/presentation/session_grid_page.dart';
+import 'package:conduit/features/settings/presentation/settings_page.dart';
+import 'package:conduit/features/settings/presentation/settings_services.dart';
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/discard_changes_dialog.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/sftp_file_viewer.dart';
@@ -827,6 +829,18 @@ class _TerminalPageState extends State<TerminalPage>
 
   static final Listenable _inertListenable = ChangeNotifier();
 
+  /// The ⋮ menu's Settings: the app-wide services when the app provides
+  /// them, else the appearance-level settings this page holds.
+  Future<void> _openSettings() => showSettings(
+    context,
+    services:
+        SettingsScope.maybeOf(context) ??
+        SettingsServices(
+          theme: widget.themeController,
+          agentAttention: widget.agentAttention,
+        ),
+  );
+
   void _toggleFullscreen() {
     setState(() => _fullscreen = !_fullscreen);
     _setSystemUiFullscreen(_fullscreen);
@@ -1590,6 +1604,7 @@ class _TerminalPageState extends State<TerminalPage>
                               palette: palette,
                               brightness: brightness,
                               onBack: () => Navigator.of(context).pop(),
+                              onOpenSettings: () => unawaited(_openSettings()),
                               onTabsChanged: _showTerminal,
                               fileTabs: fileTabs,
                               activeFileTab: activeFileTab,
