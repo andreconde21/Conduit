@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
@@ -11,7 +12,6 @@ import 'package:conduit/features/terminal/presentation/multiplexer_pill_actions.
 import 'package:conduit/features/terminal/presentation/terminal_keyboard_bar.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/widgets/pill_configurator_sheet.dart';
-import 'package:conduit/features/terminal/presentation/widgets/tmux_navigator_sheet.dart';
 import 'package:conduit/features/terminal/presentation/widgets/toolbar_arrow_pad.dart';
 import 'package:conduit/features/terminal/presentation/widgets/toolbar_snippet_palette.dart';
 import 'package:conduit_vt/conduit_vt.dart';
@@ -294,7 +294,11 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
         builder: (buttonContext) {
           final tmux = pillMultiplexer == PillMultiplexer.tmux;
           return _PillButton(
-            icon: tmux ? tmuxPlaceholderIcon : Icons.view_quilt_rounded,
+            logo: MultiplexerIcon(
+              tmux ? MultiplexerKind.tmux : MultiplexerKind.herdr,
+              size: 20,
+              semanticLabel: '',
+            ),
             tooltip: tmux
                 ? 'tmux panes and actions. Long-press for a new pane'
                 : 'Herdr panes and shortcuts. Long-press for a new pane',
@@ -608,6 +612,7 @@ class _PillButton extends StatelessWidget {
     required this.tooltip,
     this.label,
     this.icon,
+    this.logo,
     this.onTap,
     this.onLongPress,
     this.selected = false,
@@ -620,6 +625,9 @@ class _PillButton extends StatelessWidget {
   final String tooltip;
   final String? label;
   final IconData? icon;
+
+  /// A brand logo shown instead of [icon] (the tmux or Herdr mark).
+  final Widget? logo;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
   final bool selected;
@@ -651,7 +659,7 @@ class _PillButton extends StatelessWidget {
             palette.panelElevatedFor(brightness),
           )
         : palette.panelElevatedFor(brightness);
-    final isIcon = icon != null;
+    final isIcon = icon != null || logo != null;
     return Tooltip(
       message: tooltip,
       child: Material(
@@ -684,7 +692,7 @@ class _PillButton extends StatelessWidget {
                   : null,
             ),
             child: isIcon
-                ? Icon(icon, color: foreground, size: 20)
+                ? logo ?? Icon(icon, color: foreground, size: 20)
                 : Text(
                     label ?? '',
                     maxLines: 1,

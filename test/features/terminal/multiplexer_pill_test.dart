@@ -134,6 +134,14 @@ void main() {
       tester,
     ) async {
       await pumpPill(tester);
+      // The pill carries the official Herdr logo.
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('toolbar-herdr')),
+          matching: find.byKey(const ValueKey('multiplexer-icon-herdr')),
+        ),
+        findsOneWidget,
+      );
       await tapPillButton(tester);
 
       for (final key in [
@@ -276,7 +284,7 @@ void main() {
       expect(
         find.descendant(
           of: find.byKey(const ValueKey('toolbar-herdr')),
-          matching: find.byIcon(tmuxPlaceholderIcon),
+          matching: find.byKey(const ValueKey('multiplexer-icon-tmux')),
         ),
         findsOneWidget,
       );
