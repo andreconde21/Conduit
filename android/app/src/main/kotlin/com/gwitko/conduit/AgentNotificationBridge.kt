@@ -29,11 +29,19 @@ import org.json.JSONObject
  *   with Allow / Deny / Always actions for one pending permission request.
  * - `cancel(id)`: dismiss.
  * - `consumePermissionActions()` -> `List<Map>`: queued action taps, cleared.
+ * - `consumeOpenAgent()` -> `Map?`: the agent a tapped notification points
+ *   at (`hostId`, `agentId`, `workspaceId`, `tabId`, `paneId`), cleared.
+ *
+ * `show` and `showPermissionRequest` take the same optional `open*`
+ * arguments; tapping the notification body then opens the app at that
+ * agent (its Herdr workspace, tab and pane).
  *
  * Native -> Dart:
  * - `permissionActionAvailable()` -> `bool`: an action was tapped while the
  *   engine runs; Dart answers whether it is completing it now (false while
  *   the app is locked or not yet listening).
+ * - `openAgentAvailable()`: a notification body was tapped while the engine
+ *   runs; Dart calls `consumeOpenAgent`.
  *
  * Action taps go through [AgentPermissionActionReceiver], which queues the
  * tap durably and pings Dart when the engine is alive. When the engine goes
@@ -74,6 +82,9 @@ class AgentNotificationBridge : FlutterPlugin, ActivityAware, PluginRegistry.New
         activityPluginBinding.addOnNewIntentListener(this)
         // A cold start from a re-posted action: queue it for Dart.
         stashLaunchAction(activityPluginBinding.activity.intent)
+        // A cold start from a notification body tap: Dart consumes it once
+        // its listener mounts (after the app lock).
+        stashOpenAgent(activityPluginBinding.activity.intent)
     }
 
     override fun onDetachedFromActivityForConfigChanges() = onDetachedFromActivity()
@@ -89,8 +100,19 @@ class AgentNotificationBridge : FlutterPlugin, ActivityAware, PluginRegistry.New
     }
 
     override fun onNewIntent(intent: Intent): Boolean {
+        if (stashOpenAgent(intent)) {
+            channel?.invokeMethod("openAgentAvailable", null)
+        }
         if (!stashLaunchAction(intent)) return false
         channel?.invokeMethod("permissionActionAvailable", null)
+        return true
+    }
+
+    /** Remembers the agent a notification body tap points at, if any. */
+    private fun stashOpenAgent(intent: Intent?): Boolean {
+        val target = AgentNotificationStore.openTargetFromIntent(intent) ?: return false
+        pendingOpen = target
+        for (key in AgentNotificationStore.OPEN_EXTRAS) intent?.removeExtra(key)
         return true
     }
 
@@ -147,8 +169,14 @@ class AgentNotificationBridge : FlutterPlugin, ActivityAware, PluginRegistry.New
                     call.argument<String>("id") ?: "",
                     call.argument<String>("title") ?: "",
                     call.argument<String>("body") ?: "",
+                    AgentNotificationStore.OpenTarget.fromCall(call),
                 )
                 result.success(null)
+            }
+            "consumeOpenAgent" -> {
+                val target = pendingOpen
+                pendingOpen = null
+                result.success(target?.toMap())
             }
             "showPermissionRequest" -> {
                 val request = AgentNotificationStore.PermissionNotification(
@@ -157,6 +185,7 @@ class AgentNotificationBridge : FlutterPlugin, ActivityAware, PluginRegistry.New
                     body = call.argument<String>("body") ?: "",
                     hostId = call.argument<String>("hostId") ?: "",
                     requestId = call.argument<String>("requestId") ?: "",
+                    open = AgentNotificationStore.OpenTarget.fromCall(call),
                 )
                 AgentNotificationStore.showPermissionRequest(ctx, request, launchApp = false)
                 result.success(null)
@@ -177,6 +206,10 @@ class AgentNotificationBridge : FlutterPlugin, ActivityAware, PluginRegistry.New
         @Volatile
         var active: AgentNotificationBridge? = null
             private set
+
+        /** The last tapped notification's agent, until Dart consumes it. */
+        @Volatile
+        private var pendingOpen: AgentNotificationStore.OpenTarget? = null
     }
 }
 
@@ -199,12 +232,67 @@ class AgentPermissionActionReceiver : BroadcastReceiver() {
 
 /** Notification building plus the durable queue of tapped actions. */
 object AgentNotificationStore {
+    /** Where a notification body tap should take the app. */
+    data class OpenTarget(
+        val hostId: String,
+        val agentId: String,
+        val workspaceId: String,
+        val tabId: String,
+        val paneId: String,
+    ) {
+        fun toMap(): Map<String, String> = mapOf(
+            "hostId" to hostId,
+            "agentId" to agentId,
+            "workspaceId" to workspaceId,
+            "tabId" to tabId,
+            "paneId" to paneId,
+        )
+
+        fun toJson(): JSONObject = JSONObject(toMap())
+
+        fun putInto(intent: Intent) {
+            intent.putExtra(EXTRA_OPEN_HOST_ID, hostId)
+            intent.putExtra(EXTRA_OPEN_AGENT_ID, agentId)
+            intent.putExtra(EXTRA_OPEN_WORKSPACE_ID, workspaceId)
+            intent.putExtra(EXTRA_OPEN_TAB_ID, tabId)
+            intent.putExtra(EXTRA_OPEN_PANE_ID, paneId)
+        }
+
+        companion object {
+            fun fromCall(call: MethodCall): OpenTarget? {
+                val hostId = call.argument<String>("openHostId")
+                if (hostId.isNullOrEmpty()) return null
+                return OpenTarget(
+                    hostId = hostId,
+                    agentId = call.argument<String>("openAgentId") ?: "",
+                    workspaceId = call.argument<String>("openWorkspaceId") ?: "",
+                    tabId = call.argument<String>("openTabId") ?: "",
+                    paneId = call.argument<String>("openPaneId") ?: "",
+                )
+            }
+
+            fun fromJson(json: JSONObject?): OpenTarget? {
+                if (json == null) return null
+                val hostId = json.optString("hostId")
+                if (hostId.isEmpty()) return null
+                return OpenTarget(
+                    hostId = hostId,
+                    agentId = json.optString("agentId"),
+                    workspaceId = json.optString("workspaceId"),
+                    tabId = json.optString("tabId"),
+                    paneId = json.optString("paneId"),
+                )
+            }
+        }
+    }
+
     data class PermissionNotification(
         val id: String,
         val title: String,
         val body: String,
         val hostId: String,
         val requestId: String,
+        val open: OpenTarget? = null,
     ) {
         fun toJson(): JSONObject = JSONObject()
             .put("id", id)
@@ -212,6 +300,7 @@ object AgentNotificationStore {
             .put("body", body)
             .put("hostId", hostId)
             .put("requestId", requestId)
+            .apply { open?.let { put("open", it.toJson()) } }
 
         companion object {
             fun fromJson(json: JSONObject) = PermissionNotification(
@@ -220,6 +309,7 @@ object AgentNotificationStore {
                 body = json.optString("body"),
                 hostId = json.optString("hostId"),
                 requestId = json.optString("requestId"),
+                open = OpenTarget.fromJson(json.optJSONObject("open")),
             )
         }
     }
@@ -248,6 +338,15 @@ object AgentNotificationStore {
     const val EXTRA_BODY = "com.gwitko.conduit.BODY"
     val ACTION_EXTRAS = listOf(
         EXTRA_NOTIFICATION_ID, EXTRA_HOST_ID, EXTRA_REQUEST_ID, EXTRA_VERDICT, EXTRA_TITLE, EXTRA_BODY,
+    )
+    const val EXTRA_OPEN_HOST_ID = "com.gwitko.conduit.OPEN_HOST_ID"
+    const val EXTRA_OPEN_AGENT_ID = "com.gwitko.conduit.OPEN_AGENT_ID"
+    const val EXTRA_OPEN_WORKSPACE_ID = "com.gwitko.conduit.OPEN_WORKSPACE_ID"
+    const val EXTRA_OPEN_TAB_ID = "com.gwitko.conduit.OPEN_TAB_ID"
+    const val EXTRA_OPEN_PANE_ID = "com.gwitko.conduit.OPEN_PANE_ID"
+    val OPEN_EXTRAS = listOf(
+        EXTRA_OPEN_HOST_ID, EXTRA_OPEN_AGENT_ID, EXTRA_OPEN_WORKSPACE_ID, EXTRA_OPEN_TAB_ID,
+        EXTRA_OPEN_PANE_ID,
     )
     val VERDICTS = listOf("allow" to "Allow", "deny" to "Deny", "always" to "Always")
 
@@ -314,14 +413,36 @@ object AgentNotificationStore {
         )
     }
 
-    fun showPlain(context: Context, id: String, title: String, body: String) {
+    /**
+     * The body tap: opens the app, at [open]'s agent when given. Each
+     * notification gets its own request code so their extras never merge.
+     */
+    private fun contentIntent(context: Context, id: String, open: OpenTarget?): PendingIntent {
+        if (open == null) return launchIntent(context, 0)
+        return launchIntent(context, ("open:" + id).hashCode()) { open.putInto(this) }
+    }
+
+    fun openTargetFromIntent(intent: Intent?): OpenTarget? {
+        if (intent == null) return null
+        val hostId = intent.getStringExtra(EXTRA_OPEN_HOST_ID)
+        if (hostId.isNullOrEmpty()) return null
+        return OpenTarget(
+            hostId = hostId,
+            agentId = intent.getStringExtra(EXTRA_OPEN_AGENT_ID) ?: "",
+            workspaceId = intent.getStringExtra(EXTRA_OPEN_WORKSPACE_ID) ?: "",
+            tabId = intent.getStringExtra(EXTRA_OPEN_TAB_ID) ?: "",
+            paneId = intent.getStringExtra(EXTRA_OPEN_PANE_ID) ?: "",
+        )
+    }
+
+    fun showPlain(context: Context, id: String, title: String, body: String, open: OpenTarget? = null) {
         val manager = manager(context) ?: return
         val notification = builder(context)
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(Notification.BigTextStyle().bigText(body))
             .lockScreenSafe(context, title)
-            .setContentIntent(launchIntent(context, 0))
+            .setContentIntent(contentIntent(context, id, open))
             .setAutoCancel(true)
             .build()
         // A stable per-agent id: a new state for the same agent replaces the
@@ -342,7 +463,7 @@ object AgentNotificationStore {
             .setContentText(request.body)
             .setStyle(Notification.BigTextStyle().bigText(request.body))
             .lockScreenSafe(context, request.title)
-            .setContentIntent(launchIntent(context, 0))
+            .setContentIntent(contentIntent(context, request.id, request.open))
             .setAutoCancel(false)
             .setOnlyAlertOnce(true)
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
