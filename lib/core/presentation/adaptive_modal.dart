@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:conduit/core/platform_features.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 /// How a modal reads on a desktop (or a window at least
@@ -35,6 +36,47 @@ enum AdaptiveModalPresentation {
 /// landscape, a resizable Android window) gets the desktop presentation.
 const adaptiveModalDesktopWidth = 900.0;
 
+/// A DraggableScrollableSheet child size: [phone] on phones, the whole
+/// modal on desktop (where there is nothing to drag).
+double adaptiveSheetFraction(BuildContext context, double phone) =>
+    useDesktopModals(context) ? 1.0 : phone;
+
+/// Remembers where the last pointer went down, so a menu opened by a click
+/// or long-press anchors there without every caller passing a position.
+/// [install] runs from main(); [showAdaptiveModal] also installs it.
+abstract final class AdaptiveModalPointer {
+  static Offset? _position;
+  static DateTime _at = DateTime.fromMillisecondsSinceEpoch(0);
+  static bool _installed = false;
+
+  /// How long a pointer-down stays the anchor of the next menu.
+  static const freshness = Duration(seconds: 2);
+
+  static void install() {
+    if (_installed) return;
+    _installed = true;
+    GestureBinding.instance.pointerRouter.addGlobalRoute(_route);
+  }
+
+  static void _route(PointerEvent event) {
+    if (event is PointerDownEvent) {
+      _position = event.position;
+      _at = DateTime.now();
+    }
+  }
+
+  /// The last pointer-down position if it is recent, else null (a menu
+  /// opened from the keyboard opens centred).
+  static Offset? get recent =>
+      DateTime.now().difference(_at) <= freshness ? _position : null;
+
+  @visibleForTesting
+  static void reset() {
+    _position = null;
+    _at = DateTime.fromMillisecondsSinceEpoch(0);
+  }
+}
+
 /// Whether modals under [context] use the desktop presentations.
 bool useDesktopModals(BuildContext context) =>
     PlatformFeatures.isDesktop ||
@@ -64,7 +106,8 @@ AdaptiveModalPresentation adaptiveModalPresentation(
 /// Desktop-only arguments:
 /// * [anchorContext] / [anchorPosition]: where a [AdaptiveModalKind.menu]
 ///   popover opens (the button that opened it, or the pointer's global
-///   position). Without either, it opens centred.
+///   position). Without either it opens at the last click or long-press
+///   ([AdaptiveModalPointer]), and centred when there was none.
 /// * [desktopMaxWidth]: the width cap of dialogs and palettes (default 640;
 ///   menus 320, side panels 440).
 /// * [desktopFill]: the content needs a bounded height (an Expanded list, a
@@ -98,6 +141,7 @@ Future<T?> showAdaptiveModal<T>({
   Offset? anchorPoint,
   AnimationStyle? sheetAnimationStyle,
 }) {
+  AdaptiveModalPointer.install();
   final presentation = adaptiveModalPresentation(context, kind);
   if (presentation == AdaptiveModalPresentation.bottomSheet) {
     return showModalBottomSheet<T>(
@@ -131,7 +175,11 @@ Future<T?> showAdaptiveModal<T>({
       theme.bottomSheetTheme.backgroundColor ??
       theme.colorScheme.surfaceContainerHigh;
   final anchor = presentation == AdaptiveModalPresentation.popover
-      ? _anchorRect(anchorContext, anchorPosition)
+      ? _anchorRect(
+          anchorContext,
+          anchorPosition ??
+              (anchorContext == null ? AdaptiveModalPointer.recent : null),
+        )
       : null;
 
   return showGeneralDialog<T>(

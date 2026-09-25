@@ -1,3 +1,4 @@
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/features/diff_view/domain/git_diff_source.dart';
 import 'package:conduit/features/diff_view/domain/git_status.dart';
@@ -107,7 +108,8 @@ class _DiffViewState extends State<DiffView> {
             .where((entry) => entry.kind == GitStatusEntryKind.untracked)
             .toList() ??
         const <GitStatusEntry>[];
-    await showModalBottomSheet<void>(
+    await showAdaptiveModal<void>(
+      kind: AdaptiveModalKind.dialog,
       context: context,
       backgroundColor: palette.panelElevatedFor(brightness),
       showDragHandle: true,

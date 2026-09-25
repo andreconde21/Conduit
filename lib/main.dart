@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:conduit/core/diagnostics/app_error_log.dart';
 import 'package:conduit/core/platform_features.dart';
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/secure_storage.dart';
@@ -77,6 +78,7 @@ void main() {
   // A release build otherwise shows a blank page for a widget that failed
   // to build: keep the errors, and show them with a way to copy them.
   AppErrorLog.instance.install();
+  AdaptiveModalPointer.install();
   registerLocalShellLicenses();
   registerThemeLicenses();
   registerMultiplexerLogoLicenses();

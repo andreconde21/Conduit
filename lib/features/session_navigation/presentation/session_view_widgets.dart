@@ -1,3 +1,4 @@
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/session_navigation/domain/session_view_preferences.dart';
 import 'package:conduit/features/session_navigation/presentation/session_view_controller.dart';
@@ -23,7 +24,8 @@ Future<void> showSessionViewPicker(
   required String title,
 }) async {
   final current = controller.overrideFor(sessionHostId);
-  final picked = await showModalBottomSheet<_Choice>(
+  final picked = await showAdaptiveModal<_Choice>(
+    kind: AdaptiveModalKind.menu,
     context: context,
     useSafeArea: true,
     builder: (context) {

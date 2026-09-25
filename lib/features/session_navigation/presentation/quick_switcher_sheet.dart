@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_palette.dart';
@@ -66,7 +67,8 @@ Future<QuickSwitcherChoice?> showQuickSwitcher(
   Duration previewRefreshInterval = const Duration(seconds: 2),
 }) {
   final reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
-  return showModalBottomSheet<QuickSwitcherChoice>(
+  return showAdaptiveModal<QuickSwitcherChoice>(
+    kind: AdaptiveModalKind.palette,
     context: context,
     isScrollControlled: true,
     useSafeArea: true,

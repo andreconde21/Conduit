@@ -1,3 +1,4 @@
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/hosts/domain/multiplexer_prefix_key.dart';
@@ -52,7 +53,8 @@ Future<MultiplexerPrefixKey?> showMultiplexerPrefixPicker({
   required BuildContext context,
   required MultiplexerPrefixKey initial,
 }) {
-  return showModalBottomSheet<MultiplexerPrefixKey>(
+  return showAdaptiveModal<MultiplexerPrefixKey>(
+    kind: AdaptiveModalKind.dialog,
     context: context,
     isScrollControlled: true,
     useSafeArea: true,

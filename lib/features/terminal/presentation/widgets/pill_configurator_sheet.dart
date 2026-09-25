@@ -1,3 +1,4 @@
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/terminal_pill_items.dart';
@@ -13,7 +14,8 @@ Future<List<TerminalPillItem>?> showPillConfigurator({
   required List<TerminalPillItem> items,
   required List<TerminalKeyboardItem> customKeys,
 }) {
-  return showModalBottomSheet<List<TerminalPillItem>>(
+  return showAdaptiveModal<List<TerminalPillItem>>(
+    kind: AdaptiveModalKind.dialog,
     context: context,
     isScrollControlled: true,
     useSafeArea: true,

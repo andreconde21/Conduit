@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
@@ -201,7 +202,8 @@ class SessionConnectFlow {
   Future<TerminalSessionController?> pickHostAndConnect(
     BuildContext context,
   ) async {
-    final host = await showModalBottomSheet<SavedHost>(
+    final host = await showAdaptiveModal<SavedHost>(
+      kind: AdaptiveModalKind.dialog,
       context: context,
       useSafeArea: true,
       builder: (context) => AnnotatedRegion<SystemUiOverlayStyle>(

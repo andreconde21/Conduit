@@ -1,10 +1,12 @@
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/features/terminal/presentation/desktop_shortcuts.dart';
 import 'package:flutter/material.dart';
 
 /// The "Keyboard shortcuts" help sheet (Ctrl+Shift+/ or Cmd+/, and the
 /// terminal menu), listing the running OS's keys.
 Future<void> showDesktopShortcutsSheet(BuildContext context) {
-  return showModalBottomSheet<void>(
+  return showAdaptiveModal<void>(
+    kind: AdaptiveModalKind.dialog,
     context: context,
     useSafeArea: true,
     isScrollControlled: true,

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/features/share_target/presentation/share_target_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
@@ -100,7 +101,8 @@ class _ShareTargetHostState extends State<ShareTargetHost> {
   Future<void> _pickSession() async {
     _pickerOpen = true;
     try {
-      final session = await showModalBottomSheet<TerminalSessionController>(
+      final session = await showAdaptiveModal<TerminalSessionController>(
+        kind: AdaptiveModalKind.dialog,
         context: context,
         useSafeArea: true,
         builder: (context) => _SessionPickerSheet(

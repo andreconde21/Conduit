@@ -1,3 +1,4 @@
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:flutter/material.dart';
 
 enum TerminalLinkAction { openInBrowser, openInPreview, copyLink, copyText }
@@ -12,7 +13,8 @@ Future<TerminalLinkAction?> showTerminalLinkSheet(
   required String url,
   int? previewPort,
 }) {
-  return showModalBottomSheet<TerminalLinkAction>(
+  return showAdaptiveModal<TerminalLinkAction>(
+    kind: AdaptiveModalKind.menu,
     context: context,
     showDragHandle: true,
     builder: (context) {

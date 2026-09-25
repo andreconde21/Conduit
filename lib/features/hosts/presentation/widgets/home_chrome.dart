@@ -1,3 +1,4 @@
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:flutter/material.dart';
 
@@ -71,7 +72,8 @@ Future<HomeSettingsChoice?> showHomeSettingsSheet(
   BuildContext context, {
   String? machineName,
 }) {
-  return showModalBottomSheet<HomeSettingsChoice>(
+  return showAdaptiveModal<HomeSettingsChoice>(
+    kind: AdaptiveModalKind.menu,
     context: context,
     useSafeArea: true,
     builder: (context) {
