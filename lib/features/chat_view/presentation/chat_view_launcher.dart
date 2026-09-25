@@ -362,6 +362,8 @@ Future<void> openChatView({
   required AgentInfo agent,
   required VoidCallback onOpenTerminal,
   DictationController? dictation,
+  Widget Function(BuildContext routeContext)? accessoryBuilder,
+  String initialDraft = '',
 }) async {
   final (runner, :owned) = attention.runnerFor(host);
   final changes = _AgentChangeSignal(attention, host.id, agent.id);
@@ -403,6 +405,8 @@ Future<void> openChatView({
         controller: controller,
         hostName: host.name,
         dictation: dictation,
+        accessory: accessoryBuilder?.call(routeContext),
+        initialDraft: initialDraft,
         onSetUpCompanion: CompanionSetupScope.maybeOf(routeContext) == null
             ? null
             : () => showCompanionSetup(routeContext, host),
@@ -611,6 +615,7 @@ Future<void> openChatViewForHost({
   required ValueChanged<AgentInfo> onOpenTerminal,
   DictationController? dictation,
   ChatSessionLocation location = const ChatSessionLocation(),
+  Widget Function(BuildContext routeContext)? accessoryBuilder,
 }) async {
   if (attention == null) {
     await showChatViewUnavailable(context, host: host);
@@ -648,5 +653,6 @@ Future<void> openChatViewForHost({
     agent: agent,
     dictation: dictation,
     onOpenTerminal: () => onOpenTerminal(agent),
+    accessoryBuilder: accessoryBuilder,
   );
 }

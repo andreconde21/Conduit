@@ -48,7 +48,7 @@ class PreviewReadyController extends ChangeNotifier {
   final bool Function()? _canPoll;
   final Duration interval;
 
-  /// Delay between the last screen change and the next [scanScreen].
+  /// Longest delay between a screen change and the [scanScreen] after it.
   final Duration screenDebounce;
 
   Listenable? _screen;
@@ -97,8 +97,8 @@ class PreviewReadyController extends ChangeNotifier {
     }
   }
 
-  /// Follows a terminal screen: [rows] are read [screenDebounce] after
-  /// [screen] last changed, while in the foreground.
+  /// Follows a terminal screen: [rows] are read at most once per
+  /// [screenDebounce] while [screen] keeps changing, in the foreground.
   void attachScreen(Listenable screen, List<String> Function() rows) {
     _screen?.removeListener(_scheduleScreenScan);
     _screen = screen;
@@ -109,7 +109,9 @@ class PreviewReadyController extends ChangeNotifier {
 
   void _scheduleScreenScan() {
     if (!_foreground || _disposed || _screenRows == null) return;
-    _screenTimer?.cancel();
+    // A throttle, not a debounce: a build log that never pauses would
+    // otherwise never be read.
+    if (_screenTimer?.isActive ?? false) return;
     _screenTimer = Timer(screenDebounce, () {
       final rows = _screenRows;
       if (rows != null && _foreground && !_disposed) scanScreen(rows());

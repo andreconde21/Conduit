@@ -16,6 +16,7 @@ class ChatComposer extends StatefulWidget {
     this.showInterrupt = false,
     this.onExpand,
     this.dictation,
+    this.initialText = '',
     super.key,
   });
 
@@ -36,12 +37,15 @@ class ChatComposer extends StatefulWidget {
   final void Function(String text, ValueChanged<String> setDraft)? onExpand;
   final DictationController? dictation;
 
+  /// Text the field starts with (e.g. an uploaded screenshot's path).
+  final String initialText;
+
   @override
   State<ChatComposer> createState() => _ChatComposerState();
 }
 
 class _ChatComposerState extends State<ChatComposer> {
-  final _controller = TextEditingController();
+  late final _controller = TextEditingController(text: widget.initialText);
   final _focusNode = FocusNode();
 
   @override

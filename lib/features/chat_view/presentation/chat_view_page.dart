@@ -23,6 +23,8 @@ class ChatViewPage extends StatefulWidget {
     this.ownsController = true,
     this.onSetUpCompanion,
     this.onEnableMonitoring,
+    this.accessory,
+    this.initialDraft = '',
     super.key,
   });
 
@@ -44,6 +46,12 @@ class ChatViewPage extends StatefulWidget {
   /// the Agents panel and live updates need it). Non-null only while it is
   /// off; the banner offering it hides once tapped.
   final Future<void> Function()? onEnableMonitoring;
+
+  /// A small widget pinned above the composer (the "Preview ready" chip).
+  final Widget? accessory;
+
+  /// What the composer starts with.
+  final String initialDraft;
 
   @override
   State<ChatViewPage> createState() => _ChatViewPageState();
@@ -258,7 +266,16 @@ class _ChatViewPageState extends State<ChatViewPage>
                     ],
                   ),
                 Expanded(child: _buildThread(context)),
+                if (widget.accessory case final accessory?)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                      child: accessory,
+                    ),
+                  ),
                 ChatComposer(
+                  initialText: widget.initialDraft,
                   enabled: _chat.canSend,
                   disabledHint: _chat.unsupported != null
                       ? 'Chat unavailable'
