@@ -6,12 +6,15 @@ import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/data/ssh_agent_command_runner.dart';
+import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
+import 'package:conduit/features/chat_view/presentation/chat_view_launcher.dart';
 import 'package:conduit/features/diff_view/data/ssh_git_diff_source.dart';
 import 'package:conduit/features/diff_view/presentation/diff_view.dart';
 import 'package:conduit/features/diff_view/presentation/diff_view_controller.dart';
 import 'package:conduit/features/diff_view/presentation/diff_view_tab.dart';
+import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/live_preview/data/secure_live_preview_port_store.dart';
 import 'package:conduit/features/live_preview/data/ssh_port_forwarder.dart';
 import 'package:conduit/features/live_preview/domain/live_preview_port_store.dart';
@@ -82,6 +85,7 @@ class TerminalPage extends StatefulWidget {
 
   /// Remembers the last previewed port per host.
   final LivePreviewPortStore livePreviewPortStore;
+
   /// Optional connect flow for the session grid's "+" tile.
   final SessionConnectFlow? connectFlow;
 
@@ -330,10 +334,45 @@ class _TerminalPageState extends State<TerminalPage> {
         Navigator.of(context).pop();
         _focusNode.requestFocus();
       },
+      onOpenChat: (host, agent) {
+        Navigator.of(context).pop();
+        if (!chatViewAvailable(attention, host)) {
+          // Herdr-only machines have no transcript or prompt relay.
+          unawaited(
+            showChatViewUnavailable(context, attention: attention, host: host),
+          );
+          return;
+        }
+        unawaited(
+          openChatView(
+            context: context,
+            attention: attention,
+            host: host,
+            agent: agent,
+            dictation: _dictation,
+            onOpenTerminal: () => _showAgentTerminal(attention, host, agent),
+          ),
+        );
+      },
     );
     if (mounted) {
       _focusNode.requestFocus();
     }
+  }
+
+  /// After the chat view: show the agent's session and focus its pane.
+  void _showAgentTerminal(
+    AgentAttentionController attention,
+    SavedHost host,
+    AgentInfo agent,
+  ) {
+    if (!mounted) return;
+    final session = widget.workspace.sessions
+        .where((session) => session.host.id == host.id)
+        .firstOrNull;
+    if (session != null) widget.workspace.activate(session);
+    unawaited(attention.focusAgent(host.id, agent));
+    _showTerminal();
   }
 
   Future<void> _openSessionGrid() async {
@@ -559,6 +598,23 @@ class _TerminalPageState extends State<TerminalPage> {
                             onNewSession: connectFlow == null
                                 ? null
                                 : () => _openNewSession(connectFlow),
+                            onOpenChatView:
+                                attention == null ||
+                                    activeSession == null ||
+                                    activeSession.host.isLocal
+                                ? null
+                                : () => openChatViewForHost(
+                                    context: context,
+                                    attention: attention,
+                                    host: activeSession.host,
+                                    dictation: _dictation,
+                                    onOpenTerminal: (agent) =>
+                                        _showAgentTerminal(
+                                          attention,
+                                          activeSession.host,
+                                          agent,
+                                        ),
+                                  ),
                             attentionCount: attention?.attentionCount ?? 0,
                             onOpenAgentAttention: showAgents
                                 ? () => _openAgentAttention(attention)
