@@ -1,0 +1,11 @@
+#!/usr/bin/env node
+'use strict'
+// Conductore host companion: daemon + CLI. See ../README.md.
+const { main } = require('../lib/cli')
+main(process.argv.slice(2)).then(code => {
+  if (code === null) return // daemon keeps running
+  process.exitCode = code
+}, err => {
+  process.stdout.write(JSON.stringify({ error: err.message }) + '\n')
+  process.exitCode = 1
+})

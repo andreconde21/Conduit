@@ -87,6 +87,7 @@ class ChatViewController extends ChangeNotifier {
   bool _sending = false;
   String? _error;
   String? _unsupported;
+  ChatUnsupportedKind? _unsupportedKind;
   ChatAgentStatus? _agent;
   final Set<String> _deciding = {};
 
@@ -107,6 +108,9 @@ class ChatViewController extends ChangeNotifier {
 
   /// Set when the companion is missing or too old; polling has stopped.
   String? get unsupported => _unsupported;
+
+  /// Whether [unsupported] means missing or outdated.
+  ChatUnsupportedKind? get unsupportedKind => _unsupportedKind;
 
   /// Whether older lines exist before the loaded window.
   bool get hasOlder => _start > 0 && !_olderExhausted;
@@ -249,6 +253,7 @@ class ChatViewController extends ChangeNotifier {
       }
     } on ChatUnsupported catch (error) {
       _unsupported = error.message;
+      _unsupportedKind = error.kind;
       _loading = false;
       _timer?.cancel();
       _timer = null;

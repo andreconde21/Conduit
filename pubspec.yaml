@@ -68,6 +68,11 @@ flutter:
   assets:
     - third_party/licenses/
     - third_party/notices/
+    # Host companion, uploaded by the Agent hooks screen. Refresh with
+    # tools/bundle-companion.sh whenever host/ changes.
+    - assets/companion/
+    - assets/companion/bin/
+    - assets/companion/lib/
   fonts:
     - family: AtkynsonMonoNerdFontMono
       fonts:

@@ -1,3 +1,7 @@
+import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
+import 'package:conduit/features/companion_setup/data/companion_bundle.dart';
+import 'package:conduit/features/companion_setup/presentation/companion_setup_controller.dart';
+import 'package:conduit/features/companion_setup/presentation/companion_setup_page.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/host_form_page.dart';
 import 'package:flutter/material.dart';
@@ -44,8 +48,8 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('the form offers the agent monitor choice and hides the '
-      'companion check without a doctor', (tester) async {
+  testWidgets('the form offers the agent monitor choice and hides Agent '
+      'hooks without a companion setup scope', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
         home: HostFormPage(
@@ -59,46 +63,29 @@ void main() {
     expect(find.text('Agent monitor'), findsOneWidget);
     expect(find.text('Auto'), findsOneWidget);
     expect(find.text('Set up companion'), findsNothing);
+    expect(find.textContaining('Agent hooks'), findsNothing);
   });
 
-  testWidgets('Set up companion runs doctor on the draft and shows the '
-      'report', (tester) async {
-    SavedHost? probed;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: HostFormPage(
-          host: buildHost('h'),
-          companionDoctor: (draft) async {
-            probed = draft;
-            return 'conductore-hostd doctor: OK\n\nhooks: installed';
-          },
-        ),
-      ),
-    );
-    await revealAgentSection(tester);
-    await scrollTo(tester, find.text('Set up companion'));
-    await tester.tap(find.text('Set up companion'));
-    await tester.pumpAndSettle();
-
-    expect(probed?.host, '192.168.1.1');
-    expect(probed?.agentAttentionEnabled, isTrue);
-    expect(find.text('Companion check'), findsOneWidget);
-    expect(find.textContaining('hooks: installed'), findsOneWidget);
-  });
+  // The Agent hooks row that replaced "Set up companion" is covered in
+  // test/features/companion_setup/companion_setup_page_test.dart.
 
   testWidgets('the notification level picker writes both notify flags', (
     tester,
   ) async {
-    SavedHost? probed;
+    final controller = CompanionSetupController(
+      runnerFactory: (_) {
+        return ScriptedAgentCommandRunner([
+          const AgentCommandResult(stdout: '', stderr: '', exitCode: 127),
+        ]);
+      },
+      sftpRepository: NoNetworkSftpRepository(),
+      loadBundle: () async => const CompanionBundle(version: '0', files: {}),
+    );
+    addTearDown(controller.dispose);
     await tester.pumpWidget(
-      MaterialApp(
-        home: HostFormPage(
-          host: buildHost('h'),
-          companionDoctor: (draft) async {
-            probed = draft;
-            return 'ok';
-          },
-        ),
+      CompanionSetupScope(
+        controller: controller,
+        child: MaterialApp(home: HostFormPage(host: buildHost('h'))),
       ),
     );
     await revealAgentSection(tester);
@@ -112,11 +99,16 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('update the inbox quietly'), findsOneWidget);
 
-    await scrollTo(tester, find.text('Set up companion'));
-    await tester.tap(find.text('Set up companion'));
+    final tile = find.byKey(const ValueKey('companion-setup-tile'));
+    await scrollTo(tester, tile);
+    await tester.tap(tile);
     await tester.pumpAndSettle();
-    expect(probed?.agentNotifyLevel, AgentNotifyLevel.approvalsAndErrors);
-    expect(probed?.agentNotifyInput, isTrue);
-    expect(probed?.agentNotifyFinished, isFalse);
+    // The Agent hooks row opens its screen with the draft as edited.
+    final probed = tester
+        .widget<CompanionSetupPage>(find.byType(CompanionSetupPage))
+        .host;
+    expect(probed.agentNotifyLevel, AgentNotifyLevel.approvalsAndErrors);
+    expect(probed.agentNotifyInput, isTrue);
+    expect(probed.agentNotifyFinished, isFalse);
   });
 }

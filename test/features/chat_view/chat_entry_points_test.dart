@@ -5,6 +5,9 @@ import 'package:conduit/features/agent_attention/domain/agent_command_runner.dar
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_launcher.dart';
+import 'package:conduit/features/companion_setup/data/companion_bundle.dart';
+import 'package:conduit/features/companion_setup/presentation/companion_setup_controller.dart';
+import 'package:conduit/features/companion_setup/presentation/companion_setup_page.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_header.dart';
@@ -162,6 +165,46 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Chat view needs the companion'), findsOneWidget);
     expect(find.textContaining('host/install.sh'), findsOneWidget);
+  });
+
+  testWidgets('the companion dialog opens Agent hooks when the app has it', (
+    tester,
+  ) async {
+    final host = buildHost('plain');
+    final companion = CompanionSetupController(
+      runnerFactory: (_) => ScriptedAgentCommandRunner([
+        const AgentCommandResult(stdout: '', stderr: '', exitCode: 127),
+      ]),
+      sftpRepository: NoNetworkSftpRepository(),
+      loadBundle: () async => const CompanionBundle(version: '0', files: {}),
+    );
+    addTearDown(companion.dispose);
+    await tester.pumpWidget(
+      CompanionSetupScope(
+        controller: companion,
+        child: MaterialApp(
+          home: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => openChatViewForHost(
+                context: context,
+                attention: null,
+                host: host,
+                onOpenTerminal: (_) {},
+              ),
+              child: const Text('go'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('go'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey('chat-unavailable-agent-hooks')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(CompanionSetupPage), findsOneWidget);
+    expect(find.text('Not installed'), findsOneWidget);
   });
 
   testWidgets('picking a session skips ended ones and opens the only one', (

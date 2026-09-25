@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
+import 'package:conduit/features/companion_setup/presentation/companion_status_chip.dart';
 import 'package:conduit/features/hosts/data/dartssh2_ssh_key_service.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/domain/ssh_key.dart';
@@ -18,25 +19,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
 
-/// Runs the Conductore companion's `doctor` on [draft] and returns its
-/// report text (throws on connection problems).
-typedef CompanionDoctor = Future<String> Function(SavedHost draft);
-
 class HostFormPage extends StatefulWidget {
   const HostFormPage({
     this.host,
     this.themeController,
     this.keyService = const Dartssh2SshKeyService(),
-    this.companionDoctor,
     super.key,
   });
 
   final SavedHost? host;
   final ThemeController? themeController;
   final SshKeyService keyService;
-
-  /// Backs the "Set up companion" button; null hides it.
-  final CompanionDoctor? companionDoctor;
 
   @override
   State<HostFormPage> createState() => _HostFormPageState();
@@ -69,7 +62,6 @@ class _HostFormPageState extends State<HostFormPage> {
   bool _agentNotifyInput = true;
   bool _agentNotifyFinished = true;
   AgentMonitorKind _agentMonitor = AgentMonitorKind.auto;
-  bool _checkingCompanion = false;
   bool _predictiveEchoEnabled = false;
   bool _externalAuthOfferKey = true;
   bool _forwardAgent = false;
@@ -345,10 +337,10 @@ class _HostFormPageState extends State<HostFormPage> {
                   setState(() => _agentNotifyFinished = value),
               onAgentMonitorChanged: (value) =>
                   setState(() => _agentMonitor = value),
-              onCheckCompanion:
-                  widget.companionDoctor == null || _checkingCompanion
-                  ? null
-                  : _checkCompanion,
+              companionSetup: CompanionSetupTile(
+                host: widget.host,
+                resolveHost: _validatedHost,
+              ),
               onSnippetsChanged: (snippets) => setState(() {
                 _snippets = snippets;
                 if (!_snippets.any(
@@ -774,47 +766,6 @@ class _HostFormPageState extends State<HostFormPage> {
     final savedHost = _validatedHost();
     if (savedHost == null) return;
     Navigator.of(context).pop(savedHost);
-  }
-
-  /// "Set up companion": runs `conductore-hostd doctor` on the machine as
-  /// the form currently describes it and shows the report. Installing the
-  /// companion itself is done on the machine (see the report's advice).
-  Future<void> _checkCompanion() async {
-    final doctor = widget.companionDoctor;
-    final draft = _validatedHost();
-    if (doctor == null || draft == null) return;
-    setState(() => _checkingCompanion = true);
-    String report;
-    var failed = false;
-    try {
-      report = await doctor(draft);
-    } catch (error) {
-      failed = true;
-      report = error.toString();
-    } finally {
-      if (mounted) {
-        setState(() => _checkingCompanion = false);
-      }
-    }
-    if (!mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(failed ? 'Companion check failed' : 'Companion check'),
-        content: SingleChildScrollView(
-          child: SelectableText(
-            report.trim().isEmpty ? '(no output)' : report.trim(),
-            style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
   }
 
   String? _required(String? value) {
