@@ -1,6 +1,7 @@
 import 'package:conduit/features/hosts/domain/multiplexer_prefix_key.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/terminal/domain/herdr_keymap.dart';
+import 'package:conduit/features/terminal/domain/herdr_remote_control.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:flutter/material.dart';
 
@@ -230,6 +231,21 @@ enum HerdrShortcut {
     for (final shortcut in values)
       if (shortcut.group == group) shortcut,
   ];
+}
+
+/// How the navigator's "new" row and the pill's long-press menu show a
+/// [HerdrNewPane], and the key binding used when the CLI cannot do it.
+extension HerdrNewPaneDetails on HerdrNewPane {
+  /// The Herdr action typed as a fallback (the machine's binding for it).
+  HerdrShortcut get shortcut => switch (this) {
+    HerdrNewPane.splitRight => HerdrShortcut.splitRight,
+    HerdrNewPane.splitDown => HerdrShortcut.splitDown,
+    HerdrNewPane.newTab => HerdrShortcut.newTab,
+    HerdrNewPane.newWorkspace => HerdrShortcut.newWorkspace,
+  };
+
+  String get label => shortcut.label;
+  IconData get icon => shortcut.icon;
 }
 
 /// Herdr keys as a machine has them bound (see [HerdrKeymap]).

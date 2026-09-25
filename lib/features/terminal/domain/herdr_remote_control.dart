@@ -11,6 +11,53 @@ import 'package:conduit/features/terminal/domain/herdr_keymap.dart';
 /// A neighbour direction for `herdr pane focus --direction`.
 enum HerdrDirection { left, right, up, down }
 
+/// The one-tap ways to open a new shell in Herdr, each in the focused
+/// pane's working directory.
+enum HerdrNewPane {
+  /// `herdr pane split <focused> --direction right`.
+  splitRight,
+
+  /// `herdr pane split <focused> --direction down`.
+  splitDown,
+
+  /// `herdr tab create --workspace <focused workspace>`.
+  newTab,
+
+  /// `herdr workspace create`.
+  newWorkspace,
+}
+
+/// The pane Herdr has focused, as `herdr pane list` reports it.
+class HerdrFocusedPane {
+  const HerdrFocusedPane({
+    required this.paneId,
+    this.workspaceId = '',
+    this.tabId = '',
+    this.cwd = '',
+  });
+
+  final String paneId;
+  final String workspaceId;
+  final String tabId;
+
+  /// The pane's working directory; empty when Herdr did not report one.
+  final String cwd;
+
+  @override
+  bool operator ==(Object other) =>
+      other is HerdrFocusedPane &&
+      other.paneId == paneId &&
+      other.workspaceId == workspaceId &&
+      other.tabId == tabId &&
+      other.cwd == cwd;
+
+  @override
+  int get hashCode => Object.hash(paneId, workspaceId, tabId, cwd);
+
+  @override
+  String toString() => 'HerdrFocusedPane($paneId in $cwd)';
+}
+
 /// Herdr CLI commands for one Herdr server (the default session, or a named
 /// one via `--session`), wrapped for a non-interactive SSH shell.
 ///
@@ -51,6 +98,52 @@ class HerdrCommands {
 
   String paneClose(String paneId) =>
       _herdr('pane close ${shellQuoteArgument(paneId)}');
+
+  /// `herdr pane split <pane> --direction right|down --cwd <dir> --focus`.
+  /// Herdr 0.9.1 needs the pane id: without one (and outside a Herdr pane)
+  /// it answers `pane_not_found`. The new pane inherits the source pane's
+  /// directory anyway; [cwd] makes that explicit.
+  String paneSplit(String paneId, {required bool down, String cwd = ''}) =>
+      _herdr(
+        'pane split ${shellQuoteArgument(paneId)} '
+        '--direction ${down ? 'down' : 'right'}${_cwd(cwd)} --focus',
+      );
+
+  /// `herdr tab create [--workspace <id>] [--cwd <dir>] --focus`.
+  String tabCreate({String workspaceId = '', String cwd = ''}) => _herdr(
+    'tab create'
+    '${workspaceId.isEmpty ? '' : ' --workspace ${shellQuoteArgument(workspaceId)}'}'
+    '${_cwd(cwd)} --focus',
+  );
+
+  /// `herdr workspace create [--cwd <dir>] --focus`; Herdr labels it after
+  /// the directory.
+  String workspaceCreate({String cwd = ''}) =>
+      _herdr('workspace create${_cwd(cwd)} --focus');
+
+  /// The command that opens [kind] next to [focused]; null when it needs a
+  /// focused pane and there is none.
+  String? newPane(HerdrNewPane kind, HerdrFocusedPane? focused) {
+    final cwd = focused?.cwd ?? '';
+    return switch (kind) {
+      HerdrNewPane.splitRight || HerdrNewPane.splitDown =>
+        focused == null
+            ? null
+            : paneSplit(
+                focused.paneId,
+                down: kind == HerdrNewPane.splitDown,
+                cwd: cwd,
+              ),
+      HerdrNewPane.newTab => tabCreate(
+        workspaceId: focused?.workspaceId ?? '',
+        cwd: cwd,
+      ),
+      HerdrNewPane.newWorkspace => workspaceCreate(cwd: cwd),
+    };
+  }
+
+  static String _cwd(String cwd) =>
+      cwd.isEmpty ? '' : ' --cwd ${shellQuoteArgument(cwd)}';
 }
 
 /// Drives one Herdr server over a dedicated command channel (never the
@@ -230,7 +323,11 @@ class HerdrRemoteControl {
   /// `{"result": {"panes": [...]}}` envelope of Herdr 0.9, or a bare
   /// `{"panes": [...]}` object); null when none is focused or the output is
   /// not JSON.
-  static String? focusedPaneId(String raw) {
+  static String? focusedPaneId(String raw) => focusedPane(raw)?.paneId;
+
+  /// The focused pane in `herdr pane list` output, with its workspace, tab
+  /// and working directory (`cwd`, else `foreground_cwd`).
+  static HerdrFocusedPane? focusedPane(String raw) {
     Object? decoded;
     try {
       decoded = jsonDecode(raw.trim());
@@ -245,15 +342,58 @@ class HerdrRemoteControl {
     if (panes is! List) {
       return null;
     }
+    String text(Map<Object?, Object?> pane, String key) {
+      final value = pane[key];
+      return value is String ? value : '';
+    }
+
     for (final pane in panes) {
       if (pane is Map && pane['focused'] == true) {
-        final id = pane['pane_id'];
-        if (id is String && id.isNotEmpty) {
-          return id;
+        final id = text(pane, 'pane_id');
+        if (id.isEmpty) {
+          continue;
         }
+        final cwd = text(pane, 'cwd');
+        return HerdrFocusedPane(
+          paneId: id,
+          workspaceId: text(pane, 'workspace_id'),
+          tabId: text(pane, 'tab_id'),
+          cwd: cwd.isNotEmpty ? cwd : text(pane, 'foreground_cwd'),
+        );
       }
     }
     return null;
+  }
+
+  /// Opens [kind] next to the focused pane, in its directory. False when
+  /// Herdr could not (no server, an older Herdr, nothing focused to split),
+  /// so the caller can fall back to the machine's key binding.
+  Future<bool> createPane(HerdrNewPane kind) async {
+    final list = await _enqueue(commands.paneList);
+    final focused = list != null && _succeeded(list)
+        ? focusedPane(list.stdout)
+        : null;
+    final command = commands.newPane(kind, focused);
+    return command != null && await run(command);
+  }
+
+  /// [createPane] over a runner someone else owns (the navigator's).
+  static Future<bool> createPaneOn(
+    AgentCommandRunner runner,
+    HerdrNewPane kind, [
+    HerdrCommands commands = const HerdrCommands(),
+  ]) async {
+    try {
+      final list = await runner.run(commands.paneList, timeout: _timeout);
+      final focused = _succeeded(list) ? focusedPane(list.stdout) : null;
+      final command = commands.newPane(kind, focused);
+      if (command == null) {
+        return false;
+      }
+      return _succeeded(await runner.run(command, timeout: _timeout));
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<void> _dropRunner() async {

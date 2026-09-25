@@ -6,16 +6,12 @@ import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/terminal_pill_items.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
-import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
-import 'package:conduit/features/terminal/domain/herdr_keymap.dart';
-import 'package:conduit/features/terminal/domain/herdr_navigator.dart';
-import 'package:conduit/features/terminal/domain/herdr_remote_control.dart';
-import 'package:conduit/features/terminal/presentation/herdr_shortcuts.dart';
+import 'package:conduit/features/terminal/presentation/multiplexer_pill_actions.dart';
 import 'package:conduit/features/terminal/presentation/terminal_keyboard_bar.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
-import 'package:conduit/features/terminal/presentation/widgets/herdr_navigator_sheet.dart';
 import 'package:conduit/features/terminal/presentation/widgets/pill_configurator_sheet.dart';
+import 'package:conduit/features/terminal/presentation/widgets/tmux_navigator_sheet.dart';
 import 'package:conduit/features/terminal/presentation/widgets/toolbar_arrow_pad.dart';
 import 'package:conduit/features/terminal/presentation/widgets/toolbar_snippet_palette.dart';
 import 'package:conduit_vt/conduit_vt.dart';
@@ -95,7 +91,7 @@ class FloatingTerminalToolbar extends StatefulWidget {
 }
 
 class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, MultiplexerPillActions {
   bool _rowsExpanded = false;
 
   /// Set when the user hid the soft keyboard from the pill: key presses then
@@ -293,13 +289,22 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
         size: const Size(40, floatingToolbarButtonSize),
         onArrow: _sendKey,
       ),
-      TerminalPillButton.herdr => _PillButton(
+      TerminalPillButton.herdr => Builder(
         key: const ValueKey('toolbar-herdr'),
-        icon: Icons.view_quilt_rounded,
-        tooltip: 'Herdr panes and shortcuts',
-        palette: _palette,
-        brightness: _brightness,
-        onTap: _openHerdrNavigator,
+        builder: (buttonContext) {
+          final tmux = pillMultiplexer == PillMultiplexer.tmux;
+          return _PillButton(
+            icon: tmux ? tmuxPlaceholderIcon : Icons.view_quilt_rounded,
+            tooltip: tmux
+                ? 'tmux panes and actions. Long-press for a new pane'
+                : 'Herdr panes and shortcuts. Long-press for a new pane',
+            palette: _palette,
+            brightness: _brightness,
+            onTap: () => unawaited(openMultiplexerNavigator()),
+            onLongPress: () =>
+                unawaited(openMultiplexerQuickMenu(buttonContext)),
+          );
+        },
       ),
       TerminalPillButton.reconnect => _PillButton(
         key: const ValueKey('toolbar-redraw'),
@@ -412,169 +417,17 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
     }
   }
 
-  /// Why the pane list cannot be fetched for this session's host, or null
-  /// when it can.
-  String? _paneListUnavailableReason(SavedHost host) {
-    if (host.isLocal) {
-      return 'The pane list needs an SSH machine.';
-    }
-    if (widget.runnerFactory == null) {
-      return 'The pane list is not available here.';
-    }
-    if (host.authMethod == SshAuthMethod.hardwareKey) {
-      return 'The pane list is off for security-key machines: every refresh '
-          'would ask for a touch.';
-    }
-    return null;
-  }
+  // The multiplexer button (Herdr or tmux navigator, long-press "new pane"
+  // menu) lives in MultiplexerPillActions.
+  @override
+  TerminalKeyboardBar get multiplexerKeyRows => widget.keyRows;
 
-  Future<void> _openHerdrNavigator() async {
-    final host = _controller.host;
-    final reason = _paneListUnavailableReason(host);
-    final runner = reason == null ? widget.runnerFactory!(host) : null;
-    final cache = HerdrPaneListingCache.instance;
-    // A tab opened on a named Herdr session talks to that server.
-    final herdrTarget = ConnectTarget.fromSessionHostId(host.id);
-    final herdrSession = herdrTarget?.kind == ConnectTargetKind.herdr
-        ? herdrTarget!.session
-        : '';
-    try {
-      final pick = await showHerdrNavigatorSheet(
-        context: context,
-        palette: _palette,
-        brightness: _brightness,
-        hostPrefix: widget.keyRows.tmuxPrefixKey,
-        keymapHostId: baseHostId(host.id),
-        cached: cache[host.id],
-        paneListUnavailableReason: reason,
-        showCdTo: widget.keyRows.onOpenRecentDirectories != null,
-        load: runner == null
-            ? null
-            : () async {
-                // The machine's own Herdr bindings label the shortcuts
-                // (read once per app run, read-only).
-                final keymaps = HerdrKeymapCache.instance;
-                if (!keymaps.has(baseHostId(host.id))) {
-                  await keymaps.load(baseHostId(host.id), runner);
-                }
-                final listing = await HerdrNavigator.load(
-                  runner,
-                  session: herdrSession,
-                );
-                if (listing is! HerdrListingFailed) {
-                  cache[host.id] = listing;
-                }
-                return listing;
-              },
-      );
-      switch (pick) {
-        case null:
-          _focusTerminal();
-        case HerdrTabPick(:final number):
-          sendHerdrTab(
-            _controller,
-            number,
-            hostPrefix: widget.keyRows.tmuxPrefixKey,
-          );
-          _focusTerminal();
-        case HerdrShortcutPick(:final shortcut):
-          if (shortcut.confirm && !await _confirmHerdrShortcut(shortcut)) {
-            _focusTerminal();
-            return;
-          }
-          // Kill pane goes through the CLI when it can: it does not depend
-          // on the server's bindings and skips Herdr's own confirm dialog
-          // (the app just asked).
-          if (shortcut == HerdrShortcut.closePane &&
-              runner != null &&
-              await HerdrRemoteControl.closeFocusedPaneOn(
-                runner,
-                HerdrCommands(herdrSession),
-              )) {
-            _focusTerminal();
-            return;
-          }
-          _sendHerdrShortcut(shortcut);
-        case HerdrCdToPick():
-          widget.keyRows.onOpenRecentDirectories?.call();
-        case HerdrPanePick(:final entry):
-          final switched =
-              runner != null &&
-              await HerdrNavigator.focus(runner, entry, session: herdrSession);
-          if (!switched) {
-            // No CLI route (older Herdr, security-key host): let Herdr's own
-            // picker take over inside the session.
-            _sendHerdrShortcut(HerdrShortcut.gotoPicker);
-            if (mounted) {
-              ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                const SnackBar(
-                  content: Text(
-                    "Could not switch directly; opened Herdr's goto picker.",
-                  ),
-                ),
-              );
-            }
-          } else {
-            _focusTerminal();
-          }
-      }
-    } finally {
-      unawaited(runner?.close());
-    }
-  }
+  @override
+  PillCommandRunnerFactory? get multiplexerRunnerFactory =>
+      widget.runnerFactory;
 
-  Future<bool> _confirmHerdrShortcut(HerdrShortcut shortcut) async {
-    if (!mounted) {
-      return false;
-    }
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('${shortcut.label}?'),
-        content: Text(switch (shortcut) {
-          HerdrShortcut.closePane =>
-            'The focused pane and whatever runs in it will be closed.',
-          HerdrShortcut.closeTab =>
-            'The focused tab and all of its panes will be closed.',
-          _ => 'The focused workspace and everything in it will be closed.',
-        }),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            key: const ValueKey('herdr-confirm'),
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text(shortcut.label),
-          ),
-        ],
-      ),
-    );
-    return confirmed ?? false;
-  }
-
-  /// Types [shortcut] with the machine's Herdr binding for it.
-  void _sendHerdrShortcut(HerdrShortcut shortcut) {
-    final sent = sendHerdrAction(
-      _controller,
-      shortcut.action,
-      hostPrefix: widget.keyRows.tmuxPrefixKey,
-    );
-    if (!sent) {
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-        SnackBar(
-          content: Text(
-            '${shortcut.label} has no key binding in this machine\'s Herdr '
-            'config.',
-          ),
-        ),
-      );
-    } else if (shortcut.entersScrollMode) {
-      widget.keyRows.onEnterTmuxScrollMode();
-    }
-    _focusTerminal();
-  }
+  @override
+  void focusTerminalAfterMultiplexer() => _focusTerminal();
 
   void _handleSwipeEnd(DragEndDetails details) {
     final flungUp = (details.primaryVelocity ?? 0) < -600;

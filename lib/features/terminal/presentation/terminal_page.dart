@@ -806,15 +806,19 @@ class _TerminalPageState extends State<TerminalPage> {
     return herdr.controlFor(session);
   }
 
-  /// The multiplexer a session's gestures drive: the one it was opened on,
-  /// or null (the Gestures preference) for plain shells.
+  /// The multiplexer a session's gestures drive: the one it was opened on
+  /// (a host that starts tmux on connect is a tmux session too), or null
+  /// (the Gestures preference) for plain shells.
   static TerminalWindowSwitchTarget? _gestureTargetFor(
     TerminalSessionController session,
   ) {
     return switch (ConnectTarget.fromSessionHostId(session.host.id)?.kind) {
       ConnectTargetKind.herdr => TerminalWindowSwitchTarget.herdr,
       ConnectTargetKind.tmux => TerminalWindowSwitchTarget.tmux,
-      ConnectTargetKind.shell || ConnectTargetKind.directory || null => null,
+      ConnectTargetKind.shell || ConnectTargetKind.directory || null =>
+        session.host.startTmuxOnConnect
+            ? TerminalWindowSwitchTarget.tmux
+            : null,
     };
   }
 

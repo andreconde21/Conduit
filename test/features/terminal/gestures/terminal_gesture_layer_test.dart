@@ -913,12 +913,124 @@ void main() {
       });
     });
 
-    testWidgets('tmux keeps two-finger horizontal swipes inert', (
+    testWidgets('a plain shell keeps two-finger horizontal swipes inert', (
       tester,
     ) async {
       final harness = _Harness();
       addTearDown(harness.session.dispose);
       await tester.pumpWidget(harness.build());
+
+      await twoFingerSwipe(tester, const Offset(-120, 0));
+
+      expect(harness.session.log, isEmpty);
+    });
+  });
+
+  group('tmux session', () {
+    Future<_Harness> pump(
+      WidgetTester tester, {
+      TerminalGesturePreferences preferences =
+          TerminalGesturePreferences.defaults,
+      bool scrollMode = false,
+    }) async {
+      final harness = _Harness(
+        preferences: preferences,
+        target: TerminalWindowSwitchTarget.tmux,
+        scrollMode: scrollMode,
+      );
+      addTearDown(harness.session.dispose);
+      await tester.pumpWidget(harness.build());
+      return harness;
+    }
+
+    Future<void> twoFingerSwipe(WidgetTester tester, Offset by) {
+      return _twoFingerMove(
+        tester,
+        firstFrom: _center.translate(-30, 0),
+        firstTo: _center.translate(-30, 0) + by,
+        secondFrom: _center.translate(30, 0),
+        secondTo: _center.translate(30, 0) + by,
+      );
+    }
+
+    testWidgets('one-finger swipes switch windows with prefix n / p', (
+      tester,
+    ) async {
+      final harness = await pump(tester);
+
+      await _swipe(tester, _center, const Offset(-120, 4));
+      await _swipe(tester, _center, const Offset(120, -4));
+
+      expect(harness.session.log, [
+        'ctrl:keyB',
+        'text:n',
+        'ctrl:keyB',
+        'text:p',
+      ]);
+    });
+
+    testWidgets('two-finger left and right select the neighbouring pane '
+        'with prefix Right / Left', (tester) async {
+      final harness = await pump(tester);
+
+      await twoFingerSwipe(tester, const Offset(-120, 0));
+      await twoFingerSwipe(tester, const Offset(120, 4));
+
+      expect(harness.session.log, [
+        'ctrl:keyB',
+        'key:arrowRight',
+        'ctrl:keyB',
+        'key:arrowLeft',
+      ]);
+      expect(harness.fontSizes, isEmpty);
+      expect(harness.enterScrollMode, 0);
+    });
+
+    testWidgets('two-finger up and down stay scrollback in copy mode', (
+      tester,
+    ) async {
+      final harness = await pump(tester);
+
+      await twoFingerSwipe(tester, const Offset(0, 140));
+
+      expect(harness.enterScrollMode, 1);
+      expect(harness.session.log.take(2), ['ctrl:keyB', 'text:[']);
+      expect(
+        harness.session.log.skip(2).every((entry) => entry == 'key:arrowUp'),
+        isTrue,
+      );
+    });
+
+    testWidgets('pinch still changes the font size', (tester) async {
+      final harness = await pump(tester);
+
+      await _twoFingerMove(
+        tester,
+        firstFrom: _center.translate(-40, 0),
+        firstTo: _center.translate(-120, 0),
+        secondFrom: _center.translate(40, 0),
+        secondTo: _center.translate(120, 0),
+      );
+
+      expect(harness.fontSizes, isNotEmpty);
+      expect(harness.session.log, isEmpty);
+    });
+
+    testWidgets('no pane switch while in scrollback', (tester) async {
+      final harness = await pump(tester, scrollMode: true);
+
+      await twoFingerSwipe(tester, const Offset(-120, 0));
+
+      expect(harness.session.log, isEmpty);
+    });
+
+    testWidgets('follows the two-finger pane setting', (tester) async {
+      final harness = await pump(
+        tester,
+        preferences: const TerminalGesturePreferences(
+          herdrTwoFingerPanes: false,
+        ),
+      );
 
       await twoFingerSwipe(tester, const Offset(-120, 0));
 

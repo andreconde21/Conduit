@@ -125,7 +125,7 @@ class TerminalGesturesSettings extends StatelessWidget {
             title: const Text('Two-finger swipe switches pane'),
             subtitle: Text(
               'Swipe left or right with two fingers to focus the pane on the '
-              'right or left.',
+              'right or left. Also in tmux sessions.',
               style: captionStyle,
             ),
             value: preferences.herdrTwoFingerPanes,
