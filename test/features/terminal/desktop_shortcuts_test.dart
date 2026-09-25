@@ -278,6 +278,7 @@ void main() {
     );
     expect(find.text('Ctrl+Shift+T'), findsOneWidget);
     expect(find.text('Alt+1…9'), findsOneWidget);
+    expect(find.text('Ctrl+PgUp / Ctrl+PgDn'), findsOneWidget);
   }, variant: _desktops);
 
   testWidgets(
