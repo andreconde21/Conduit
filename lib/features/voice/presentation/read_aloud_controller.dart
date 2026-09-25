@@ -10,27 +10,30 @@ import 'package:conduit/features/voice/domain/text_to_speech.dart';
 import 'package:conduit/features/voice/domain/voice_preferences.dart';
 import 'package:flutter/foundation.dart';
 
-/// Reads Chat View replies aloud as they arrive.
+/// Reads Claude's answers aloud in Chat View, like a conversation: not
+/// every item, only what a listener needs.
 ///
-/// [observe] is fed the thread after every poll. The first call only
-/// records what is already there, so opening a chat never re-reads its
-/// history; later calls speak the items that appeared after the newest one
-/// already seen (older pages loaded by scrolling up are never read).
+/// [observe] is fed the thread and the agent state after every poll.
+/// When a turn ends (the agent waits for input or has ended, with no
+/// approval pending), the turn's final answer (the assistant text after
+/// its last tool call, see [SpeechText.finalAnswer]) is spoken, cleaned
+/// for speech and capped (see [SpeechText.cap]). Intermediate text, tool
+/// activity and the working label are never spoken. New approval requests
+/// and AskUserQuestion prompts are announced as they appear.
 ///
-/// Assistant text is spoken as plain speech (see [SpeechText]); runs of
-/// tool calls collapse into one cue ("Ran 3 commands and edited
-/// todos.ts."), spoken before the next reply or after a short quiet
-/// spell; pending approvals and AskUserQuestion prompts are announced.
-/// Utterances queue and play one at a time. Anything that arrives while
-/// read-aloud is off or [suppressed] (the user is dictating) is skipped,
-/// not saved for later.
+/// The first call only records what is there, so opening a chat never
+/// re-reads its history. A turn that ends while reading is off, or while
+/// [suppressed] (the user is dictating), is marked as heard and not read
+/// later. Utterances queue and play one at a time.
+///
+/// [conversation] (the Talk loop) reads even when [enabled] is off and
+/// phrases announcements with how to answer by voice.
 class ReadAloudController extends ChangeNotifier {
   ReadAloudController({
     required TextToSpeech tts,
     required this.preferences,
     this.dictationLanguage = _noLanguage,
     bool enabled = false,
-    this.toolCueDelay = const Duration(seconds: 4),
   }) : _tts = tts,
        _enabled = enabled;
 
@@ -44,18 +47,16 @@ class ReadAloudController extends ChangeNotifier {
   /// The dictation language, spoken in when no speech language is set.
   final String Function() dictationLanguage;
 
-  /// How long a run of tool calls waits for a reply before its cue is
-  /// spoken on its own.
-  final Duration toolCueDelay;
-
   bool _enabled;
   bool _suppressed = false;
   bool _available = true;
+  bool _conversation = false;
   bool _primed = false;
   final Set<String> _seenItems = {};
   final Set<String> _seenRequests = {};
-  final List<ChatItem> _toolRun = [];
-  Timer? _toolTimer;
+
+  /// Assistant text ids already read (or deliberately skipped).
+  final Set<String> _heard = {};
 
   final Queue<String> _queue = Queue();
   String? _currentId;
@@ -65,6 +66,20 @@ class ReadAloudController extends ChangeNotifier {
   bool _disposed = false;
 
   bool get enabled => _enabled;
+
+  /// Whether the Talk loop is running (reads regardless of [enabled]).
+  bool get conversation => _conversation;
+  set conversation(bool value) {
+    if (_conversation == value) return;
+    _conversation = value;
+    if (!value && !_enabled) stop();
+    notifyListeners();
+  }
+
+  bool get _active => (_enabled || _conversation) && !_suppressed;
+
+  /// Speaking or about to: the Talk loop waits for this to clear.
+  bool get busy => _currentId != null || _queue.isNotEmpty;
 
   /// Whether an utterance is playing right now.
   bool get speaking => _currentId != null;
@@ -108,8 +123,6 @@ class ReadAloudController extends ChangeNotifier {
   /// Stops speaking and drops everything queued. Items already seen stay
   /// seen.
   void stop() {
-    _toolTimer?.cancel();
-    _toolRun.clear();
     final wasSpeaking = _currentId != null || _queue.isNotEmpty;
     _queue.clear();
     _currentId = null;
@@ -120,16 +133,20 @@ class ReadAloudController extends ChangeNotifier {
     }
   }
 
-  /// Feeds the current thread and pending approvals. See the class docs.
+  /// Feeds the current thread, pending approvals and the agent [state]
+  /// (`working`, `waiting_input`, `needs_permission`, `ended`). See the
+  /// class docs.
   void observe(
     List<ChatItem> items, [
     List<PendingPermissionRequest> pending = const [],
+    String? state,
   ]) {
     if (_disposed) return;
     if (!_primed) {
       _primed = true;
       _seenItems.addAll(items.map((item) => item.id));
       _seenRequests.addAll(pending.map((request) => request.id));
+      _heard.addAll(items.whereType<ChatAssistantText>().map((i) => i.id));
       return;
     }
     var lastSeen = -1;
@@ -148,49 +165,43 @@ class ReadAloudController extends ChangeNotifier {
       for (final request in pending)
         if (_seenRequests.add(request.id)) request,
     ];
-    if (!_enabled || _suppressed) {
-      return;
-    }
+    final speak = _active;
     for (final item in fresh) {
+      if (!speak) break;
       switch (item) {
-        case ChatToolCall() || ChatTodoList():
-          _toolRun.add(item);
-        case ChatAssistantText(:final text):
-          _flushToolRun();
-          _enqueue(SpeechText.fromMarkdown(text));
         case ChatQuestion() when !item.answered:
-          _flushToolRun();
-          _enqueue(SpeechText.question(item));
+          _enqueue(SpeechText.question(item, hint: _conversation));
         case ChatPlan(:final status) when status == ChatPlanStatus.pending:
-          _flushToolRun();
           _enqueue(SpeechText.planReady);
-        case ChatNotice(:final kind, :final text)
-            when kind == ChatNoticeKind.error:
-          _flushToolRun();
-          _enqueue('Error. ${SpeechText.inline(text)}');
         default:
           break;
       }
     }
-    for (final request in newRequests) {
-      _flushToolRun();
-      _enqueue(SpeechText.approval(request));
+    if (speak) {
+      for (final request in newRequests) {
+        _enqueue(SpeechText.approval(request, hint: _conversation));
+      }
     }
-    if (_toolRun.isNotEmpty) {
-      _toolTimer?.cancel();
-      _toolTimer = Timer(toolCueDelay, () {
-        if (_enabled && !_suppressed) _flushToolRun();
-      });
+    final turnEnded =
+        (state == 'waiting_input' || state == 'ended') && pending.isEmpty;
+    if (turnEnded) {
+      final answer = SpeechText.finalAnswer(
+        items,
+      ).where((text) => !_heard.contains(text.id)).toList();
+      _heard.addAll(answer.map((text) => text.id));
+      if (speak && answer.isNotEmpty) {
+        _enqueue(
+          SpeechText.cap(
+            answer.map((text) => SpeechText.fromMarkdown(text.text)).join(' '),
+          ),
+        );
+      }
     }
   }
 
-  void _flushToolRun() {
-    _toolTimer?.cancel();
-    if (_toolRun.isEmpty) return;
-    final cue = SpeechText.toolCue(_toolRun);
-    _toolRun.clear();
-    _enqueue(cue);
-  }
+  /// Speaks [text] now (queued behind anything playing), e.g. the Talk
+  /// loop asking again.
+  void say(String text) => _enqueue(text);
 
   void _enqueue(String? text) {
     if (text == null) return;
@@ -259,7 +270,6 @@ class ReadAloudController extends ChangeNotifier {
   void dispose() {
     stop();
     _disposed = true;
-    _toolTimer?.cancel();
     _watchdog?.cancel();
     unawaited(_events?.cancel());
     super.dispose();

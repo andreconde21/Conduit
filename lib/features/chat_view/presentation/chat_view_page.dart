@@ -141,7 +141,7 @@ class _ChatViewPageState extends State<ChatViewPage>
   /// marks what is already there as read.
   void _feedReadAloud() {
     if (!_chat.loading && _chat.unsupported == null) {
-      _readAloud?.observe(_chat.items, _chat.pending);
+      _readAloud?.observe(_chat.items, _chat.pending, _chat.agent?.state);
     }
   }
 

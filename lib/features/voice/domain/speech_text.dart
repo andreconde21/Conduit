@@ -1,6 +1,5 @@
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/chat_view/domain/chat_items.dart';
-import 'package:conduit/features/chat_view/domain/chat_tool_summary.dart';
 
 /// Turns chat content into text that sounds natural when spoken: Markdown
 /// syntax is dropped, code blocks become a short cue, lists become
@@ -155,118 +154,85 @@ abstract final class SpeechText {
     return chunks;
   }
 
-  /// One short line for a run of tool calls, e.g. "Ran 3 commands and
-  /// edited todos.ts." Null when there is nothing worth saying.
-  static String? toolCue(List<ChatItem> items) {
-    var commands = 0;
-    final edited = <String>[];
-    final read = <String>[];
-    var searches = 0;
-    var web = 0;
-    var agents = 0;
-    var todos = false;
-    final other = <String>[];
-    for (final item in items) {
-      switch (item) {
-        case ChatTodoList():
-          todos = true;
-        case ChatToolCall(:final kind, :final input, :final name):
-          final path = _pathOf(input);
-          switch (kind) {
-            case ChatToolKind.bash:
-              if (name == 'Bash') commands += 1;
-            case ChatToolKind.edit || ChatToolKind.write:
-              _addUnique(edited, path);
-            case ChatToolKind.read:
-              _addUnique(read, path);
-            case ChatToolKind.search:
-              searches += 1;
-            case ChatToolKind.web:
-              web += 1;
-            case ChatToolKind.task:
-              agents += 1;
-            case ChatToolKind.other:
-              _addUnique(other, ChatToolSummary.of(item).title);
-          }
-        default:
-          break;
-      }
-    }
-    final parts = <String>[
-      if (commands > 0)
-        commands == 1 ? 'ran a command' : 'ran $commands commands',
-      if (edited.isNotEmpty)
-        edited.length == 1
-            ? 'edited ${edited.single.isEmpty ? 'a file' : edited.single}'
-            : 'edited ${edited.length} files',
-      if (read.isNotEmpty)
-        read.length == 1
-            ? 'read ${read.single.isEmpty ? 'a file' : read.single}'
-            : 'read ${read.length} files',
-      if (searches > 0)
-        searches == 1 ? 'searched the code' : 'searched $searches times',
-      if (web > 0) 'looked something up online',
-      if (agents > 0)
-        agents == 1 ? 'started an agent' : 'started $agents agents',
-      if (todos) 'updated the to-do list',
-      if (other.isNotEmpty)
-        other.length == 1
-            ? 'used ${other.single}'
-            : 'used ${other.length} tools',
-    ];
-    if (parts.isEmpty) return null;
-    final joined = parts.length == 1
-        ? parts.single
-        : '${parts.sublist(0, parts.length - 1).join(', ')} and ${parts.last}';
-    return '${joined[0].toUpperCase()}${joined.substring(1)}.';
+  /// Longest final answer spoken before "the rest is on screen".
+  static const maxAnswer = 600;
+
+  /// Cuts [speech] at a sentence end near [max] characters and says the
+  /// rest is on screen.
+  static String cap(String speech, {int max = maxAnswer}) {
+    final text = speech.trim();
+    if (text.length <= max) return text;
+    final window = text.substring(0, max);
+    var cut = window.lastIndexOf(RegExp(r'[.!?](\s|$)'));
+    if (cut < max ~/ 2) cut = window.lastIndexOf(' ');
+    if (cut <= 0) cut = max - 1;
+    final head = text.substring(0, cut + 1).trimRight();
+    return '$head …the rest is on screen.';
   }
 
-  static String? _pathOf(Map<String, Object?> input) {
-    for (final key in const ['file_path', 'notebook_path', 'path']) {
-      final value = input[key];
-      if (value is String && value.trim().isNotEmpty) {
-        final parts = value.trim().split(RegExp(r'[/\\]'));
-        return parts.lastWhere((p) => p.isNotEmpty, orElse: () => value);
-      }
+  /// The final answer of the latest turn: the assistant text after the
+  /// last tool call, question or prompt (thinking and notices skipped).
+  static List<ChatAssistantText> finalAnswer(List<ChatItem> items) {
+    final answer = <ChatAssistantText>[];
+    for (var i = items.length - 1; i >= 0; i--) {
+      final item = items[i];
+      if (item is ChatThinking || item is ChatNotice) continue;
+      if (item is! ChatAssistantText) break;
+      answer.insert(0, item);
     }
-    return null;
-  }
-
-  static void _addUnique(List<String> list, String? value) {
-    final entry = value ?? '';
-    if (!list.contains(entry)) list.add(entry);
+    return answer;
   }
 
   static const _maxSummary = 160;
 
-  /// "Claude needs your approval: Bash, npm test."
-  static String approval(PendingPermissionRequest request) {
+  /// "Claude needs your approval to run npm test." With [hint], adds how
+  /// to answer by voice.
+  static String approval(
+    PendingPermissionRequest request, {
+    bool hint = false,
+  }) {
     final summary = _clip(inline(request.summary));
     final tool = request.toolName.startsWith('mcp__')
         ? request.toolName.substring(5).replaceFirst('__', ' ')
         : request.toolName;
-    return summary.isEmpty
-        ? 'Claude needs your approval: $tool.'
-        : 'Claude needs your approval: $tool, ${_end(summary)}';
+    final what = switch (request.toolName) {
+      _ when summary.isEmpty || summary == tool => 'to use $tool',
+      'Bash' => 'to run $summary',
+      'Edit' || 'MultiEdit' || 'Write' || 'NotebookEdit' => 'to edit $summary',
+      'WebFetch' => 'to fetch $summary',
+      _ => 'to use $tool: $summary',
+    };
+    final sentence = _end('Claude needs your approval $what');
+    return hint ? '$sentence Say allow, deny, or always.' : sentence;
   }
 
   /// "Claude is asking: Which database? Options: Postgres, or SQLite."
-  static String? question(ChatQuestion question) {
+  /// With [hint], options are numbered and it says how to answer.
+  static String? question(ChatQuestion question, {bool hint = false}) {
     final prompts = question.questions;
     if (prompts.isEmpty) return null;
     final parts = <String>[];
     for (final prompt in prompts) {
       final text = _end(_clip(inline(prompt.question)));
       final labels = [
-        for (final option in prompt.options.take(4)) inline(option.label),
+        for (final option in prompt.options.take(hint ? 9 : 4))
+          inline(option.label),
       ].where((label) => label.isNotEmpty).toList();
-      parts.add(
-        labels.isEmpty
-            ? text
-            : '$text Options: ${labels.length == 1 ? labels.single : '${labels.sublist(0, labels.length - 1).join(', ')}, or ${labels.last}'}.',
-      );
+      if (labels.isEmpty) {
+        parts.add(text);
+      } else if (hint) {
+        final numbered = [
+          for (var i = 0; i < labels.length; i++) '${i + 1}, ${labels[i]}',
+        ].join('; ');
+        parts.add('$text Options: $numbered.');
+      } else {
+        parts.add(
+          '$text Options: ${labels.length == 1 ? labels.single : '${labels.sublist(0, labels.length - 1).join(', ')}, or ${labels.last}'}.',
+        );
+      }
     }
-    return 'Claude is asking: ${parts.join(' ')}';
+    final spoken = 'Claude is asking: ${parts.join(' ')}';
+    return hint ? '$spoken Say the number or the name.' : spoken;
   }
 
   /// A pending ExitPlanMode.

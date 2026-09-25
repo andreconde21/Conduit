@@ -213,9 +213,9 @@ class _SpeechSettingsControlsState extends State<SpeechSettingsControls> {
                   secondary: const Icon(Icons.record_voice_over_outlined),
                   title: const Text('Read replies aloud by default'),
                   subtitle: Text(
-                    "Chat View speaks Claude's new replies, approvals and "
-                    'questions. The speaker in its header turns it off per '
-                    'session.',
+                    "Chat View speaks Claude's final answer of each turn, "
+                    'approvals and questions, never tool output. The speaker '
+                    'in its header turns it off per session.',
                     style: muted,
                   ),
                   value: voice.readAloudByDefault,

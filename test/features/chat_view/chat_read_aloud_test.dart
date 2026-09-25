@@ -85,10 +85,8 @@ void main() {
 
     await chat.refresh();
     await tester.pump();
-    expect(tts.spoken, ['Ran 2 commands.']);
-    tts.done();
-    await tester.pump();
-    expect(tts.spoken, ['Ran 2 commands.', 'All done, see todos.ts.']);
+    // Only the turn's final answer; the commands are never read.
+    expect(tts.spoken, ['All done, see todos.ts.']);
 
     await tester.tap(toggle);
     await tester.pump();
@@ -114,7 +112,7 @@ void main() {
 
     await chat.refresh();
     await tester.pump();
-    expect(tts.spoken, ['First reply.']);
+    expect(tts.spoken, ['First reply. Second reply.']);
 
     await tester.enterText(
       find.byKey(const ValueKey('chat-composer-field')),
@@ -125,7 +123,7 @@ void main() {
     expect(tts.stops, 1);
     tts.done();
     await tester.pump();
-    expect(tts.spoken, ['First reply.'], reason: 'the queue was dropped');
+    expect(tts.spoken, ['First reply. Second reply.']);
   });
 
   testWidgets('announces approvals', (tester) async {
@@ -145,7 +143,7 @@ void main() {
     ]);
     await chat.refresh();
     await tester.pump();
-    expect(tts.spoken, ['Claude needs your approval: Bash, npm test.']);
+    expect(tts.spoken, ['Claude needs your approval to run npm test.']);
   });
 
   testWidgets('screen off keeps reading; leaving the app stops', (

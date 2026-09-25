@@ -90,42 +90,36 @@ void main() {
     expect(chunks.first, endsWith('.'));
   });
 
-  group('toolCue', () {
-    test('counts commands and names a single edited file', () {
-      expect(
-        SpeechText.toolCue([
-          tool('Bash', {'command': 'ls'}),
-          tool('Bash', {'command': 'pwd'}),
-          tool('Bash', {'command': 'make'}),
-        ]),
-        'Ran 3 commands.',
-      );
-      expect(
-        SpeechText.toolCue([
-          tool('Edit', {'file_path': '/src/app/todos.ts'}),
-        ]),
-        'Edited todos.ts.',
-      );
-    });
+  test('cap cuts long answers at a sentence and points to the screen', () {
+    expect(SpeechText.cap('Short answer.'), 'Short answer.');
+    final long = List.filled(40, 'This sentence is filler text.').join(' ');
+    final capped = SpeechText.cap(long);
+    expect(capped.length, lessThan(SpeechText.maxAnswer + 40));
+    expect(capped, endsWith('filler text. …the rest is on screen.'));
+  });
 
-    test('joins several kinds', () {
-      expect(
-        SpeechText.toolCue([
-          tool('Bash', {'command': 'ls'}),
-          tool('Edit', {'file_path': '/a/x.dart'}),
-          tool('Write', {'file_path': '/a/y.dart'}),
-          tool('Read', {'file_path': '/a/z.dart'}),
-          tool('Grep', {'pattern': 'foo'}),
-          const ChatTodoList('t', todos: []),
-        ]),
-        'Ran a command, edited 2 files, read z.dart, searched the code and '
-        'updated the to-do list.',
-      );
-    });
-
-    test('nothing to say for an empty run', () {
-      expect(SpeechText.toolCue(const []), isNull);
-    });
+  test('finalAnswer is the text after the last tool call', () {
+    const intro = ChatAssistantText('a1', text: 'Let me check.');
+    const outro1 = ChatAssistantText('a2', text: 'All fixed.');
+    const outro2 = ChatAssistantText('a3', text: 'Tests pass.');
+    expect(
+      SpeechText.finalAnswer([
+        const ChatUserMessage('u', text: 'fix it'),
+        intro,
+        tool('Bash', {'command': 'make'}),
+        const ChatThinking('t'),
+        outro1,
+        outro2,
+      ]),
+      [outro1, outro2],
+    );
+    expect(
+      SpeechText.finalAnswer([
+        intro,
+        tool('Bash', {'command': 'make'}),
+      ]),
+      isEmpty,
+    );
   });
 
   test('approval announcement names the tool and summary', () {
@@ -137,7 +131,19 @@ void main() {
           summary: 'npm test',
         ),
       ),
-      'Claude needs your approval: Bash, npm test.',
+      'Claude needs your approval to run npm test.',
+    );
+    expect(
+      SpeechText.approval(
+        const PendingPermissionRequest(
+          id: 'r2',
+          toolName: 'Edit',
+          summary: 'src/app.ts',
+        ),
+        hint: true,
+      ),
+      'Claude needs your approval to edit src/app.ts. '
+      'Say allow, deny, or always.',
     );
   });
 
@@ -158,6 +164,25 @@ void main() {
         ),
       ),
       'Claude is asking: Which database? Options: Postgres, or SQLite.',
+    );
+    expect(
+      SpeechText.question(
+        const ChatQuestion(
+          'q',
+          questions: [
+            ChatQuestionPrompt(
+              question: 'Which database?',
+              options: [
+                ChatQuestionOption(label: 'Postgres'),
+                ChatQuestionOption(label: 'SQLite'),
+              ],
+            ),
+          ],
+        ),
+        hint: true,
+      ),
+      'Claude is asking: Which database? Options: 1, Postgres; 2, SQLite. '
+      'Say the number or the name.',
     );
   });
 }
