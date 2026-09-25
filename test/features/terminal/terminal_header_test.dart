@@ -107,6 +107,24 @@ void main() {
     expect(find.byType(TerminalHeader), findsNothing);
   });
 
+  testWidgets('the overflow menu opens Settings', (tester) async {
+    await pumpTerminal(tester);
+
+    await tester.tap(find.byTooltip('More'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('terminal-menu-settings')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Settings'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('settings-section-terminal')),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('settings-section-terminal')));
+    await tester.pumpAndSettle();
+    expect(find.text('Send mouse taps'), findsOneWidget);
+  });
+
   testWidgets('swiping down on the row opens the switcher, which leads to '
       'the session grid', (tester) async {
     await pumpTerminal(tester);
