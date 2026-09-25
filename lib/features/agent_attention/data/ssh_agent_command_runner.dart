@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:conduit/core/app_failure.dart';
+import 'package:conduit/core/connection_problem.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/terminal/data/ssh_client_factory.dart';
@@ -39,9 +40,10 @@ class SshAgentCommandRunner implements AgentCommandRunner {
       ).connect(_host));
     } catch (error) {
       _client = null;
-      throw AppFailure(
+      throw ConnectionFailure(
         'Could not reach ${_host.name}.',
         describeSshConnectionError(error),
+        kind: classifyConnectionError(error),
       );
     }
     try {
@@ -58,9 +60,12 @@ class SshAgentCommandRunner implements AgentCommandRunner {
       throw const AppFailure('The command timed out.');
     } catch (error) {
       await _dropClient();
-      throw AppFailure(
+      // Authentication and the handshake happen on the first command, so
+      // this is where a dropped or rejected connection shows up.
+      throw ConnectionFailure(
         'Running a command on ${_host.name} failed.',
         describeSshConnectionError(error),
+        kind: classifyConnectionError(error),
       );
     }
   }

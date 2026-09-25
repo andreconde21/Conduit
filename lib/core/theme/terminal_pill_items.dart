@@ -9,6 +9,7 @@ enum TerminalPillButton {
   reconnect('Redraw / reconnect', 'Ctrl+L. Long-press reconnects.'),
   paste('Paste', 'Paste the clipboard.'),
   chat('Chat', 'Toggle the chat composer.'),
+  dictate('Dictate', 'Open the chat line and start dictating.'),
   keyboard('Keyboard', 'Show or hide the soft keyboard.'),
   tmux('Tmux', 'Tmux actions after the host prefix.'),
   touch('Touch', 'Touch mode: mouse taps and scrollback.'),

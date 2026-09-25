@@ -2,6 +2,7 @@ package com.gwitko.conduit
 
 import android.Manifest
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -11,6 +12,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -25,6 +27,9 @@ import io.flutter.plugin.common.MethodChannel
  *  - `isAvailable` -> Boolean, whether any recognition service exists.
  *  - `hasPermission` -> Boolean, RECORD_AUDIO state.
  *  - `requestPermission` -> Boolean, resolves once the system dialog closes.
+ *  - `openSettings` -> Boolean, opens the system voice input settings (or
+ *    Settings itself when a vendor build lacks that screen); false when
+ *    neither could be opened.
  *  - `start` {language?: String, continuous?, restart?, muteBeeps?,
  *    completeSilenceMillis?, possiblyCompleteSilenceMillis?,
  *    minimumLengthMillis?} -> null, begins a listening session.
@@ -104,6 +109,7 @@ class SpeechRecognitionBridge(private val activity: Activity) :
             )
             "hasPermission" -> result.success(hasPermission())
             "requestPermission" -> requestPermission(result)
+            "openSettings" -> result.success(openSettings())
             "start" -> {
                 start(
                     call.argument<String>("language"),
@@ -163,6 +169,28 @@ class SpeechRecognitionBridge(private val activity: Activity) :
     /** The app left the foreground: never leave the user's streams muted. */
     fun onStop() {
         restoreVolume()
+    }
+
+    /**
+     * Voice input settings pick the recognizer ("Voice input" / "Default
+     * voice input app"); not every vendor build has the screen, so fall
+     * back to Settings itself.
+     */
+    private fun openSettings(): Boolean {
+        for (action in listOf(
+            Settings.ACTION_VOICE_INPUT_SETTINGS,
+            Settings.ACTION_SETTINGS,
+        )) {
+            try {
+                activity.startActivity(Intent(action))
+                return true
+            } catch (_: ActivityNotFoundException) {
+                // Try the next screen.
+            } catch (_: SecurityException) {
+                // Try the next screen.
+            }
+        }
+        return false
     }
 
     private fun hasPermission(): Boolean {

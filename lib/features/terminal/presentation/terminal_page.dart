@@ -188,6 +188,10 @@ class _TerminalPageState extends State<TerminalPage>
   bool _tmuxScrollMode = false;
   bool _composeMode = false;
 
+  /// The next chat line starts dictating as it opens (the Dictate button);
+  /// cleared once that bar is built.
+  bool _dictateOnOpen = false;
+
   /// The on-screen pill and key rows. Hidden by default on desktop, where a
   /// physical keyboard exists; a slim strip keeps them one click away.
   bool _touchKeysVisible = PlatformFeatures.touchKeyRowsByDefault;
@@ -692,6 +696,18 @@ class _TerminalPageState extends State<TerminalPage>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focusNode.requestFocus();
     });
+  }
+
+  /// The pill's Dictate button: the chat line, dictating straight away.
+  void _startDictationLine() {
+    setState(() {
+      _composeMode = true;
+      _dictateOnOpen = true;
+      // A fresh bar, so an open one starts dictating too (its draft is
+      // kept in _composeDrafts).
+      _composeRevision += 1;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _dictateOnOpen = false);
   }
 
   /// The pill's Chat button: Chat View when the session shows a Claude
@@ -2320,6 +2336,7 @@ class _TerminalPageState extends State<TerminalPage>
                           initialText:
                               _composeDrafts[activeSession.host.id] ?? '',
                           dictation: _dictation,
+                          startDictation: _dictateOnOpen,
                           onChanged: (draft) {
                             _composeDrafts[activeSession.host.id] = draft;
                           },
@@ -2401,6 +2418,9 @@ class _TerminalPageState extends State<TerminalPage>
                           onToggleCompose: () =>
                               setState(() => _composeMode = !_composeMode),
                           onChatButton: () => _handleChatButton(activeSession),
+                          onDictate: _dictation == null
+                              ? null
+                              : _startDictationLine,
                           tmuxPrefixKey: activeSession.host.tmuxPrefixKey,
                           tmuxScrollMode: _tmuxScrollMode,
                           terminalMouseInput:
@@ -2508,6 +2528,7 @@ class _ComposeInputBar extends StatefulWidget {
     this.history = const <String>[],
     this.initialText = '',
     this.dictation,
+    this.startDictation = false,
     super.key,
   });
 
@@ -2536,6 +2557,9 @@ class _ComposeInputBar extends StatefulWidget {
 
   /// Voice input; null hides the mic.
   final DictationController? dictation;
+
+  /// Start dictating as the bar opens.
+  final bool startDictation;
 
   @override
   State<_ComposeInputBar> createState() => _ComposeInputBarState();
@@ -2673,6 +2697,7 @@ class _ComposeInputBarState extends State<_ComposeInputBar> {
                 controller: widget.dictation!,
                 textController: _controller,
                 focusNode: _focusNode,
+                autoStart: widget.startDictation,
                 onMessage: (message) {
                   ScaffoldMessenger.of(context)
                     ..hideCurrentSnackBar()

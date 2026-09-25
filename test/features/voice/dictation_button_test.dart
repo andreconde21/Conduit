@@ -211,13 +211,131 @@ void main() {
     ]);
   });
 
-  testWidgets('hides itself when the platform has no recognizer', (
+  testWidgets('shows a muted mic when the platform has no recognizer', (
     tester,
   ) async {
     installFakeChannel();
     available = false;
     await pumpButton(tester);
 
-    expect(find.byKey(const ValueKey('dictation-button')), findsNothing);
+    final mic = find.byKey(const ValueKey('dictation-button'));
+    expect(mic, findsOneWidget);
+    expect(
+      find.descendant(of: mic, matching: find.byIcon(Icons.mic_off_rounded)),
+      findsOneWidget,
+    );
+    expect(find.byTooltip('Voice input unavailable'), findsOneWidget);
+  });
+
+  testWidgets(
+    'tapping the muted mic explains and opens voice settings',
+    (tester) async {
+      installFakeChannel();
+      available = false;
+      await pumpButton(tester);
+
+      await tapMic(tester);
+      await tester.pumpAndSettle();
+      expect(find.text('No speech recognizer'), findsOneWidget);
+      expect(find.textContaining('Google speech services'), findsOneWidget);
+      // It re-checked first, and never tried to listen.
+      expect(calls.where((c) => c == 'isAvailable'), hasLength(2));
+      expect(calls, isNot(contains('start')));
+
+      await tester.tap(find.byKey(const ValueKey('speech-open-settings')));
+      await tester.pumpAndSettle();
+      expect(calls, contains('openSettings'));
+      expect(find.text('No speech recognizer'), findsNothing);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.android),
+  );
+
+  testWidgets(
+    'offers no settings button off Android',
+    (tester) async {
+      installFakeChannel();
+      available = false;
+      await pumpButton(tester);
+
+      await tapMic(tester);
+      await tester.pumpAndSettle();
+      expect(find.text('No speech recognizer'), findsOneWidget);
+      expect(find.byKey(const ValueKey('speech-open-settings')), findsNothing);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+  );
+
+  testWidgets('a recognizer installed since is used on the next tap', (
+    tester,
+  ) async {
+    installFakeChannel();
+    available = false;
+    final harness = await pumpButton(tester);
+    expect(harness.controller.isAvailable, isFalse);
+
+    available = true;
+    await tapMic(tester);
+    expect(find.text('No speech recognizer'), findsNothing);
+    expect(calls, contains('start'));
+    await harness.controller.cancel();
+    await tester.pump();
+  });
+
+  testWidgets('a disabled mic stays visible with its reason', (tester) async {
+    installFakeChannel();
+    final text = TextEditingController();
+    final controller = DictationController(
+      PlatformSpeechRecognizer(),
+      language: () => '',
+    );
+    addTearDown(controller.dispose);
+    addTearDown(text.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DictationButton(
+            controller: controller,
+            textController: text,
+            enabled: false,
+            disabledTooltip: 'No Claude session yet',
+          ),
+        ),
+      ),
+    );
+    final button = tester.widget<IconButton>(
+      find.byKey(const ValueKey('dictation-button')),
+    );
+    expect(button.onPressed, isNull);
+    expect(find.byTooltip('No Claude session yet'), findsOneWidget);
+  });
+
+  testWidgets('autoStart starts dictating as the button appears', (
+    tester,
+  ) async {
+    installFakeChannel();
+    final text = TextEditingController();
+    final controller = DictationController(
+      PlatformSpeechRecognizer(),
+      language: () => '',
+    );
+    addTearDown(controller.dispose);
+    addTearDown(text.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DictationButton(
+            controller: controller,
+            textController: text,
+            autoStart: true,
+          ),
+        ),
+      ),
+    );
+    for (var i = 0; i < 6; i += 1) {
+      await tester.pump();
+    }
+    expect(calls, contains('start'));
+    expect(controller.status, isNot(DictationStatus.idle));
+    await controller.cancel();
   });
 }

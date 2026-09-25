@@ -56,7 +56,10 @@ class CompanionProbe {
       );
     } catch (error) {
       return classifyCompanionStatus(
-        CompanionProbeResults(connectionError: _describe(error)),
+        CompanionProbeResults(
+          connectionError: _describe(error),
+          connectionFailure: error,
+        ),
         now: clock(),
       );
     }

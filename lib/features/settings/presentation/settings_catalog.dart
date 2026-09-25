@@ -237,6 +237,12 @@ const List<SettingsEntry> settingsCatalog = [
   ),
   SettingsEntry(
     SettingsSection.chatVoice,
+    'Where to find voice',
+    keywords: ['mic', 'microphone', 'dictate', 'talk', 'speech', 'voice'],
+    availableWhen: _speech,
+  ),
+  SettingsEntry(
+    SettingsSection.chatVoice,
     'Language',
     keywords: ['dictation', 'speech', 'microphone'],
     availableWhen: _speech,

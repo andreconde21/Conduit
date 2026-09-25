@@ -36,6 +36,7 @@ Future<void> showToolbarSnippetPalette({
   required ValueChanged<TerminalSnippet> onSnippet,
   String hostPassword = '',
   ValueChanged<String>? onPassword,
+  VoidCallback? onDictate,
 }) {
   return showAdaptiveModal<void>(
     kind: AdaptiveModalKind.palette,
@@ -63,6 +64,12 @@ Future<void> showToolbarSnippetPalette({
               Navigator.of(context).pop();
               onPassword(password);
             },
+      onDictate: onDictate == null
+          ? null
+          : () {
+              Navigator.of(context).pop();
+              onDictate();
+            },
     ),
   );
 }
@@ -77,6 +84,7 @@ class ToolbarSnippetPalette extends StatelessWidget {
     required this.onSnippet,
     this.hostPassword = '',
     this.onPassword,
+    this.onDictate,
     super.key,
   });
 
@@ -88,6 +96,9 @@ class ToolbarSnippetPalette extends StatelessWidget {
   final ValueChanged<TerminalSnippet> onSnippet;
   final String hostPassword;
   final ValueChanged<String>? onPassword;
+
+  /// Opens the chat line with dictation running; null hides the chip.
+  final VoidCallback? onDictate;
 
   @override
   Widget build(BuildContext context) {
@@ -113,6 +124,22 @@ class ToolbarSnippetPalette extends StatelessWidget {
             spacing: 8,
             runSpacing: 8,
             children: [
+              if (onDictate != null)
+                Tooltip(
+                  message: 'Speak a line into the chat line',
+                  child: ActionChip(
+                    key: const ValueKey('palette-dictate'),
+                    avatar: Icon(Icons.mic_none_rounded, color: foreground),
+                    label: const Text('Dictate'),
+                    labelStyle: TextStyle(
+                      color: foreground,
+                      fontWeight: FontWeight.w700,
+                    ),
+                    backgroundColor: palette.panelElevatedFor(brightness),
+                    side: BorderSide(color: palette.hairlineFor(brightness)),
+                    onPressed: onDictate,
+                  ),
+                ),
               for (final prompt in ToolbarQuickPrompt.values)
                 Tooltip(
                   message: prompt.description,

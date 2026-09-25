@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:conduit/core/app_failure.dart';
+import 'package:conduit/core/connection_problem.dart';
 import 'package:conduit/core/telemetry/telemetry.dart';
 import 'package:conduit/core/telemetry/telemetry_events.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
@@ -305,18 +306,12 @@ class TerminalSessionController extends ChangeNotifier {
       _reportConnect();
       _runStartupCommandIfConfigured(session);
       _runConnectSnippetIfConfigured(session);
-    } on AppFailure catch (failure) {
-      if (_disposed || generation != _connectionGeneration) {
-        return;
-      }
-      _reportConnect(failure);
-      _fail(failure.toString());
     } catch (error) {
       if (_disposed || generation != _connectionGeneration) {
         return;
       }
       _reportConnect(error);
-      _fail('Connection failed: $error');
+      _failConnect(error);
     } finally {
       await securityKeySubscription?.cancel();
     }
@@ -922,6 +917,32 @@ class TerminalSessionController extends ChangeNotifier {
     terminal.write('\r\n$error\r\n');
     _status = TerminalConnectionStatus.failed;
     notifyListeners();
+  }
+
+  /// Says why connecting failed: the shared headline and advice for an
+  /// unreachable machine or a rejected sign-in, the technical reason
+  /// dimmed below it.
+  void _failConnect(Object error) {
+    final problem = connectionProblemFor(
+      error,
+      machine: host.name,
+      address: host.host,
+      retryLabel: 'Reconnect',
+    );
+    if (problem == null) {
+      _fail(
+        error is AppFailure ? error.toString() : 'Connection failed: $error',
+      );
+      return;
+    }
+    final detail = problem.detail;
+    _fail(
+      [
+        problem.title,
+        problem.message,
+        if (detail != null) '\x1b[2m${detail.replaceAll('\n', '\r\n')}\x1b[0m',
+      ].join('\r\n'),
+    );
   }
 
   void _fail(String message) {

@@ -9,6 +9,8 @@ class FakeSpeechRecognizer implements SpeechRecognizer {
   var stops = 0;
   var cancels = 0;
   var permission = true;
+  var available = true;
+  var settingsOpened = 0;
   final _events = StreamController<SpeechEvent>.broadcast(sync: true);
 
   void emit(SpeechEvent event) => _events.add(event);
@@ -31,7 +33,13 @@ class FakeSpeechRecognizer implements SpeechRecognizer {
   Future<bool> requestPermission() async => permission;
 
   @override
-  Future<bool> isAvailable() async => true;
+  Future<bool> isAvailable() async => available;
+
+  @override
+  Future<bool> openSettings() async {
+    settingsOpened += 1;
+    return true;
+  }
 
   @override
   Future<void> start({
