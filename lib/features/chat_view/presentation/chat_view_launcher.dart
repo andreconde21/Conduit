@@ -4,6 +4,8 @@ import 'package:conduit/features/agent_attention/presentation/agent_attention_co
 import 'package:conduit/features/chat_view/data/conductore_chat_client.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_controller.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_page.dart';
+import 'package:conduit/features/companion_setup/presentation/companion_setup_controller.dart';
+import 'package:conduit/features/companion_setup/presentation/companion_setup_page.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/voice/presentation/dictation_controller.dart';
 import 'package:flutter/material.dart';
@@ -66,6 +68,9 @@ Future<void> openChatView({
         controller: controller,
         hostName: host.name,
         dictation: dictation,
+        onSetUpCompanion: CompanionSetupScope.maybeOf(routeContext) == null
+            ? null
+            : () => showCompanionSetup(routeContext, host),
         onOpenTerminal: () {
           toTerminal = true;
           Navigator.of(routeContext).pop();
@@ -95,16 +100,26 @@ Future<void> showChatViewUnavailable(
             '${attention!.providerFor(host.id).label}, not the Conductore '
             'companion. ${ConductoreChatClient.installHint} Then refresh '
             'the Agents panel.';
+  final canSetUp = CompanionSetupScope.maybeOf(context) != null;
   return showDialog<void>(
     context: context,
-    builder: (context) => AlertDialog(
+    builder: (dialogContext) => AlertDialog(
       title: const Text('Chat view needs the companion'),
       content: SelectableText(message),
       actions: [
         TextButton(
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: () => Navigator.of(dialogContext).pop(),
           child: const Text('OK'),
         ),
+        if (canSetUp)
+          FilledButton(
+            key: const ValueKey('chat-unavailable-agent-hooks'),
+            onPressed: () {
+              Navigator.of(dialogContext).pop();
+              showCompanionSetup(context, host);
+            },
+            child: const Text('Agent hooks'),
+          ),
       ],
     ),
   );

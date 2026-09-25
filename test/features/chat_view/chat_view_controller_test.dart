@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
+import 'package:conduit/features/chat_view/data/conductore_chat_client.dart';
 import 'package:conduit/features/chat_view/domain/chat_items.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_controller.dart';
 import 'package:flutter/foundation.dart';
@@ -191,6 +192,8 @@ void main() {
       final b = controllerFor(old);
       await b.refresh();
       expect(b.unsupported, contains('too old'));
+      expect(a.unsupportedKind, ChatUnsupportedKind.notInstalled);
+      expect(b.unsupportedKind, ChatUnsupportedKind.outdated);
     },
   );
 

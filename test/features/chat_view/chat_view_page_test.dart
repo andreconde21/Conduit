@@ -46,6 +46,7 @@ void main() {
     List<Object> script, {
     ChatDecide? decide,
     VoidCallback? onOpenTerminal,
+    VoidCallback? onSetUpCompanion,
   }) async {
     final runner = ScriptedAgentCommandRunner(script);
     final controller = ChatViewController(
@@ -60,6 +61,7 @@ void main() {
           controller: controller,
           hostName: 'dev',
           onOpenTerminal: onOpenTerminal ?? () {},
+          onSetUpCompanion: onSetUpCompanion,
         ),
       ),
     );
@@ -254,5 +256,45 @@ void main() {
     expect((blocks[4] as MarkdownListItem).indent, 1);
     expect((blocks[5] as MarkdownListItem).marker, '1.');
     expect((blocks[6] as MarkdownListItem).marker, '☑');
+  });
+
+  testWidgets('a missing companion offers the Agent hooks screen', (
+    tester,
+  ) async {
+    var opened = 0;
+    await pumpPage(tester, [
+      const AgentCommandResult(
+        stdout: '',
+        stderr: 'sh: conductore-hostd: not found',
+        exitCode: 127,
+      ),
+    ], onSetUpCompanion: () => opened += 1);
+    expect(find.textContaining('not installed'), findsOneWidget);
+    await tester.tap(find.text('Install agent hooks'));
+    expect(opened, 1);
+  });
+
+  testWidgets('an old companion offers the update', (tester) async {
+    var opened = 0;
+    await pumpPage(tester, [
+      const AgentCommandResult(
+        stdout: '{"error":"unknown command transcript"}',
+        stderr: '',
+        exitCode: 1,
+      ),
+    ], onSetUpCompanion: () => opened += 1);
+    expect(find.textContaining('too old'), findsOneWidget);
+    await tester.tap(find.text('Update agent hooks'));
+    expect(opened, 1);
+  });
+
+  testWidgets('without a setup callback the reason shows alone', (
+    tester,
+  ) async {
+    await pumpPage(tester, [
+      const AgentCommandResult(stdout: '', stderr: '', exitCode: 127),
+    ]);
+    expect(find.textContaining('not installed'), findsOneWidget);
+    expect(find.byKey(const ValueKey('chat-set-up-companion')), findsNothing);
   });
 }

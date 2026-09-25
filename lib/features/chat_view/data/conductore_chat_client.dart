@@ -6,12 +6,25 @@ import 'package:conduit/features/agent_attention/data/remote_tool_command.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/chat_view/domain/chat_transcript.dart';
 
+/// Why the chat view cannot run on a host.
+enum ChatUnsupportedKind {
+  /// `conductore-hostd` is not installed.
+  notInstalled,
+
+  /// The companion predates the chat commands.
+  outdated,
+}
+
 /// Thrown when the host's companion is missing, or too old to know the
 /// chat commands.
 class ChatUnsupported implements Exception {
-  const ChatUnsupported(this.message);
+  const ChatUnsupported(
+    this.message, {
+    this.kind = ChatUnsupportedKind.notInstalled,
+  });
 
   final String message;
+  final ChatUnsupportedKind kind;
 
   @override
   String toString() => message;
@@ -136,6 +149,7 @@ class ConductoreChatClient {
         throw const ChatUnsupported(
           'The Conductore companion on this machine is too old for the chat '
           'view. Update it by running host/install.sh again.',
+          kind: ChatUnsupportedKind.outdated,
         );
       }
       throw failure;
