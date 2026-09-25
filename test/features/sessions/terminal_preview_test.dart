@@ -34,6 +34,26 @@ void main() {
     });
   });
 
+  group('TerminalSessionController rename', () {
+    test('overrides the title until cleared', () {
+      final controller = TerminalSessionController(
+        host: buildHost('h'),
+        repository: ImmediateTerminalRepository(TrackableTerminalSession()),
+      );
+      addTearDown(controller.dispose);
+      var notified = 0;
+      controller.addListener(() => notified += 1);
+
+      controller.rename('  Deploys  ');
+      expect(controller.title, 'Deploys');
+      expect(controller.customTitle, 'Deploys');
+      controller.rename('');
+      expect(controller.title, controller.host.name);
+      expect(controller.customTitle, isNull);
+      expect(notified, 2);
+    });
+  });
+
   group('TerminalSessionController startup', () {
     test('types the startup command after connecting', () async {
       final session = TrackableTerminalSession();

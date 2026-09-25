@@ -170,6 +170,31 @@ void main() {
     expect(board.state.phase, HomeBoardPhase.ready);
   });
 
+  test('a machine reached before lists without a request', () async {
+    // No saved timestamp, but the host key is trusted.
+    board
+      ..setVisible(true)
+      ..selectHost(buildHost('t'), connectedBefore: true);
+    await pumpEventQueue();
+    expect(board.requestReason, isNull);
+    expect(created, 1);
+    expect(board.state.phase, HomeBoardPhase.ready);
+  });
+
+  test('learning that a waiting machine was reached starts it', () async {
+    board
+      ..setVisible(true)
+      ..selectHost(buildHost('n'));
+    await pumpEventQueue();
+    expect(board.state.phase, HomeBoardPhase.awaitingRequest);
+
+    // The trusted keys load after the first frame.
+    board.selectHost(buildHost('n'), connectedBefore: true);
+    await pumpEventQueue();
+    expect(created, 1);
+    expect(board.state.phase, HomeBoardPhase.ready);
+  });
+
   testWidgets('polling stops after repeated failures until refreshed', (
     tester,
   ) async {

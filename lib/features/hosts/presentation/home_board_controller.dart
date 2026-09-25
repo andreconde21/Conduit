@@ -195,6 +195,11 @@ class HomeBoardController extends ChangeNotifier {
   bool _visible = false;
   bool _requested = false;
 
+  /// The machine was reached before even though its saved record has no
+  /// last-connected time (a trusted host key, an open session): it lists
+  /// on its own.
+  bool _connectedBefore = false;
+
   /// Generation of the fetch in flight, or null when idle.
   int? _fetchingGeneration;
   bool _disposed = false;
@@ -217,7 +222,7 @@ class HomeBoardController extends ChangeNotifier {
     if (host.authMethod == SshAuthMethod.hardwareKey) {
       return HomeBoardRequestReason.hardwareKey;
     }
-    if (host.lastConnectedAt == null) {
+    if (host.lastConnectedAt == null && !_connectedBefore) {
       return HomeBoardRequestReason.neverConnected;
     }
     return null;
@@ -227,11 +232,16 @@ class HomeBoardController extends ChangeNotifier {
 
   /// Shows [host] on the board. Selecting the same machine again only
   /// refreshes its saved details; a different one starts over.
-  void selectHost(SavedHost? host) {
+  ///
+  /// [connectedBefore] marks a machine the app has reached before (its host
+  /// key is trusted, or a session is open) so it lists without a request
+  /// even when its saved record lost the last-connected time.
+  void selectHost(SavedHost? host, {bool connectedBefore = false}) {
     if (_disposed) return;
     if (host?.id == _host?.id) {
       final wasWaiting = _needsRequest;
       _host = host;
+      _connectedBefore = _connectedBefore || connectedBefore;
       // A first connection trusts the host key; the board can start.
       if (wasWaiting && !_needsRequest) {
         _state = HomeBoardState(phase: _initialPhase());
@@ -245,6 +255,7 @@ class HomeBoardController extends ChangeNotifier {
     unawaited(_closeRunner());
     _host = host;
     _requested = false;
+    _connectedBefore = connectedBefore;
     _failures = 0;
     _skipTicks = 0;
     _state = HomeBoardState(phase: _initialPhase());

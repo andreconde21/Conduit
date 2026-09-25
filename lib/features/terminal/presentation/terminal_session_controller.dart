@@ -85,7 +85,21 @@ class TerminalSessionController extends ChangeNotifier {
   static const _connectSnippetAfterTmuxDelay = Duration(milliseconds: 250);
 
   TerminalConnectionStatus get status => _status;
-  String get title => host.name;
+  String get title => _customTitle ?? host.name;
+
+  /// Name the user gave this session (long-press › Rename on the home
+  /// grid), or null to show the machine and target name.
+  String? get customTitle => _customTitle;
+  String? _customTitle;
+
+  /// Renames the session for this app run; blank restores the default.
+  void rename(String? value) {
+    final trimmed = value?.trim() ?? '';
+    final next = trimmed.isEmpty ? null : trimmed;
+    if (next == _customTitle) return;
+    _customTitle = next;
+    notifyListeners();
+  }
 
   /// The window title the remote application last set (OSC 0/2), empty
   /// until one arrives. Herdr and tmux both keep it current.

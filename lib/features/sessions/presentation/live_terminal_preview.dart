@@ -1,0 +1,230 @@
+import 'dart:math' as math;
+
+import 'package:conduit/features/sessions/presentation/terminal_preview.dart';
+import 'package:conduit_vt/conduit_vt.dart';
+import 'package:flutter/material.dart';
+
+/// Renders a [StyledTerminalPreview] the way the terminal draws it: the
+/// theme's palette, bold/faint/inverse, and a monospace font scaled so the
+/// whole screen width fits the available width. When the screen is taller
+/// than the box, the bottom rows (where prompts and the cursor are) win.
+class LiveTerminalPreview extends StatelessWidget {
+  const LiveTerminalPreview({
+    required this.preview,
+    required this.theme,
+    required this.fontFamily,
+    this.lineHeight = 1.18,
+    this.placeholder,
+    this.placeholderColor,
+    super.key,
+  });
+
+  final StyledTerminalPreview preview;
+  final TerminalTheme theme;
+  final String fontFamily;
+  final double lineHeight;
+
+  /// Shown centred while the screen is empty.
+  final String? placeholder;
+  final Color? placeholderColor;
+
+  /// Font size that fits [columns] cells of [fontFamily] into [width].
+  static double fitFontSize({
+    required double width,
+    required int columns,
+    required String fontFamily,
+  }) {
+    final advance = _advanceRatio(fontFamily);
+    return math.max(2, width / (math.max(1, columns) * advance));
+  }
+
+  /// Rows of [fontSize] text that fit into [height].
+  static int fitRows({
+    required double height,
+    required double fontSize,
+    double lineHeight = 1.18,
+  }) => math.max(1, (height / (fontSize * lineHeight)).floor());
+
+  static final Map<String, double> _advanceCache = {};
+
+  /// Width of one cell per unit of font size, measured once per family.
+  static double _advanceRatio(String fontFamily) {
+    return _advanceCache.putIfAbsent(fontFamily, () {
+      const sample = 'MMMMMMMMMMMMMMMMMMMM';
+      final painter = TextPainter(
+        text: TextSpan(
+          text: sample,
+          style: TextStyle(fontFamily: fontFamily, fontSize: 100),
+        ),
+        textDirection: TextDirection.ltr,
+        maxLines: 1,
+      )..layout();
+      final ratio = painter.width / (sample.length * 100);
+      painter.dispose();
+      return ratio > 0 ? ratio : 0.6;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (preview.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: Text(
+            placeholder ?? 'Waiting for output…',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color:
+                  placeholderColor ?? theme.foreground.withValues(alpha: 0.6),
+              fontSize: 11,
+            ),
+          ),
+        ),
+      );
+    }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final fontSize = fitFontSize(
+          width: width,
+          columns: preview.columns,
+          fontFamily: fontFamily,
+        );
+        final rows = constraints.hasBoundedHeight
+            ? fitRows(
+                height: constraints.maxHeight,
+                fontSize: fontSize,
+                lineHeight: lineHeight,
+              )
+            : preview.rows.length;
+        final visible = preview.rows.length > rows
+            ? preview.rows.sublist(preview.rows.length - rows)
+            : preview.rows;
+        final colors = _PreviewColors.of(theme);
+        final base = TextStyle(
+          fontFamily: fontFamily,
+          fontSize: fontSize,
+          height: lineHeight,
+          color: theme.foreground,
+          leadingDistribution: TextLeadingDistribution.even,
+        );
+        final spans = <InlineSpan>[];
+        for (var index = 0; index < visible.length; index++) {
+          if (index > 0) spans.add(const TextSpan(text: '\n'));
+          for (final run in visible[index]) {
+            spans.add(TextSpan(text: run.text, style: colors.styleFor(run)));
+          }
+        }
+        return ClipRect(
+          child: OverflowBox(
+            alignment: Alignment.topLeft,
+            maxWidth: width,
+            maxHeight: double.infinity,
+            child: RichText(
+              key: const ValueKey('live-preview-text'),
+              softWrap: false,
+              text: TextSpan(style: base, children: spans),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Resolves raw cell colours against a [TerminalTheme] (the same mapping as
+/// the terminal painter), cached per theme.
+class _PreviewColors {
+  _PreviewColors(this.theme) : palette = _buildPalette(theme);
+
+  final TerminalTheme theme;
+  final List<Color> palette;
+
+  static _PreviewColors? _last;
+
+  static _PreviewColors of(TerminalTheme theme) {
+    final last = _last;
+    if (last != null && identical(last.theme, theme)) return last;
+    return _last = _PreviewColors(theme);
+  }
+
+  TextStyle? styleFor(PreviewRun run) {
+    final flags = run.flags;
+    final inverse = flags & CellFlags.inverse != 0;
+    final hasBackground =
+        run.background & CellColor.typeMask != CellColor.normal;
+    var foreground = inverse
+        ? _resolve(run.background, theme.background)
+        : _resolve(run.foreground, theme.foreground);
+    final background = inverse
+        ? _resolve(run.foreground, theme.foreground)
+        : hasBackground
+        ? _resolve(run.background, theme.background)
+        : null;
+    if (flags & CellFlags.faint != 0) {
+      foreground = foreground.withValues(alpha: foreground.a * 0.5);
+    }
+    if (flags & CellFlags.invisible != 0) {
+      foreground = background ?? theme.background;
+    }
+    final bold = flags & CellFlags.bold != 0;
+    final italic = flags & CellFlags.italic != 0;
+    return TextStyle(
+      color: foreground,
+      backgroundColor: background,
+      fontWeight: bold ? FontWeight.bold : null,
+      fontStyle: italic ? FontStyle.italic : null,
+    );
+  }
+
+  Color _resolve(int cellColor, Color fallback) {
+    final type = cellColor & CellColor.typeMask;
+    final value = cellColor & CellColor.valueMask;
+    switch (type) {
+      case CellColor.normal:
+        return fallback;
+      case CellColor.named:
+      case CellColor.palette:
+        return palette[value.clamp(0, 255)];
+      default:
+        return Color(value | 0xFF000000);
+    }
+  }
+
+  static List<Color> _buildPalette(TerminalTheme theme) {
+    final named = [
+      theme.black,
+      theme.red,
+      theme.green,
+      theme.yellow,
+      theme.blue,
+      theme.magenta,
+      theme.cyan,
+      theme.white,
+      theme.brightBlack,
+      theme.brightRed,
+      theme.brightGreen,
+      theme.brightYellow,
+      theme.brightBlue,
+      theme.brightMagenta,
+      theme.brightCyan,
+      theme.brightWhite,
+    ];
+    const steps = [0, 95, 135, 175, 215, 255];
+    return List<Color>.generate(256, (index) {
+      if (index < 16) return named[index];
+      if (index < 232) {
+        final cube = index - 16;
+        return Color.fromARGB(
+          0xFF,
+          steps[cube ~/ 36],
+          steps[(cube ~/ 6) % 6],
+          steps[cube % 6],
+        );
+      }
+      final gray = 8 + (index - 232) * 10;
+      return Color.fromARGB(0xFF, gray, gray, gray);
+    }, growable: false);
+  }
+}

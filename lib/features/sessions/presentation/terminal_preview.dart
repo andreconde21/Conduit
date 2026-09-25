@@ -55,3 +55,131 @@ class TerminalPreview {
   @override
   int get hashCode => Object.hashAll(lines);
 }
+
+/// One run of cells in a [StyledTerminalPreview] row that share colours
+/// and attributes. Colours are the terminal's raw cell encoding (see
+/// `CellColor`); [LiveTerminalPreview] resolves them against a theme.
+class PreviewRun {
+  const PreviewRun(this.text, this.foreground, this.background, this.flags);
+
+  final String text;
+  final int foreground;
+  final int background;
+  final int flags;
+
+  @override
+  bool operator ==(Object other) =>
+      other is PreviewRun &&
+      other.text == text &&
+      other.foreground == foreground &&
+      other.background == background &&
+      other.flags == flags;
+
+  @override
+  int get hashCode => Object.hash(text, foreground, background, flags);
+}
+
+/// A snapshot of a terminal's visible screen with colours and attributes,
+/// for live preview tiles.
+class StyledTerminalPreview {
+  const StyledTerminalPreview(this.rows, {required this.columns});
+
+  static const empty = StyledTerminalPreview([], columns: 80);
+
+  /// Visible rows, top first, trailing blank rows dropped.
+  final List<List<PreviewRun>> rows;
+
+  /// Width of the captured screen in cells; the renderer fits this many
+  /// columns into the tile width.
+  final int columns;
+
+  bool get isEmpty => rows.isEmpty;
+
+  /// Plain text of each row (tests and accessibility).
+  List<String> get lines => [
+    for (final row in rows) row.map((run) => run.text).join(),
+  ];
+
+  /// Captures the current viewport (the alternate screen when a full-screen
+  /// app is active) at its full width, keeping at most the last [maxRows]
+  /// non-blank rows.
+  static StyledTerminalPreview capture(Terminal terminal, {int maxRows = 80}) {
+    final buffer = terminal.buffer;
+    final height = buffer.height;
+    final columns = math.max(1, terminal.viewWidth);
+    final viewHeight = math.max(1, terminal.viewHeight);
+    final start = math.max(0, height - viewHeight);
+    final rows = <List<PreviewRun>>[];
+    final blank = <bool>[];
+    for (var index = start; index < height; index++) {
+      final row = _captureLine(buffer.lines[index], columns);
+      rows.add(row);
+      blank.add(
+        row.every((run) => run.text.trim().isEmpty && run.background == 0),
+      );
+    }
+    var end = rows.length;
+    while (end > 0 && blank[end - 1]) {
+      end -= 1;
+    }
+    final begin = math.max(0, end - maxRows);
+    return StyledTerminalPreview(rows.sublist(begin, end), columns: columns);
+  }
+
+  static List<PreviewRun> _captureLine(BufferLine line, int columns) {
+    final runs = <PreviewRun>[];
+    final text = StringBuffer();
+    var foreground = 0;
+    var background = 0;
+    var flags = 0;
+    var started = false;
+    final limit = math.min(columns, line.length);
+    for (var index = 0; index < limit; index++) {
+      final codePoint = line.getCodePoint(index);
+      if (codePoint == 0 && index > 0 && line.getWidth(index - 1) == 2) {
+        // Second half of a wide character.
+        continue;
+      }
+      final fg = line.getForeground(index);
+      final bg = line.getBackground(index);
+      final attrs = line.getAttributes(index);
+      if (started && (fg != foreground || bg != background || attrs != flags)) {
+        runs.add(PreviewRun(text.toString(), foreground, background, flags));
+        text.clear();
+      }
+      started = true;
+      foreground = fg;
+      background = bg;
+      flags = attrs;
+      text.writeCharCode(codePoint == 0 ? 0x20 : codePoint);
+    }
+    if (started) {
+      runs.add(PreviewRun(text.toString(), foreground, background, flags));
+    }
+    return runs;
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (other is! StyledTerminalPreview ||
+        other.columns != columns ||
+        other.rows.length != rows.length) {
+      return false;
+    }
+    for (var index = 0; index < rows.length; index++) {
+      final a = rows[index];
+      final b = other.rows[index];
+      if (a.length != b.length) return false;
+      for (var run = 0; run < a.length; run++) {
+        if (a[run] != b[run]) return false;
+      }
+    }
+    return true;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    columns,
+    Object.hashAll([for (final row in rows) Object.hashAll(row)]),
+  );
+}

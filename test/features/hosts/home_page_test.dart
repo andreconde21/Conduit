@@ -7,12 +7,12 @@ import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/home_board_controller.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/hosts/presentation/hosts_page.dart';
-import 'package:conduit/features/hosts/presentation/widgets/herdr_board.dart';
+import 'package:conduit/features/hosts/presentation/widgets/home_session_grid.dart';
 import 'package:conduit/features/local_shell/presentation/local_shell_controller.dart';
 import 'package:conduit/features/sessions/domain/connect_preferences.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
-import 'package:conduit/features/sessions/presentation/session_grid_page.dart';
+import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:conduit/features/terminal/presentation/host_key_prompt_coordinator.dart';
 import 'package:conduit/features/terminal/presentation/terminal_page.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
@@ -40,6 +40,7 @@ void main() {
     WidgetTester tester, {
     List<SavedHost> hosts = const [],
     bool withConnectFlow = false,
+    HostKeyVerifier? hostKeyVerifier,
   }) async {
     tester.view.physicalSize = const Size(1080, 2400);
     tester.view.devicePixelRatio = 2.6;
@@ -67,7 +68,7 @@ void main() {
       pollInterval: const Duration(days: 1),
     );
     addTearDown(board.dispose);
-    final verifier = NoopVerifier();
+    final verifier = hostKeyVerifier ?? NoopVerifier();
     flow = withConnectFlow
         ? SessionConnectFlow(
             hostsController: hostsController,
@@ -116,6 +117,20 @@ void main() {
     ).copyWith(lastConnectedAt: lastConnectedAt ?? DateTime.utc(2026));
   }
 
+  Finder dormant(String id) => find.byKey(ValueKey('dormant-$id'));
+
+  Future<void> scrollTo(WidgetTester tester, Finder finder) async {
+    await tester.scrollUntilVisible(
+      finder,
+      200,
+      scrollable: find.descendant(
+        of: find.byKey(const ValueKey('home-scroll')),
+        matching: find.byType(Scrollable),
+      ),
+    );
+    await tester.pump();
+  }
+
   testWidgets('no machines shows the add-machine flow and no board', (
     tester,
   ) async {
@@ -123,14 +138,20 @@ void main() {
 
     expect(find.text('No saved machines yet'), findsOneWidget);
     expect(find.text('Add machine'), findsOneWidget);
-    expect(find.byType(HerdrBoard), findsNothing);
+    expect(find.byType(DormantWorkspaceTile), findsNothing);
+    expect(find.byType(HomeBoardNoticeTile), findsNothing);
     expect(runnerHosts, isEmpty);
-    // App lock and appearance (backup lives in its sheet) stay reachable.
+    // Lock sits in the bar; appearance (with backup) and trusted keys sit
+    // behind the gear.
     expect(find.byTooltip('Lock'), findsOneWidget);
-    expect(find.byTooltip('Appearance'), findsOneWidget);
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('Appearance'), findsOneWidget);
+    expect(find.text('Trusted keys'), findsOneWidget);
+    expect(find.text('Lock now'), findsOneWidget);
   });
 
-  testWidgets('one machine: board lists workspaces, panes and states', (
+  testWidgets('one machine: Herdr workspaces show as dormant tiles', (
     tester,
   ) async {
     await pumpHome(tester, hosts: [host('a')]);
@@ -138,42 +159,52 @@ void main() {
     expect(find.byKey(const ValueKey('machine-name')), findsOneWidget);
     expect(find.text('Host a'), findsOneWidget);
     expect(runnerHosts, ['a']);
+    expect(find.text('SESSIONS'), findsOneWidget);
+    expect(find.text('none open'), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-add-tile')), findsOneWidget);
+    expect(find.byType(HomeBoardNoticeTile), findsNothing);
 
-    expect(find.text('Infrastructure'), findsOneWidget);
-    expect(find.text('TheCalendar'), findsOneWidget);
-    expect(find.text('Deploying images'), findsOneWidget);
-    expect(find.text('Proofing PR 398'), findsOneWidget);
-    expect(find.text('main › claude'), findsOneWidget);
-    expect(find.text('review › claude'), findsOneWidget);
-    expect(find.text('Tab 1 › codex'), findsOneWidget);
-    expect(find.text('Working'), findsOneWidget);
-    expect(find.text('Needs input'), findsOneWidget);
-    expect(find.text('Done'), findsOneWidget);
-    expect(find.text('1 waiting'), findsOneWidget);
-    expect(find.text('3 agent panes'), findsOneWidget);
+    expect(dormant('w1'), findsOneWidget);
+    expect(dormant('w2'), findsOneWidget);
+    expect(
+      find.descendant(of: dormant('w1'), matching: find.text('Infrastructure')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: dormant('w1'),
+        matching: find.text('2 agents · 2 tabs'),
+      ),
+      findsOneWidget,
+    );
+    for (final chip in ['Needs input', 'Working']) {
+      expect(
+        find.descendant(of: dormant('w1'), matching: find.text(chip)),
+        findsOneWidget,
+        reason: chip,
+      );
+    }
+    expect(
+      find.descendant(of: dormant('w2'), matching: find.text('Done')),
+      findsOneWidget,
+    );
+    expect(find.text('2 workspaces not open'), findsOneWidget);
     // Counters and the local shell are tucked into "More".
+    await scrollTo(tester, find.text('MORE'));
     expect(find.text('MORE'), findsOneWidget);
     expect(find.text('Live sessions'), findsNothing);
   });
 
-  testWidgets('tapping a pane opens its Herdr workspace and focuses it', (
-    tester,
-  ) async {
+  testWidgets('tapping a dormant workspace opens it', (tester) async {
     final (workspace, board) = await pumpHome(tester, hosts: [host('a')]);
 
-    await tester.tap(find.text('Proofing PR 398'));
+    await tester.tap(dormant('w1'));
     await tester.pump();
     await tester.pump();
 
-    expect(
-      runner.commands.where((c) => c.contains('agent focus w1:p2')),
-      hasLength(1),
-    );
-    expect(workspace.sessions, hasLength(1));
     final session = workspace.sessions.single;
     expect(session.host.id, 'a#herdr:w1');
     expect(session.host.name, 'Host a: Infrastructure');
-
     await tester.pump(const Duration(seconds: 1));
     await tester.pump();
     expect(find.byType(TerminalPage), findsOneWidget);
@@ -181,14 +212,7 @@ void main() {
     expect(board.visible, isFalse);
     expect(runner.closeCount, greaterThanOrEqualTo(1));
 
-    // The pane is focused again once the new client has attached.
-    await tester.pump(const Duration(milliseconds: 60));
-    expect(
-      runner.commands.where((c) => c.contains('agent focus w1:p2')),
-      hasLength(2),
-    );
-
-    // Back on the home page the board resumes and lists again.
+    // Back home: the board resumes, and the workspace is now a live tile.
     final polls = runner.commands.where((c) => c.contains('workspace list'));
     final before = polls.length;
     tester.state<NavigatorState>(find.byType(Navigator)).pop();
@@ -198,6 +222,36 @@ void main() {
     expect(
       runner.commands.where((c) => c.contains('workspace list')).length,
       greaterThan(before),
+    );
+    expect(find.byType(HomeSessionTile), findsOneWidget);
+    expect(dormant('w1'), findsNothing);
+    expect(dormant('w2'), findsOneWidget);
+  });
+
+  testWidgets('long-pressing a dormant workspace opens one of its panes', (
+    tester,
+  ) async {
+    final (workspace, _) = await pumpHome(tester, hosts: [host('a')]);
+
+    await tester.longPress(dormant('w1'));
+    await tester.pumpAndSettle();
+    expect(find.text('main › claude'), findsOneWidget);
+    expect(find.text('review › claude'), findsOneWidget);
+    await tester.tap(find.text('Proofing PR 398'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(
+      runner.commands.where((c) => c.contains('agent focus w1:p2')),
+      hasLength(1),
+    );
+    expect(workspace.sessions.single.host.id, 'a#herdr:w1');
+    await tester.pump(const Duration(seconds: 1));
+    // The pane is focused again once the new client has attached.
+    await tester.pump(const Duration(milliseconds: 60));
+    expect(
+      runner.commands.where((c) => c.contains('agent focus w1:p2')),
+      hasLength(2),
     );
   });
 
@@ -210,6 +264,8 @@ void main() {
       withConnectFlow: true,
     );
 
+    await tester.longPress(dormant('w1'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Proofing PR 398'));
     await tester.pump();
     await tester.pump();
@@ -222,44 +278,99 @@ void main() {
     expect(session.startupCommand, endsWith('; herdr'));
     await tester.pump(const Duration(seconds: 1));
     expect(find.byType(TerminalPage), findsOneWidget);
-
-    // Tapping another pane in that workspace reuses the tab.
     tester.state<NavigatorState>(find.byType(Navigator)).pop();
-    await tester.pump(const Duration(seconds: 1));
-    await tester.tap(find.text('Deploying images'));
-    await tester.pump();
-    await tester.pump();
-    expect(workspace.sessions, hasLength(1));
-    expect(runner.commands.last, contains('agent focus w1:p1'));
     await tester.pump(const Duration(seconds: 1));
     await flow!.herdr.dispose();
   });
 
-  testWidgets('a pane in an open Herdr session activates that session', (
-    tester,
-  ) async {
-    final (workspace, _) = await pumpHome(tester, hosts: [host('a')]);
+  testWidgets('open sessions show as live tiles with transport and '
+      'workspace', (tester) async {
+    final (workspace, _) = await pumpHome(
+      tester,
+      hosts: [host('a'), host('m').copyWith(useMosh: true)],
+    );
+    workspace.open(host('m').copyWith(useMosh: true));
+    // Opened last, so the page shows its machine.
     final herdr = workspace.open(
       const ConnectTarget.herdr(
         workspaceId: 'w1',
         label: 'Infrastructure',
       ).apply(host('a')),
     );
-    workspace.open(host('a'));
+    herdr.terminal.write('\x1b[32mclaude\x1b[0m is working on it');
     await tester.pump();
-    expect(workspace.activeSession, isNot(herdr));
 
-    // Open sessions for the machine show as live tiles.
-    expect(find.byType(SessionTile), findsNWidgets(2));
-    expect(find.text('Open'), findsWidgets);
+    expect(find.byType(HomeSessionTile), findsNWidgets(2));
+    expect(find.text('2 open'), findsOneWidget);
+    final herdrTile = find.byKey(const ValueKey('home-session-a#herdr:w1'));
+    expect(
+      find.descendant(of: herdrTile, matching: find.text('SSH')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: herdrTile, matching: find.text('Infrastructure')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: herdrTile, matching: find.byIcon(herdrIcon)),
+      findsOneWidget,
+    );
+    // The live preview renders the screen, colours included.
+    final preview = tester.widget<RichText>(
+      find.descendant(
+        of: herdrTile,
+        matching: find.byKey(const ValueKey('live-preview-text')),
+      ),
+    );
+    expect(preview.text.toPlainText(), contains('claude is working on it'));
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('home-session-m')),
+        matching: find.text('Mosh'),
+      ),
+      findsOneWidget,
+    );
+    // The attached workspace is no longer dormant.
+    expect(dormant('w1'), findsNothing);
+    expect(dormant('w2'), findsOneWidget);
 
-    await tester.tap(find.text('Deploying images'));
+    final mosh = workspace.sessions.first;
+    await tester.tap(find.byKey(const ValueKey('home-session-m')));
     await tester.pump();
-    expect(workspace.sessions, hasLength(2));
-    expect(workspace.activeSession, herdr);
-    expect(runner.commands.last, contains('agent focus w1:p1'));
+    expect(workspace.activeSession, mosh);
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.byType(TerminalPage), findsOneWidget);
+  });
+
+  testWidgets('long-press on a tile renames, reconnects or closes', (
+    tester,
+  ) async {
+    final (workspace, _) = await pumpHome(tester, hosts: [host('a')]);
+    final session = workspace.open(host('a'));
+    await tester.pump();
+    final tile = find.byKey(const ValueKey('home-session-a'));
+
+    await tester.longPress(tile);
+    await tester.pumpAndSettle();
+    expect(find.text('Reconnect'), findsOneWidget);
+    expect(find.text('Close session'), findsOneWidget);
+    await tester.tap(find.text('Rename'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'Deploys');
+    await tester.tap(find.widgetWithText(FilledButton, 'Rename'));
+    await tester.pumpAndSettle();
+    expect(session.title, 'Deploys');
+    expect(
+      find.descendant(of: tile, matching: find.text('Deploys')),
+      findsWidgets,
+    );
+
+    await tester.longPress(tile);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Close session'));
+    await tester.pumpAndSettle();
+    expect(workspace.sessions, isEmpty);
+    expect(find.byType(HomeSessionTile), findsNothing);
   });
 
   testWidgets('many machines: defaults to the last connected and switches', (
@@ -293,7 +404,7 @@ void main() {
     expect(runnerHosts, ['b', 'c']);
   });
 
-  testWidgets('hardware-key machines list panes only on request', (
+  testWidgets('hardware-key machines list workspaces only on request', (
     tester,
   ) async {
     await pumpHome(
@@ -303,24 +414,44 @@ void main() {
     expect(find.text('Hardware-key login'), findsOneWidget);
     expect(runnerHosts, isEmpty);
 
-    await tester.tap(find.text('Show panes'));
+    await tester.tap(find.text('List workspaces'));
     await tester.pump();
     await tester.pump();
     expect(runnerHosts, ['k']);
-    expect(find.text('Infrastructure'), findsOneWidget);
+    expect(dormant('w1'), findsOneWidget);
+    expect(find.byType(HomeBoardNoticeTile), findsNothing);
   });
 
-  testWidgets('Herdr not running offers to start it', (tester) async {
+  testWidgets('Herdr not running shows a notice that starts it', (
+    tester,
+  ) async {
     runner
       ..workspaces = HerdrFixtures.notRunning
       ..workspaceExitCode = 1;
     final (workspace, _) = await pumpHome(tester, hosts: [host('a')]);
+    expect(find.byType(HomeBoardNoticeTile), findsOneWidget);
     expect(find.text('Herdr is not running'), findsOneWidget);
 
     await tester.tap(find.text('Start Herdr'));
     await tester.pump();
     expect(workspace.sessions.single.host.id, 'a#herdr');
     await tester.pump(const Duration(milliseconds: 400));
+  });
+
+  testWidgets('a listing failure shows its reason and retries', (
+    tester,
+  ) async {
+    runner.error = StateError('connection refused');
+    await pumpHome(tester, hosts: [host('a')]);
+    expect(find.text('Could not list Herdr workspaces'), findsOneWidget);
+    expect(find.textContaining('connection refused'), findsOneWidget);
+
+    runner.error = null;
+    await tester.tap(find.text('Retry'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.byType(HomeBoardNoticeTile), findsNothing);
+    expect(dormant('w1'), findsOneWidget);
   });
 
   testWidgets('machine menu keeps edit, files, connect to and delete', (
@@ -334,6 +465,7 @@ void main() {
       'Connect to…',
       'Files',
       'Edit',
+      'Agent hooks',
       'Duplicate',
       'Copy address',
       'Delete',
@@ -343,17 +475,78 @@ void main() {
     }
   });
 
-  testWidgets('a never-connected machine lists panes only on request', (
+  testWidgets('a never-connected machine lists workspaces only on request', (
     tester,
   ) async {
     await pumpHome(tester, hosts: [buildHost('n')]);
     expect(find.text('Not connected yet'), findsOneWidget);
     expect(runnerHosts, isEmpty);
 
-    await tester.tap(find.text('Show panes'));
+    await tester.tap(find.text('List workspaces'));
     await tester.pump();
     await tester.pump();
     expect(runnerHosts, ['n']);
-    expect(find.text('Infrastructure'), findsOneWidget);
+    expect(dormant('w1'), findsOneWidget);
   });
+
+  testWidgets('a machine with a trusted host key lists on its own', (
+    tester,
+  ) async {
+    await pumpHome(
+      tester,
+      hosts: [buildHost('n')],
+      hostKeyVerifier: _TrustedVerifier('192.168.1.1', 22),
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Not connected yet'), findsNothing);
+    expect(runnerHosts, ['n']);
+    expect(dormant('w1'), findsOneWidget);
+  });
+
+  testWidgets('the bottom of the page clears the 3-button navigation bar', (
+    tester,
+  ) async {
+    // Galaxy M53 with 3-button navigation: a 48 dp bar at 2.6 px/dp.
+    tester.view.padding = const FakeViewPadding(bottom: 125);
+    tester.view.viewPadding = const FakeViewPadding(bottom: 125);
+    await pumpHome(tester, hosts: [host('a')]);
+    addTearDown(tester.view.resetPadding);
+    addTearDown(tester.view.resetViewPadding);
+
+    await scrollTo(tester, find.text('MORE'));
+    await tester.tap(find.text('MORE'));
+    await tester.pumpAndSettle();
+    await tester.drag(
+      find.byKey(const ValueKey('home-scroll')),
+      const Offset(0, -3000),
+    );
+    await tester.pumpAndSettle();
+    final screen = tester.view.physicalSize / tester.view.devicePixelRatio;
+    final navBar = 125 / tester.view.devicePixelRatio;
+    // Nothing scrolls under the buttons: the list ends above the bar.
+    final list = tester.getRect(find.byKey(const ValueKey('home-scroll')));
+    expect(list.bottom, lessThanOrEqualTo(screen.height - navBar + 0.01));
+    // The expanded "More" area (counters) is fully above it.
+    final counters = tester.getRect(find.text('Live sessions'));
+    expect(counters.bottom, lessThan(screen.height - navBar));
+  });
+}
+
+class _TrustedVerifier extends NoopVerifier {
+  _TrustedVerifier(this.host, this.port);
+
+  final String host;
+  final int port;
+
+  @override
+  Future<List<HostKeyRecord>> loadTrustedKeys() async => [
+    HostKeyRecord(
+      host: host,
+      port: port,
+      type: 'ssh-ed25519',
+      fingerprint: 'SHA256:test',
+      trustedAt: DateTime.utc(2026),
+    ),
+  ];
 }

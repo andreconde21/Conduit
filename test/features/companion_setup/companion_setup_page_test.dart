@@ -409,12 +409,11 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: MachineSwitcher(
+            body: MachineChip(
               host: host,
               sessionCount: 0,
               hostCount: 1,
               onSwitch: () {},
-              onOpen: () {},
               onMenu: (choice) => chosen = choice,
             ),
           ),
