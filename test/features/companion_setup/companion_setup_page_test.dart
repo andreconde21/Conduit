@@ -428,6 +428,35 @@ void main() {
       expect(MachineMenuChoice.agentHooks.hostAction, isNull);
     });
 
+    testWidgets('opening the screen with a stale status while a chip '
+        'listens does not rebuild during build', (tester) async {
+      runner.responses.addAll(healthyResponses());
+      final stale = CompanionSetupController(
+        runnerFactory: (_) => runner,
+        sftpRepository: FakeSftpRepository(sftp),
+        loadBundle: () async => fakeBundle(),
+        staleAfter: Duration.zero,
+      );
+      addTearDown(stale.dispose);
+      await tester.pumpWidget(
+        CompanionSetupScope(
+          controller: stale,
+          child: MaterialApp(
+            home: Scaffold(body: CompanionStatusChip(host: host)),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(ActionChip));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.byType(CompanionSetupPage), findsOneWidget);
+      expect(
+        runner.commands.where((c) => c.contains('hostd version')),
+        hasLength(2),
+      );
+    });
+
     testWidgets('showCompanionSetup uses the scope', (tester) async {
       runner.responses['conductore-hostd version'] = notFound;
       await tester.pumpWidget(

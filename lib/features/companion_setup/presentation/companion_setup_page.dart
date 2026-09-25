@@ -73,7 +73,10 @@ class _CompanionSetupPageState extends State<CompanionSetupPage> {
   @override
   void initState() {
     super.initState();
-    _controller.ensureChecked(_host);
+    // After the frame: a re-check notifies listeners that may be building.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _controller.ensureChecked(_host);
+    });
     unawaited(
       _controller.bundledVersion().then((version) {
         if (mounted) setState(() => _bundledVersion = version);
