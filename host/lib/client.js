@@ -1,6 +1,6 @@
 'use strict'
 
-// Socket client used by both the hook and the CLI.
+// Socket client used by the CLI (the sh hook and statusline use the spool).
 // Protocol: newline-delimited JSON, one request object per connection.
 // The daemon answers with one or more JSON lines; the last line is the response
 // unless the request is a stream (`events`), which ends when the daemon closes.
@@ -68,9 +68,11 @@ function daemonScript () {
   return path.join(__dirname, '..', 'bin', 'conductore-hostd')
 }
 
+// Starts the daemon in its own session (setsid), with the memory flags.
+// The sh clients get here through `conductore-hostd daemon --detach`.
 function spawnDaemon () {
   paths.ensureDirs()
-  const child = spawn(process.execPath, [daemonScript(), 'daemon'], {
+  const child = spawn(process.execPath, [...paths.DAEMON_NODE_FLAGS, daemonScript(), 'daemon'], {
     detached: true,
     stdio: 'ignore',
     env: process.env

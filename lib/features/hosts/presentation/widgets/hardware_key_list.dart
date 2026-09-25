@@ -1,3 +1,4 @@
+import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/domain/ssh_key.dart';
 import 'package:flutter/material.dart';
@@ -125,7 +126,7 @@ class _HardwareKeyCard extends StatelessWidget {
           colorScheme.primary.withValues(alpha: 0.07),
           colorScheme.surface,
         ),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
         border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Column(
@@ -227,7 +228,7 @@ class _EmptyState extends StatelessWidget {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
         border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Row(

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_palette.dart';
+import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/hosts/domain/multiplexer_prefix_key.dart';
 import 'package:conduit/features/terminal/domain/herdr_keymap.dart';
@@ -307,7 +308,7 @@ class _HerdrNavigatorSheetState extends State<HerdrNavigatorSheet> {
                 accent.withValues(alpha: 0.14),
                 _palette.panelElevatedFor(_brightness),
               ),
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(AppTheme.radius),
               clipBehavior: Clip.antiAlias,
               child: InkWell(
                 key: ValueKey('herdr-new-${kind.name}'),
@@ -363,7 +364,7 @@ class _HerdrNavigatorSheetState extends State<HerdrNavigatorSheet> {
                       padding: EdgeInsets.zero,
                       minimumSize: const Size(0, 40),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(AppTheme.radius),
                       ),
                     ),
                     onPressed: () =>
@@ -396,7 +397,7 @@ class _HerdrNavigatorSheetState extends State<HerdrNavigatorSheet> {
         for (final shortcut in HerdrShortcut.quick)
           Material(
             color: _palette.panelElevatedFor(_brightness),
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(AppTheme.radius),
             clipBehavior: Clip.antiAlias,
             child: InkWell(
               key: ValueKey('herdr-quick-${shortcut.name}'),
@@ -520,7 +521,7 @@ class _HerdrNavigatorSheetState extends State<HerdrNavigatorSheet> {
               )
             : _palette.panelElevatedFor(_brightness),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(AppTheme.radius),
           side: entry.focused
               ? BorderSide(color: accent.withValues(alpha: 0.7))
               : BorderSide.none,
@@ -598,7 +599,7 @@ class _HerdrNavigatorSheetState extends State<HerdrNavigatorSheet> {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.16),
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
       ),
       child: Text(
         label,

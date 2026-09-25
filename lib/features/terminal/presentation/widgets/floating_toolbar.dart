@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_palette.dart';
+import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/terminal_pill_items.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
@@ -198,9 +199,8 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
     return Material(
       key: const ValueKey('floating-toolbar-pill'),
       color: _palette.panelFor(_brightness).withValues(alpha: 0.9),
-      elevation: 2,
-      shadowColor: Colors.black.withValues(alpha: 0.3),
-      shape: StadiumBorder(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppTheme.radius),
         side: BorderSide(color: _palette.hairlineFor(_brightness)),
       ),
       clipBehavior: Clip.antiAlias,
@@ -664,7 +664,7 @@ class _PillButton extends StatelessWidget {
       message: tooltip,
       child: Material(
         color: background,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           // One deliberate haptic per long-press, below, instead of the
@@ -686,7 +686,7 @@ class _PillButton extends StatelessWidget {
             padding: EdgeInsets.symmetric(horizontal: isIcon ? 0 : 6),
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(AppTheme.radius),
               border: selected && !emphasized
                   ? Border.all(color: accent.withValues(alpha: 0.7), width: 1.2)
                   : null,

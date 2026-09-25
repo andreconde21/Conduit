@@ -3,7 +3,8 @@
 // Idempotent merge / unmerge of our hook handlers into ~/.claude/settings.json.
 // Other people's hooks (moshi-hook, safety hooks, ...) are left exactly as they are.
 // Our handlers are recognised by their command, which always ends in
-// `conductore-hook <Event>`.
+// `conductore-hook <Event>`; that covers the Node hook of 0.3 and older (same
+// file name), so a merge migrates it to the sh client in place.
 
 const fs = require('fs')
 const os = require('os')

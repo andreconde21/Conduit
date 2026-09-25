@@ -89,10 +89,19 @@ Most of this needs the [host companion](#host-companion) on the machine.
 
 ### Look
 
-- Built-in terminal themes (Catppuccin, Tokyo Night, Gruvbox, Nord and more),
-  font sizing and palette choices.
-- **In progress:** Omarchy themes and fonts, theme sync from the PC, and
-  Everforest as the default theme.
+- All 22 [Omarchy](https://omarchy.org) themes, dark and light, from
+  Catppuccin and Tokyo Night to Rose Pine and White. Everforest is the
+  default. Each theme colours the terminal (its 16 ANSI colours, exactly as
+  Omarchy's alacritty config) and the whole app.
+- Omarchy-style chrome: flat surfaces from the theme background, thin
+  borders, square corners, monospace headings.
+- JetBrains Mono Nerd Font, Omarchy's font, is the default terminal font,
+  with every Nerd Font icon for prompts and Herdr. Atkynson Mono and the
+  system monospace stay selectable.
+- Theme sync with your PC: in Appearance, pick a saved machine under
+  "Follow Omarchy theme from machine". The app reads its current Omarchy
+  theme and font over SSH when it starts or comes back, including your own
+  custom themes.
 
 ## Install
 

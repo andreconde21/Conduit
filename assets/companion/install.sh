@@ -3,6 +3,7 @@
 #
 #   host/install.sh            copy host/ to ~/.local/share/conductore and link the
 #                              executables into ~/.local/bin, then register hooks
+#                              (migrates a 0.3 install: sh hook and statusline)
 #   host/install.sh --link     link ~/.local/bin straight at this checkout (dev)
 #   host/install.sh --uninstall
 set -eu
@@ -16,7 +17,7 @@ for arg in "$@"; do
   case "$arg" in
     --link) MODE=link ;;
     --uninstall) MODE=uninstall ;;
-    -h|--help) sed -n '2,8p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,9p' "$0"; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -30,7 +31,7 @@ mkdir -p "$BIN_DIR"
 
 if [ "$MODE" = uninstall ]; then
   if [ -x "$BIN_DIR/conductore-hostd" ]; then "$BIN_DIR/conductore-hostd" uninstall || true; fi
-  rm -f "$BIN_DIR/conductore-hostd" "$BIN_DIR/conductore-hook"
+  rm -f "$BIN_DIR/conductore-hostd" "$BIN_DIR/conductore-hook" "$BIN_DIR/conductore-statusline"
   [ -d "$SHARE_DIR" ] && rm -rf "$SHARE_DIR/bin" "$SHARE_DIR/lib" && rmdir "$SHARE_DIR" 2>/dev/null || true
   echo "removed"
   exit 0
@@ -45,9 +46,10 @@ if [ "$MODE" = copy ]; then
 else
   SRC="$HERE"
 fi
-chmod +x "$SRC/bin/conductore-hostd" "$SRC/bin/conductore-hook"
-ln -sf "$SRC/bin/conductore-hostd" "$BIN_DIR/conductore-hostd"
-ln -sf "$SRC/bin/conductore-hook" "$BIN_DIR/conductore-hook"
+for b in conductore-hostd conductore-hook conductore-statusline; do
+  chmod +x "$SRC/bin/$b"
+  ln -sf "$SRC/bin/$b" "$BIN_DIR/$b"
+done
 
 # Restart a daemon from a previous version so it picks up the new code.
 "$BIN_DIR/conductore-hostd" stop >/dev/null 2>&1 || true

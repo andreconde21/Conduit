@@ -1,51 +1,80 @@
 # Conductore host companion
 
-A small daemon plus a Claude Code hook client that runs on the machine where
-your agents run. It turns Claude Code hook events into a live, machine-readable
-view of every agent (working, waiting for input, waiting for permission, ended)
-and lets a phone answer permission prompts. The phone talks to it over plain
-SSH exec commands: no ports, no relay, nothing listening on the network.
+A small daemon plus two tiny sh clients (a Claude Code hook and a statusline)
+that run on the machine where your agents run. It turns Claude Code hook
+events into a live, machine-readable view of every agent (working, waiting for
+input, waiting for permission, ended) and lets a phone answer permission
+prompts. The phone talks to it over plain SSH exec commands: no ports, no
+relay, nothing listening on the network.
 
-    Claude Code ──hooks──▶ conductore-hook ──unix socket──▶ conductore-hostd
-                                                                  ▲
-    phone ──ssh user@host "conductore-hostd status|events|decide|transcript|send"─┘
+    Claude Code ──hooks──────▶ conductore-hook (sh) ─────┐ spool dir
+    Claude Code ──statusLine─▶ conductore-statusline (sh)┘ (one file per event)
+                                                          ▼
+                                                   conductore-hostd (Node daemon)
+                                                          ▲ unix socket
+    phone ──ssh user@host "conductore-hostd status|events|decide|transcript|send"
 
-Requirements: Node.js 18 or newer (Claude Code already needs it), Linux or
-macOS. No npm dependencies. Optional: tmux and/or Herdr for "focus".
+Built to cost nothing while agents work: a hook event is one `cat` and one
+`ln` (about 2.5 ms and 2 MB, no Node start), and the daemon sleeps until a
+file appears. See Footprint.
+
+Requirements: Node.js 18 or newer for the daemon and CLI (Claude Code already
+needs it), Linux or macOS. The hook and statusline need only POSIX `sh`,
+`cat`, `ln`, `mkfifo`, `date` and `rm`. No npm dependencies. Optional: tmux
+and/or Herdr for "focus".
 
 ## Install
 
 ```sh
 host/install.sh          # copies host/ to ~/.local/share/conductore, links
-                         # ~/.local/bin/conductore-{hostd,hook}, registers hooks
+                         # ~/.local/bin/conductore-{hostd,hook,statusline},
+                         # registers hooks and the statusline
 host/install.sh --link   # dev: link ~/.local/bin straight at this checkout
 host/install.sh --uninstall
 ```
 
 `install.sh` ends by running `conductore-hostd install`, which merges nine
-hook handlers into `~/.claude/settings.json` (backup in `settings.json.bak`)
-and wires the statusline (see Usage below). Existing hooks are left
-untouched; running it again is a no-op. Check with:
+hook handlers into `~/.claude/settings.json` (backup in `settings.json.bak`),
+wires the statusline (see Usage below) and records the path of `node` for
+the sh clients (`~/.conductore/node`: hooks may run with a PATH without node).
+Existing hooks are left untouched; running it again changes nothing and does
+not rewrite the file. Upgrading from 0.3 is the same command: the Node hook
+entries (same file name) are replaced in place and a
+`conductore-hostd statusline [--chain '…']` line becomes
+`conductore-statusline [--chain '…']`, keeping the command it wraps. Check with:
 
 ```sh
 conductore-hostd doctor
 ```
 
 The daemon is not a service. The first hook event after install (or after the
-daemon exits) starts it detached; it exits by itself after 24 h without any
-request. `conductore-hostd stop` stops it; `uninstall` removes the hooks and
-stops it. Files:
+daemon exits) starts it detached (at most one attempt per 10 s); it exits by
+itself after 6 h without any event or request. Events that arrive while it is
+down wait in the spool and are applied, in order, when it starts; `status`
+starts it when the spool is not empty. `conductore-hostd stop` stops it;
+`uninstall` removes the hooks and stops it. Files (all in 0700 directories):
 
 | Path | Purpose |
 | --- | --- |
-| `$XDG_RUNTIME_DIR/conductore/hostd.sock` (else `~/.conductore/hostd.sock`) | socket, mode 0600 in a 0700 directory |
+| `$XDG_RUNTIME_DIR/conductore/hostd.sock` (else `~/.conductore/hostd.sock`) | socket, mode 0600 |
+| `~/.conductore/spool/` | events and statusline reports waiting for the daemon |
+| `~/.conductore/tmp/` | staging files of the sh clients, FIFOs of waiting permission prompts |
+| `~/.conductore/usage/` | statusline holds and parked reports (see Usage) |
+| `~/.conductore/hostd.pid` | lock and pid of the running daemon |
+| `~/.conductore/node` | node binary the sh clients start the daemon with |
+| `~/.conductore/spawn.at` | time of the last start attempt |
 | `~/.conductore/state.json` | atomic snapshot of the state, read by `status` when the daemon is down |
 | `~/.conductore/hostd.log` | log, rotated once at 1 MB to `hostd.log.1` |
 | `~/.conductore/always-rules.json` | record of every rule added through an "always" decision |
 
 Environment: `CONDUCTORE_PERMISSION_TIMEOUT` (seconds the hook waits for the
-phone, default 120), `CONDUCTORE_HOME`, `CONDUCTORE_SOCKET`,
-`CONDUCTORE_CLAUDE_SETTINGS` (overrides, mainly for tests).
+phone, default 120, read by the hook), `CONDUCTORE_IDLE_EXIT_S` (daemon idle
+exit, default 21600 = 6 h, 0 = never), `CONDUCTORE_USAGE_THROTTLE_MS`
+(default 10000, see Usage), `CONDUCTORE_LOG=debug` (log every state change),
+`CONDUCTORE_HOME`, `CONDUCTORE_SOCKET`, `CONDUCTORE_CLAUDE_SETTINGS`
+(overrides, mainly for tests; with `CONDUCTORE_HOME` set the socket defaults
+to `<home>/hostd.sock`). The daemon reads its environment when it starts, from
+whichever client started it.
 
 ### PATH for the phone's SSH shell
 
@@ -63,16 +92,25 @@ Every handler except PermissionRequest is `async: true`, so it can never stall
 Claude Code; SessionEnd gets a 5 s timeout because Claude Code only waits
 briefly on exit.
 
-The hook reads Claude Code's JSON from stdin, adds `tmux` (when `$TMUX` is set:
-session, window index, pane id, window name) and `herdr` (from
-`HERDR_WORKSPACE_ID`, `HERDR_TAB_ID`, `HERDR_PANE_ID`) and sends the event to
-the daemon, starting it if needed. Anything that goes wrong is logged and the
-hook exits 0 without output.
+The hook (`bin/conductore-hook`, POSIX sh) never parses the JSON. It writes a
+few `key=value` header lines (event name, pid, `$TMUX`, `$TMUX_PANE`,
+`$HERDR_WORKSPACE_ID`, `$HERDR_TAB_ID`, `$HERDR_PANE_ID`, `$HERDR_AGENT_NAME`)
+and then Claude Code's stdin untouched into `~/.conductore/tmp/`, hard-links
+the finished file into `~/.conductore/spool/` (atomic, never overwrites; `mv`
+on filesystems without hard links) and exits 0 without output. If the pid
+file shows no live daemon it starts one in the background first. The format
+is documented in `lib/spool.js`.
 
-The daemon reduces events into one record per `session_id`, bumps a `seq`
-counter on every change, keeps the last 1000 change records for long-polling,
-and writes `state.json` (debounced, atomic rename). Agents whose session ended
-more than an hour ago are pruned.
+The daemon watches the spool (`fs.watch`: inotify on Linux, FSEvents on
+macOS; it also scans it at start and before answering `status` / `events`),
+takes entries oldest first, removes them, and adds the location: `herdr`
+straight from the header, `tmux` by asking the pane's tmux server
+(`tmux -S <socket from $TMUX> display-message -p -t <pane>`: session, window
+index, pane id, window name), cached 5 s per pane so bursts of tool events
+cost one `tmux`. It reduces events into one record per `session_id`, bumps a
+`seq` counter on every change, keeps the last 1000 change records for
+long-polling, and writes `state.json` (debounced 1 s, atomic rename). Agents
+whose session ended more than an hour ago are pruned.
 
 ### Agent states
 
@@ -272,26 +310,34 @@ Prints `{"ok":true,"sessionId":"…","via":"tmux","paneId":"%5","key":"Escape"}`
 
 ### `conductore-hostd statusline [--chain '<cmd>']`
 
-Not for the phone: this is Claude Code's `statusLine` command. See Usage.
+Not for the phone: the Node statusline of 0.3, kept so a not yet migrated
+`statusLine` keeps working. `install` registers `conductore-statusline`
+instead. See Usage.
 
 ### Others
 
-* `install` / `uninstall`: `{"ok":true,"settings":"…/settings.json","events":[…],"statusLine":"set|wrapped|updated|unchanged"}` / `{"ok":true,"removed":[…],"statusLineRestored":true,"daemonStopped":true}`
-* `doctor`: `{"ok":true,"user":"andre","checks":[{"name":"hooks registered","ok":true,"detail":"9 events"},{"name":"statusline (usage)","ok":true,"detail":"wired, wrapping: ~/bin/my-line"}, …]}`
-  (a missing statusline does not make `ok` false; only usage is lost)
+* `install` / `uninstall`: `{"ok":true,"settings":"…/settings.json","hook":"…/conductore-hook","statusline":"…/conductore-statusline","events":[…],"statusLine":"set|wrapped|updated|unchanged"}` / `{"ok":true,"removed":[…],"statusLineRestored":true,"daemonStopped":true}`
+* `doctor`: `{"ok":true,"user":"andre","checks":[{"name":"hooks registered","ok":true,"detail":"9 events"},{"name":"statusline (usage)","ok":true,"detail":"wired, wrapping: ~/bin/my-line"},{"name":"hook latency","ok":true,"detail":"3.1 ms per event (median of 5, no-op event)"},{"name":"daemon memory","ok":true,"detail":"45.9 MB RSS, 180 ms CPU in 3600 s, version 0.4.0"}, …]}`
+  (a missing statusline, daemon or latency does not make `ok` false; the
+  latency is measured around the spawn from Node, so it includes a little
+  process start-up; with no daemon running, it starts one)
 * `stop`: `{"ok":true,"running":true,"stopped":true}` or `{"ok":true,"running":false}`
-* `version`: `{"version":"0.3.0","protocol":1,"node":"22.23.1"}`
+* `version`: `{"version":"0.4.0","protocol":1,"node":"22.23.1"}`
+* `daemon [--detach]`: runs the daemon (what the clients start;
+  `--detach` starts it in its own session with the flags from Footprint).
 
 ## Usage (context and rate limits)
 
 Hooks carry no usage data; Claude Code's statusline does. `install` sets
-`statusLine.command` to `conductore-hostd statusline` when none is set. If
+`statusLine.command` to `conductore-statusline` (sh) when none is set. If
 you already have one, it becomes
-`conductore-hostd statusline --chain '<your command>'` (other `statusLine`
-fields such as `padding` are kept): your command gets the same stdin and its
-output is printed unchanged. `uninstall` puts your command back.
+`conductore-statusline --chain '<your command>'` (other `statusLine`
+fields such as `padding` are kept): your command runs through `sh -c` with
+the same JSON on stdin (trailing newlines normalised to one) and its output
+is printed unchanged. `uninstall` puts your command back.
 
-Each run maps the statusline JSON into the session's `usage`:
+Each run spools the statusline JSON; the daemon maps it into the session's
+`usage`:
 
 | `usage` field | from |
 | --- | --- |
@@ -308,17 +354,37 @@ A usage report never changes `state` or `updatedAt`. The daemon publishes at
 most one `reason: "usage"` change per session every 10 s
 (`CONDUCTORE_USAGE_THROTTLE_MS`), always carrying the latest value; an
 unchanged report publishes nothing. A report for a session the daemon has
-not seen yet is held until its first hook event. Without `--chain` the
-command prints `Opus · api · 42% ctx · 5h 23%`. It never fails visibly: bad
-input, a stopped daemon (started for the next report) or a failing chained
-command still exit 0.
+not seen yet is held until its first hook event.
+
+The statusline runs after every assistant message, so it is throttled before
+it reaches the daemon too: when the daemon takes a report from the spool it
+creates `usage/<session>.hold` for the same 10 s. While that file exists the
+statusline parks its report as `usage/<session>.<pid>` (one `[ -e ]` test, no
+clock read, no daemon wake-up), and when the hold ends the daemon applies the
+newest parked report and deletes the rest. So the daemon wakes at most once
+per 10 s per session and the last value of a burst is never lost.
+
+Without `--chain` the command prints `Opus · api · 43% ctx · 5h 24%`, the
+same line as `lib/statusline.js` builds, computed with shell parameter
+expansion only (no jq, no Node); on JSON it cannot read it prints
+`conductore`. It never fails visibly: bad input, a stopped daemon (started
+for the next report) or a failing chained command still exit 0. The chained
+command has no time limit of its own any more; Claude Code cancels a slow
+statusline itself.
 
 ## Permission decisions
 
-`conductore-hook PermissionRequest` registers the request, then blocks until
-`decide` is called or `CONDUCTORE_PERMISSION_TIMEOUT` (120 s) passes. Its
-stdout is exactly what Claude Code's PermissionRequest decision control
-expects (`hookSpecificOutput.hookEventName = "PermissionRequest"`,
+`conductore-hook PermissionRequest` creates a FIFO (`tmp/p.<pid>`), opens
+it read-write, spools the request with the FIFO's path and blocks reading it
+until `decide` is called or `CONDUCTORE_PERMISSION_TIMEOUT` (120 s) passes.
+The daemon writes the decision line into the FIFO with a non-blocking open,
+which fails (ENXIO) once nobody reads it: that is how it notices a hook that
+Claude Code killed (checked once a second, only while a prompt is pending),
+and why `decide` on a dead hook fails. A watchdog subshell (one `sleep 1` per
+second, only while the prompt waits) ends the wait at the timeout, after 5 s
+if no daemon picked the request up (none running and none could start), or
+as soon as the daemon that took it dies. Its stdout is exactly what Claude
+Code's PermissionRequest decision control expects (`hookSpecificOutput.hookEventName = "PermissionRequest"`,
 `decision.behavior` allow or deny, optional `message`, `updatedInput`,
 `updatedPermissions`), as documented at
 https://code.claude.com/docs/en/hooks#permissionrequest-decision-control.
@@ -367,8 +433,14 @@ Code still evaluates ask rules against `updatedInput` (not used here).
   tailnet in the intended setup). There is no other authentication layer, so
   protect the SSH key as you would the host.
 * The daemon never executes tool input. It stores and reports it; `focus`,
-  `send`, `interrupt` and the hook run only `tmux`, `herdr` and `node`
-  through `execFile`/`spawn`, with arguments passed as an array (no shell).
+  `send`, `interrupt` and the location lookup run only `tmux`, `herdr` and
+  `node` through `execFile`/`spawn`, with arguments passed as an array (no
+  shell). The sh clients never evaluate their input: the JSON is copied with
+  `cat` or held in a variable and only matched with parameter expansion.
+* The spool, tmp and usage directories are 0700 under a 0700 state dir, so
+  only the user can drop events in (the same user can already run the CLI).
+  The daemon only opens FIFOs that are directly inside its own `tmp/`, and
+  opens them write-only and non-blocking.
 * `send` types into the agent's pane, which is what the SSH user could do by
   attaching to tmux/Herdr anyway. It refuses while a permission prompt is
   waiting so a prompt cannot answer it by accident.
@@ -382,19 +454,78 @@ Code still evaluates ask rules against `updatedInput` (not used here).
   in memory and in `state.json` (0600). They are visible to anyone with the
   user's shell, which is also true of the transcripts.
 * The hook client trusts its stdin (it comes from Claude Code) and the daemon
-  trusts its socket peers (owner-only). Request bodies are capped at 1 MB.
+  trusts its socket peers (owner-only) and spool files (owner-only
+  directory). Request bodies are capped at 1 MB, spool files at 8 MB.
+
+## Footprint
+
+Measured on development-central (Ubuntu 24.04, dash as `/bin/sh`, Node 22,
+12 cores) with `host/bench.sh 200` and `/proc` over 60 s windows:
+
+| | 0.3.0 (Node hook) | 0.4.0 (sh clients) |
+| --- | --- | --- |
+| hook event, wall | 34 ms | 2.4 ms |
+| hook event, peak RSS | 46 MB (a Node process) | 1.9 MB (`sh`, `cat`, `ln`) |
+| statusline refresh, wall | 30 ms | 3.2 ms |
+| statusline refresh, peak RSS | 47 MB | 1.9 MB |
+| daemon CPU per hook event | (not measured) | 0.35 ms |
+| daemon idle RSS | 53.6 MB | 47.2 MB |
+| daemon idle private memory (`Private_Dirty`) | 8.8 MB | 7.4 MB |
+| daemon threads | 7 | 4 |
+| daemon idle CPU, 60 s | 0 ticks, plus a prune timer every 5 min | 0 ticks, 0 context switches, no timers |
+| daemon idle exit | 24 h | 6 h |
+
+About 40 MB of the daemon's RSS is the node binary's own pages, shared with
+every other Node process (Claude Code included): a bare
+`node -e 'setInterval(()=>{},1e9)'` has 42.7 MB RSS and 6.4 MB private. The
+daemon runs with `--max-old-space-size=16 --max-semi-space-size=1
+--lite-mode --no-expose-wasm --v8-pool-size=1` (`lib/paths.js`): lite mode
+(no optimizing compiler) touches about 6 MB less and costs no measurable CPU
+at this load (0.35 vs 0.37 ms per event), one V8 worker instead of four drops
+three threads; `--jitless`, `--single-threaded` and glibc
+`MALLOC_ARENA_MAX=1` saved nothing more. The heap limits mostly cap growth.
+
+Idle means asleep: no polling loop, no periodic timer. The only timers are
+one-shots tied to activity (snapshot debounce, usage holds and throttle, the
+next prune deadline, long-poll timeouts, the idle exit) and a 1 s FIFO probe
+that runs only while a permission prompt is pending. V8 runs a few
+memory-reducer GCs in the first minute after a burst, then nothing (strace
+shows no syscalls).
+
+## Portability notes
+
+* Tested here with dash and bash; the scripts use only POSIX sh plus `[ -e ]`
+  style tests, `kill -0`, `read -r`, `$(( ))` and `${var%%pattern}`, which
+  zsh in sh mode and macOS's bash 3.2 `/bin/sh` also have. macOS has not been
+  run: it relies on `mkfifo -m`, a FIFO opened read-write (`exec 3<>fifo`,
+  supported by Darwin), `ln` and `fs.watch` over FSEvents.
+* Hard links need the state dir on a local filesystem; where `ln` fails the
+  clients fall back to `mv`.
+* The statusline default line reads the JSON with pattern matching, not a
+  parser: it assumes Claude Code's key names and that string values have no
+  escaped quotes. A miss only drops a part of the line (the usage recorded
+  by the daemon is parsed properly in Node).
+* The daemon's liveness check in the clients is `kill -0 <pid from
+  hostd.pid>`: after a hard crash, a recycled pid can delay the automatic
+  restart until the phone's next `status`/`events` (which pings the socket
+  and restarts it).
 
 ## Development
 
 ```sh
 cd host && node --test test/*.test.js
+host/bench.sh 200        # per-event cost on this machine (throwaway state dir)
 ```
 
 `test/state.test.js` covers the reducer, `test/settings.test.js` the
 settings merge, `test/transcript.test.js` the transcript reader,
-`test/statusline.test.js` usage mapping, statusLine wiring and throttled
-usage events through a real daemon, `test/chat.test.js` the
-`transcript`/`send`/`interrupt` commands (with fake
-`tmux`/`herdr` binaries that record their arguments), and `test/daemon.test.js` spawns a real daemon on a temp
-socket and drives the real hook client and CLI through the permission and
-long-poll flows.
+`test/statusline.test.js` usage mapping, statusLine wiring and 0.3 migration,
+the sh statusline (default line parity with `lib/statusline.js`, hold and
+park throttle, `--chain` passthrough) through a real daemon,
+`test/chat.test.js` the `transcript`/`send`/`interrupt` commands (with fake
+`tmux`/`herdr` binaries that record their arguments), and
+`test/daemon.test.js` spawns a real daemon on a temp socket and drives the sh
+hook and the CLI through spool handoff (daemon down, ordering, staging
+cleanup), tmux/Herdr location, the FIFO permission flows (allow, deny,
+always, timeout, killed hook, daemon stopped or killed mid-wait, no daemon at
+all), long-poll, restart and doctor.

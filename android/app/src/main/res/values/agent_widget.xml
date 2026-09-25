@@ -13,13 +13,19 @@
     <string name="agent_tile_one_needs_input">1 needs input</string>
     <string name="agent_tile_needs_input">%1$d need input</string>
 
-    <!-- Fallback palette (pre-Android 12): matches the app's dark launcher look. -->
-    <color name="agent_widget_surface">#F4F1F8</color>
-    <color name="agent_widget_on_surface">#1C1B1F</color>
-    <color name="agent_widget_on_surface_variant">#5C5966</color>
-    <color name="agent_widget_accent">#6750A4</color>
-    <color name="agent_widget_on_accent">#FFFFFF</color>
-    <color name="agent_widget_urgent">#B3261E</color>
+    <!-- Omarchy Everforest (themes/everforest/colors.toml), the app's default
+         theme, in every mode: the widget matches the app, not the wallpaper.
+         on_surface_variant is the foreground 30% toward the background, as
+         the app's muted text. -->
+    <color name="agent_widget_surface">#2D353B</color>
+    <color name="agent_widget_on_surface">#D3C6AA</color>
+    <color name="agent_widget_on_surface_variant">#A19B89</color>
+    <color name="agent_widget_border">#475258</color>
+    <color name="agent_widget_accent">#7FBBB3</color>
+    <color name="agent_widget_on_accent">#2D353B</color>
+    <color name="agent_widget_urgent">#E67E80</color>
 
-    <dimen name="agent_widget_corner_radius">16dp</dimen>
+    <!-- Omarchy's windows are square; the launcher may round the widget
+         further on Android 12+. -->
+    <dimen name="agent_widget_corner_radius">6dp</dimen>
 </resources>

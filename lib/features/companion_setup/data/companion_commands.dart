@@ -43,7 +43,9 @@ abstract final class CompanionCommands {
 
   /// Feeds the hook client a Notification and then a SessionEnd for
   /// [testSessionId], exactly as Claude Code would (JSON on stdin, event
-  /// name as the only argument; see host/lib/hook.js). The SessionEnd makes
+  /// name as the only argument; see host/bin/conductore-hook). The hook only
+  /// spools the event; the `status` that follows applies it, starting the
+  /// daemon if needed. The SessionEnd makes
   /// the daemon prune the test agent an hour later instead of keeping it.
   static final sendTestEvent = script(
     'printf "%s\\n" '

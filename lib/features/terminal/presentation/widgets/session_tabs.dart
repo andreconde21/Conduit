@@ -1,5 +1,6 @@
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/theme/app_palette.dart';
+import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/terminal/presentation/terminal_file_tabs_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
@@ -246,14 +247,14 @@ class _Tab extends StatelessWidget {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(AppTheme.radius),
           onTap: onTap,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 140),
             constraints: const BoxConstraints(maxWidth: 176),
             decoration: BoxDecoration(
               color: background,
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(AppTheme.radius),
               border: Border.all(
                 color: selected
                     ? accent.withValues(alpha: 0.55)

@@ -1,8 +1,118 @@
-#!/usr/bin/env node
-'use strict'
-// Claude Code hook client. Must never break Claude Code: always exits 0.
-const { main } = require('../lib/hook')
-main(process.argv.slice(2)).then(() => process.exit(0), err => {
-  try { require('../lib/log').log('hook', 'fatal', err && (err.stack || err.message)) } catch {}
-  process.exit(0)
-})
+#!/bin/sh
+# conductore-hook <Event>: Claude Code hook client. POSIX sh, no Node.
+#
+# Hands the hook JSON (stdin) to conductore-hostd through the spool
+# directory and exits: one `cat` and one `ln` per event (a hard link
+# publishes the finished file atomically and never overwrites; `ln` is
+# lighter than GNU `mv`). The daemon removes both names, and adds the
+# tmux/Herdr location from the variables passed in the header.
+#
+# PermissionRequest waits on a FIFO for the phone's decision, at most
+# $CONDUCTORE_PERMISSION_TIMEOUT seconds (default 120), and prints the
+# decision JSON the daemon wrote. Timeout, no daemon, any error: prints
+# nothing, so Claude Code shows its own prompt. Always exits 0.
+#
+# Layout (see lib/spool.js, lib/paths.js): $CONDUCTORE_HOME or ~/.conductore
+#   spool/  events the daemon watches    tmp/  staging files and FIFOs
+#   hostd.pid  running daemon            spawn.at  last start attempt
+#   node       node binary recorded by `conductore-hostd install`
+
+exec 2>/dev/null
+umask 077
+d=${CONDUCTORE_HOME:-$HOME/.conductore}
+ev=${1:-}
+[ -d "$d/spool" ] && [ -d "$d/tmp" ] || mkdir -p "$d/spool" "$d/tmp" || exit 0
+
+# Starts the daemon when it is not running, at most once per 10 s.
+wake() {
+  if [ -f "$d/hostd.pid" ] && read -r pid <"$d/hostd.pid" && kill -0 "$pid"; then
+    return 0
+  fi
+  now=$(date +%s)
+  last=0
+  [ -f "$d/spawn.at" ] && read -r last <"$d/spawn.at"
+  case $last in '' | *[!0-9]*) last=0 ;; esac
+  age=$((now - last))
+  [ "$age" -ge 0 ] && [ "$age" -lt 10 ] && return 1
+  printf '%s\n' "$now" >"$d/spawn.at"
+  node=node
+  [ -f "$d/node" ] && read -r node <"$d/node"
+  case $0 in */*) bin=${0%/*} ;; *) bin=. ;; esac
+  "$node" "$bin/conductore-hostd" daemon --detach </dev/null >/dev/null 2>&1 3>&- &
+  return 1
+}
+
+# Publishes $tmp as $out (a fresh name): hard link, else rename.
+publish() {
+  while [ -e "$out" ]; do out=$out.n; done
+  ln "$tmp" "$out" || mv -f "$tmp" "$out" || { rm -f "$tmp"; return 1; }
+}
+
+# Header, then Claude Code's JSON untouched.
+header() {
+  printf 'conductore 1\nkind=hook\nevent=%s\npid=%s\ntmp=%s\n' "$ev" "$$" "${tmp##*/}"
+  if [ -n "${TMUX:-}" ]; then printf 'tmux=%s\ntmux_pane=%s\n' "$TMUX" "${TMUX_PANE:-}"; fi
+  if [ -n "${HERDR_WORKSPACE_ID:-}${HERDR_PANE_ID:-}" ]; then
+    printf 'herdr_workspace=%s\nherdr_tab=%s\nherdr_pane=%s\nherdr_name=%s\n' \
+      "${HERDR_WORKSPACE_ID:-}" "${HERDR_TAB_ID:-}" "${HERDR_PANE_ID:-}" "${HERDR_AGENT_NAME:-}"
+  fi
+}
+
+tmp=$d/tmp/h.$$
+while [ -e "$tmp" ]; do tmp=$tmp.n; done
+out=$d/spool/$$
+
+if [ "$ev" != PermissionRequest ]; then
+  { header; printf '\n'; cat; } >"$tmp" || { rm -f "$tmp"; exit 0; }
+  publish || exit 0
+  wake
+  exit 0
+fi
+
+# PermissionRequest: the FIFO is held open read-write (fd 3) before the
+# request is visible, so the daemon's non-blocking write-open always finds a
+# reader while we wait, and fails (hook gone) once we and the watchdog exit.
+t=${CONDUCTORE_PERMISSION_TIMEOUT:-120}
+case $t in '' | *[!0-9]* | 0) t=120 ;; esac
+fifo=$d/tmp/p.$$
+rm -f "$fifo"
+if ! mkfifo -m 600 "$fifo" || ! exec 3<>"$fifo"; then
+  # No FIFO: still report the prompt, then let the terminal ask.
+  rm -f "$fifo"
+  { header; printf '\n'; cat; } >"$tmp" && publish && wake
+  exit 0
+fi
+{ header; printf 'fifo=%s\ntimeout=%s\n\n' "$fifo" "$t"; cat; } >"$tmp" && publish || {
+  rm -f "$tmp" "$fifo"
+  exit 0
+}
+wake
+
+# Watchdog: ends the wait after $t s, after 5 s if no daemon picked the
+# request up, or as soon as this shell is gone. It wakes once a second, and
+# only while a prompt is pending.
+(
+  i=0
+  while [ "$i" -lt "$t" ]; do
+    sleep 1
+    kill -0 $$ || exit 0
+    i=$((i + 1))
+    if [ -e "$out" ]; then
+      # Nobody picked the request up (no daemon, cannot start one).
+      [ "$i" -ge 5 ] && break
+    else
+      # Picked up; a daemon that died since will never answer.
+      { [ -f "$d/hostd.pid" ] && read -r p <"$d/hostd.pid" && kill -0 "$p"; } || break
+    fi
+  done
+  printf '\n' >&3
+) </dev/null >/dev/null 2>&1 &
+watchdog=$!
+
+line=
+IFS= read -r line <&3
+exec 3<&-
+kill "$watchdog"
+rm -f "$fifo" "$out" "$tmp"
+[ -n "$line" ] && printf '%s\n' "$line"
+exit 0

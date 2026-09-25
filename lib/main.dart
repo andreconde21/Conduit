@@ -63,8 +63,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   registerLocalShellLicenses();
-  registerMultiplexerLogoLicenses();
   registerThemeLicenses();
+  registerMultiplexerLogoLicenses();
   unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
 
   const secureStorage = FlutterSecureStorage();
