@@ -226,131 +226,133 @@ Future<void> showMultiplexerTabsSheet(
 }) async {
   unawaited(controller.refresh());
   // Livelier while the list is open; back to the caller's pace after.
-  final pace = controller.pollInterval;
-  controller.setPollInterval(MultiplexerTabsController.listPollInterval);
+  final endBoost = controller.boostPolling();
   final noun = multiplexerTabNoun(controller);
-  // On desktop a popover at the session tab's label (the click that
-  // opened it), like a tab overflow list.
-  await showAdaptiveModal<void>(
-    context: context,
-    kind: AdaptiveModalKind.menu,
-    desktopMaxWidth: 360,
-    useSafeArea: true,
-    isScrollControlled: true,
-    sheetAnimationStyle: MediaQuery.maybeDisableAnimationsOf(context) ?? false
-        ? AnimationStyle.noAnimation
-        : null,
-    builder: (sheetContext) => ConstrainedBox(
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.6,
-      ),
-      child: Padding(
-        padding: EdgeInsets.only(
-          bottom: shouldApplyBottomSafeArea(sheetContext)
-              ? MediaQuery.viewPaddingOf(sheetContext).bottom
-              : 0,
+  try {
+    // On desktop a popover at the session tab's label (the click that
+    // opened it), like a tab overflow list.
+    await showAdaptiveModal<void>(
+      context: context,
+      kind: AdaptiveModalKind.menu,
+      desktopMaxWidth: 360,
+      useSafeArea: true,
+      isScrollControlled: true,
+      sheetAnimationStyle: MediaQuery.maybeDisableAnimationsOf(context) ?? false
+          ? AnimationStyle.noAnimation
+          : null,
+      builder: (sheetContext) => ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.6,
         ),
-        child: ListenableBuilder(
-          listenable: controller,
-          builder: (sheetContext, _) {
-            final theme = Theme.of(sheetContext);
-            final tabs = controller.tabs;
-            return Column(
-              key: const ValueKey('mux-tabs-sheet'),
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 14, 8, 4),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          '$sessionLabel · ${tabs.length} '
-                          '${noun}s',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w800,
+        child: Padding(
+          padding: EdgeInsets.only(
+            bottom: shouldApplyBottomSafeArea(sheetContext)
+                ? MediaQuery.viewPaddingOf(sheetContext).bottom
+                : 0,
+          ),
+          child: ListenableBuilder(
+            listenable: controller,
+            builder: (sheetContext, _) {
+              final theme = Theme.of(sheetContext);
+              final tabs = controller.tabs;
+              return Column(
+                key: const ValueKey('mux-tabs-sheet'),
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 14, 8, 4),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '$sessionLabel · ${tabs.length} '
+                            '${noun}s',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
                           ),
                         ),
-                      ),
-                      TextButton.icon(
-                        key: const ValueKey('mux-tabs-sheet-new'),
-                        icon: const Icon(Icons.add_rounded),
-                        label: Text('New $noun'),
-                        onPressed: () {
-                          Navigator.of(sheetContext).pop();
-                          unawaited(controller.create());
-                          onDone?.call();
-                        },
-                      ),
-                    ],
+                        TextButton.icon(
+                          key: const ValueKey('mux-tabs-sheet-new'),
+                          icon: const Icon(Icons.add_rounded),
+                          label: Text('New $noun'),
+                          onPressed: () {
+                            Navigator.of(sheetContext).pop();
+                            unawaited(controller.create());
+                            onDone?.call();
+                          },
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                Flexible(
-                  child: ListView(
-                    shrinkWrap: true,
-                    padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
-                    children: [
-                      for (final (i, tab) in tabs.indexed)
-                        ListTile(
-                          key: ValueKey('mux-tabs-sheet-${tab.id}'),
-                          dense: true,
-                          selected: tab.active,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: AppTheme.borderRadius,
-                          ),
-                          leading: SizedBox(
-                            width: 28,
-                            child: Text(
-                              controller.kind == MultiplexerTabsKind.tmux
-                                  ? '${tab.index}'
-                                  : '${i + 1}',
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w800,
+                  Flexible(
+                    child: ListView(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+                      children: [
+                        for (final (i, tab) in tabs.indexed)
+                          ListTile(
+                            key: ValueKey('mux-tabs-sheet-${tab.id}'),
+                            dense: true,
+                            selected: tab.active,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: AppTheme.borderRadius,
+                            ),
+                            leading: SizedBox(
+                              width: 28,
+                              child: Text(
+                                controller.kind == MultiplexerTabsKind.tmux
+                                    ? '${tab.index}'
+                                    : '${i + 1}',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                            title: Text(
+                              tab.label,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontWeight: tab.active
+                                    ? FontWeight.w800
+                                    : FontWeight.w600,
+                              ),
+                            ),
+                            subtitle: _subtitle(tab),
+                            trailing: MultiplexerTabDot(tab: tab, size: 8),
+                            onTap: () {
+                              Navigator.of(sheetContext).pop();
+                              unawaited(
+                                controller.select(tab).whenComplete(() {
+                                  onDone?.call();
+                                }),
+                              );
+                            },
+                            onLongPress: () => unawaited(
+                              showMultiplexerTabActions(
+                                sheetContext,
+                                controller,
+                                tab,
                               ),
                             ),
                           ),
-                          title: Text(
-                            tab.label,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontWeight: tab.active
-                                  ? FontWeight.w800
-                                  : FontWeight.w600,
-                            ),
-                          ),
-                          subtitle: _subtitle(tab),
-                          trailing: MultiplexerTabDot(tab: tab, size: 8),
-                          onTap: () {
-                            Navigator.of(sheetContext).pop();
-                            unawaited(
-                              controller.select(tab).whenComplete(() {
-                                onDone?.call();
-                              }),
-                            );
-                          },
-                          onLongPress: () => unawaited(
-                            showMultiplexerTabActions(
-                              sheetContext,
-                              controller,
-                              tab,
-                            ),
-                          ),
-                        ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-              ],
-            );
-          },
+                ],
+              );
+            },
+          ),
         ),
       ),
-    ),
-  );
-  controller.setPollInterval(pace);
+    );
+  } finally {
+    endBoost();
+  }
   onDone?.call();
 }
 

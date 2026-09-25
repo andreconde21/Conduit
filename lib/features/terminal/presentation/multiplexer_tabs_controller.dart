@@ -203,18 +203,40 @@ class MultiplexerTabsController extends ChangeNotifier {
   final _unread = MultiplexerUnreadTracker();
   late Duration _pollInterval = initialPollInterval;
 
-  /// How often the tabs are listed while visible.
-  Duration get pollInterval => _pollInterval;
+  /// Open tab lists that asked for [listPollInterval] ([boostPolling]).
+  int _boosts = 0;
 
-  /// Polls every [interval] from now on (the strip wants 2 s; the phone's
-  /// compact label is fine with 5 s, the open list with 2 s again).
+  /// How often the tabs are listed while visible: the pace the layout set,
+  /// or [listPollInterval] while a tab list is open.
+  Duration get pollInterval => _boosts > 0 && listPollInterval < _pollInterval
+      ? listPollInterval
+      : _pollInterval;
+
+  /// The layout's pace (the strip wants 2 s, the phone's compact label is
+  /// fine with 5 s). An open list's [boostPolling] stays in force over it.
   void setPollInterval(Duration interval) {
     if (interval == _pollInterval || _disposed) return;
-    _pollInterval = interval;
-    if (_visible) {
-      _timer?.cancel();
-      _timer = Timer.periodic(interval, (_) => unawaited(refresh()));
-    }
+    _repace(() => _pollInterval = interval);
+  }
+
+  /// Polls at [listPollInterval] until the returned callback runs (an open
+  /// tab list); calls nest.
+  VoidCallback boostPolling() {
+    _repace(() => _boosts += 1);
+    var ended = false;
+    return () {
+      if (ended) return;
+      ended = true;
+      _repace(() => _boosts -= 1);
+    };
+  }
+
+  void _repace(VoidCallback change) {
+    final before = pollInterval;
+    change();
+    if (_disposed || !_visible || pollInterval == before) return;
+    _timer?.cancel();
+    _timer = Timer.periodic(pollInterval, (_) => unawaited(refresh()));
   }
 
   List<MultiplexerTab> _tabs = const [];
@@ -241,7 +263,7 @@ class MultiplexerTabsController extends ChangeNotifier {
     _timer?.cancel();
     _timer = null;
     if (visible) {
-      _timer = Timer.periodic(_pollInterval, (_) => unawaited(refresh()));
+      _timer = Timer.periodic(pollInterval, (_) => unawaited(refresh()));
       unawaited(refresh());
     }
   }

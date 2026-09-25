@@ -351,6 +351,27 @@ void main() {
     });
   });
 
+  test('an open list keeps its 2 s pace when the layout sets its own', () {
+    final controller = MultiplexerTabsController(
+      backend: TmuxTabsBackend(
+        channel: SerialCommandChannel(runnerFactory: () => FakeTmux(['a'])),
+        sessionName: 's',
+      ),
+    );
+    addTearDown(controller.dispose);
+    controller.setPollInterval(MultiplexerTabsController.compactPollInterval);
+    final end = controller.boostPolling();
+    // What a rebuild of the page's poller does while the list is open.
+    controller.setPollInterval(MultiplexerTabsController.compactPollInterval);
+    expect(controller.pollInterval, MultiplexerTabsController.listPollInterval);
+    end();
+    end();
+    expect(
+      controller.pollInterval,
+      MultiplexerTabsController.compactPollInterval,
+    );
+  });
+
   test('the channel reuses one runner for every command', () async {
     var opened = 0;
     final tmux = FakeTmux(['a', 'b']);
