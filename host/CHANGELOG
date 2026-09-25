@@ -1,5 +1,9 @@
 # Changelog — host companion
 
+## Unreleased
+
+- feat: `statusline [--chain '<cmd>']` records context and rate-limit usage per session (`usage` on each agent, throttled `reason: usage` changes); `install` wires or wraps `statusLine`, `uninstall` restores it, `doctor` reports it.
+
 ## 0.2.0 (2026-09-25)
 
 - feat: chat view support: agents carry `transcriptPath`; new `transcript` (incremental, capped JSONL reader with `--since` / `--before` / `--tail-bytes`), `send` (types a prompt into the agent's Herdr or tmux pane, no shell) and `interrupt` (Escape) commands.
