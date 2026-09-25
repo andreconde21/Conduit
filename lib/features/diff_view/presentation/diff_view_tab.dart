@@ -33,6 +33,9 @@ class DiffViewTab extends TerminalFileTab {
   Listenable? get listenable => controller;
 
   @override
+  String get viewKind => 'diff';
+
+  @override
   bool matches(TerminalFileTab other) =>
       other is DiffViewTab && other.host.id == host.id;
 

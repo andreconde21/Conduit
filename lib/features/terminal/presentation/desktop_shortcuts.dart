@@ -19,7 +19,14 @@ import 'package:flutter/services.dart';
 ///   rarely used numeric argument.
 /// * The help sheet is Ctrl+Shift+/ (Ctrl+?), not Ctrl+/, which sends ^_
 ///   (undo). F1 stays with htop and mc.
-/// * macOS uses Cmd, which never reaches the shell.
+/// * The desktop shell's splits: Ctrl+Shift+\ (right) and Ctrl+Shift+-
+///   (down), like Windows Terminal's Alt+Shift pair but on Ctrl so Alt
+///   stays Meta. Ctrl+Shift+- used to send Ctrl+_ (undo); Ctrl+/ still
+///   sends the same ^_. Alt+arrows move between splits, and only when a
+///   split lies that way: otherwise the shell gets them (word motion).
+///   Ctrl+Shift+U jumps to the next unread row of the sidebar.
+/// * macOS uses Cmd, which never reaches the shell (iTerm2's Cmd+D /
+///   Cmd+Shift+D split, Cmd+Option+arrows move).
 enum DesktopAction {
   zoomIn('Zoom in'),
   zoomOut('Zoom out'),
@@ -30,7 +37,13 @@ enum DesktopAction {
   previousSession('Previous session'),
   goToSession('Go to session 1 to 9'),
   toggleFullscreen('Fullscreen terminal'),
-  showShortcuts('Keyboard shortcuts');
+  showShortcuts('Keyboard shortcuts'),
+  splitRight('Split right'),
+  splitDown('Split down'),
+
+  /// [DesktopShortcutMatch.index]: 0 left, 1 right, 2 up, 3 down.
+  focusPane('Move between splits'),
+  nextUnread('Next unread');
 
   const DesktopAction(this.label);
 
@@ -38,7 +51,8 @@ enum DesktopAction {
 }
 
 /// A matched shortcut; [index] is the zero-based session for
-/// [DesktopAction.goToSession].
+/// [DesktopAction.goToSession], the direction for
+/// [DesktopAction.focusPane] (see [focusDirections]).
 @immutable
 class DesktopShortcutMatch {
   const DesktopShortcutMatch(this.action, [this.index = 0]);
@@ -134,6 +148,34 @@ DesktopShortcutMatch? matchDesktopShortcut(KeyEvent event) {
       final index = _digitIndex(key);
       if (index != null) return match(DesktopAction.goToSession, index);
     }
+    // Splits. Shift+\ and Shift+- arrive as \ / | and - / _ depending on
+    // the OS.
+    if (!_mac &&
+        shift &&
+        (key == LogicalKeyboardKey.backslash || key == LogicalKeyboardKey.bar)) {
+      return match(DesktopAction.splitRight);
+    }
+    if (!_mac &&
+        shift &&
+        (key == LogicalKeyboardKey.minus ||
+            key == LogicalKeyboardKey.underscore)) {
+      return match(DesktopAction.splitDown);
+    }
+    if (_mac && key == LogicalKeyboardKey.keyD) {
+      return match(shift ? DesktopAction.splitDown : DesktopAction.splitRight);
+    }
+    if (shift && key == LogicalKeyboardKey.keyU) {
+      return match(DesktopAction.nextUnread);
+    }
+  }
+
+  // Between splits: Alt+arrows, Cmd+Option+arrows on macOS.
+  final paneModifiers = _mac
+      ? meta && alt && !ctrl && !shift
+      : alt && !ctrl && !meta && !shift;
+  if (paneModifiers) {
+    final direction = focusDirections.indexOf(key);
+    if (direction >= 0) return match(DesktopAction.focusPane, direction);
   }
 
   // Ctrl+Tab / Ctrl+Shift+Tab on every desktop.
@@ -159,6 +201,14 @@ DesktopShortcutMatch? matchDesktopShortcut(KeyEvent event) {
   }
   return null;
 }
+
+/// The arrows of [DesktopAction.focusPane], by match index.
+const focusDirections = [
+  LogicalKeyboardKey.arrowLeft,
+  LogicalKeyboardKey.arrowRight,
+  LogicalKeyboardKey.arrowUp,
+  LogicalKeyboardKey.arrowDown,
+];
 
 int? _digitIndex(LogicalKeyboardKey key) {
   const digits = [
@@ -216,6 +266,10 @@ String desktopShortcutKeys(DesktopAction action) => switch (action) {
   DesktopAction.goToSession => _mac ? 'Cmd+1…9' : 'Alt+1…9',
   DesktopAction.toggleFullscreen => _mac ? 'Ctrl+Cmd+F' : 'F11',
   DesktopAction.showShortcuts => _mac ? 'Cmd+/' : 'Ctrl+Shift+/',
+  DesktopAction.splitRight => _mac ? 'Cmd+D' : 'Ctrl+Shift+\\',
+  DesktopAction.splitDown => _mac ? 'Cmd+Shift+D' : 'Ctrl+Shift+-',
+  DesktopAction.focusPane => _mac ? 'Cmd+Option+arrows' : 'Alt+arrows',
+  DesktopAction.nextUnread => _mac ? 'Cmd+Shift+U' : 'Ctrl+Shift+U',
 };
 
 /// Everything the help sheet lists, for the running OS.

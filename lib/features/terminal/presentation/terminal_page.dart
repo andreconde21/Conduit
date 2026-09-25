@@ -15,8 +15,15 @@ import 'package:conduit/features/agent_attention/domain/agent_command_runner.dar
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_launcher.dart';
+import 'package:conduit/features/chat_view/presentation/chat_view_presenter.dart';
 import 'package:conduit/features/companion_setup/domain/companion_status.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_controller.dart';
+import 'package:conduit/features/desktop_shell/domain/shell_layout.dart';
+import 'package:conduit/features/desktop_shell/domain/sidebar_tree.dart';
+import 'package:conduit/features/desktop_shell/presentation/chat_view_tab.dart';
+import 'package:conduit/features/desktop_shell/presentation/terminal_shell_embedding.dart';
+import 'package:conduit/features/desktop_shell/presentation/widgets/shell_split_area.dart';
+import 'package:conduit/features/desktop_shell/presentation/widgets/shell_tab_strip.dart';
 import 'package:conduit/features/diff_view/data/ssh_git_diff_source.dart';
 import 'package:conduit/features/diff_view/presentation/diff_view.dart';
 import 'package:conduit/features/diff_view/presentation/diff_view_controller.dart';
@@ -121,6 +128,7 @@ class TerminalPage extends StatefulWidget {
     this.promptImagePreparer,
     this.homeBoards,
     this.hostChannels,
+    this.shell,
     super.key,
   });
 
@@ -166,12 +174,17 @@ class TerminalPage extends StatefulWidget {
   /// means SSH through [hostKeyVerifier].
   final HostChannels? hostChannels;
 
+  /// Runs the page inside the desktop shell (its tabs, split panes and
+  /// dashboard) instead of as a pushed route; null on phones and tablets.
+  final TerminalShellEmbedding? shell;
+
   @override
   State<TerminalPage> createState() => _TerminalPageState();
 }
 
 class _TerminalPageState extends State<TerminalPage>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin
+    implements TerminalShellHost {
   final _focusNode = FocusNode();
 
   /// The short slide after a swipe on the top row switched sessions.
@@ -220,8 +233,14 @@ class _TerminalPageState extends State<TerminalPage>
   /// on phones. See desktop_shortcuts.dart.
   late final _desktopShortcuts = DesktopShortcutHandler(
     onShortcut: _handleDesktopShortcut,
-    isActive: () => mounted && (_route?.isCurrent ?? true),
+    isActive: () =>
+        mounted &&
+        (_route?.isCurrent ?? true) &&
+        (widget.shell?.isVisible() ?? true),
   );
+
+  /// The desktop shell's panes and this page's focus, kept in step.
+  TerminalShellSync? _shellSync;
   ModalRoute<Object?>? _route;
 
   @override
@@ -260,6 +279,147 @@ class _TerminalPageState extends State<TerminalPage>
       _focusNode.requestFocus();
     });
     _desktopShortcuts.attach();
+    final shell = widget.shell;
+    if (shell != null) {
+      shell.host = this;
+      _shellSync = TerminalShellSync(
+        controller: shell.controller,
+        viewIds: () => viewIds,
+        activeViewId: () => activeViewId,
+        activate: activateView,
+      );
+      _fileTabs.addListener(_handleShellViewsChanged);
+      shell.controller.addListener(_handleShellControllerChanged);
+      _layoutWasHeld = shell.controller.layoutHeld;
+      _shellSync!.fromPage();
+    }
+  }
+
+  bool _layoutWasHeld = true;
+
+  void _handleShellViewsChanged() {
+    _shellSync?.fromPage();
+    widget.shell?.onViewsChanged?.call();
+  }
+
+  void _handleShellControllerChanged() {
+    final held = widget.shell!.controller.layoutHeld;
+    if (_layoutWasHeld && !held) {
+      _layoutWasHeld = false;
+      _shellSync?.afterRelease();
+      widget.shell?.onViewsChanged?.call();
+    }
+  }
+
+  // TerminalShellHost: what the desktop shell asks of the embedded page.
+
+  @override
+  List<String> get viewIds => [
+    for (final session in widget.workspace.sessions) sessionViewId(session),
+    for (final tab in _fileTabs.tabs) tab.viewId,
+  ];
+
+  @override
+  String? get activeViewId {
+    final tab = _fileTabs.active;
+    if (tab != null) return tab.viewId;
+    final session = widget.workspace.activeSession;
+    return session == null ? null : sessionViewId(session);
+  }
+
+  @override
+  TerminalSessionController? get focusedSession =>
+      _fileTabs.active == null ? widget.workspace.activeSession : null;
+
+  TerminalSessionController? _sessionForView(String viewId) => widget
+      .workspace
+      .sessions
+      .where((session) => sessionViewId(session) == viewId)
+      .firstOrNull;
+
+  TerminalFileTab? _tabForView(String viewId) =>
+      _fileTabs.tabs.where((tab) => tab.viewId == viewId).firstOrNull;
+
+  @override
+  void activateView(String viewId) {
+    final session = _sessionForView(viewId);
+    if (session != null) {
+      _fileTabs.activate(null);
+      widget.workspace.activate(session);
+      _focusNode.requestFocus();
+      return;
+    }
+    final tab = _tabForView(viewId);
+    if (tab != null) _fileTabs.activate(tab);
+  }
+
+  @override
+  Future<void> closeView(String viewId) async {
+    final session = _sessionForView(viewId);
+    if (session != null) {
+      await _closeSessionFromKeyboard(session);
+      return;
+    }
+    final tab = _tabForView(viewId);
+    if (tab != null) await _closeFileTab(tab);
+  }
+
+  @override
+  bool presentChat(ChatViewRequest request) {
+    if (!mounted) return false;
+    _fileTabs.add(ChatViewTab(request));
+    return true;
+  }
+
+  @override
+  LivePreviewTab? previewTabFor(SavedHost host) => _previewTabFor(host);
+
+  @override
+  Future<void> openPreviewForFocused() async {
+    final session = widget.workspace.activeSession;
+    if (session == null) return;
+    await _openLivePreview(session);
+  }
+
+  /// Splits the focused pane at [edge] with the most recent view on no
+  /// pane, or with a new session when every view is on screen.
+  Future<void> _splitFocused(ShellEdge edge) async {
+    final sync = _shellSync;
+    final shell = widget.shell;
+    if (sync == null || shell == null) return;
+    final rendered = sync.rendered;
+    if (!rendered.canSplit) return;
+    final hidden = sync.hiddenView;
+    if (hidden != null) {
+      shell.controller.editLayout(
+        viewIds.toSet(),
+        (layout) => layout.split(layout.focusedPane.id, edge, hidden),
+      );
+      return;
+    }
+    final connectFlow = widget.connectFlow;
+    if (connectFlow == null) return;
+    sync.requestSplit(edge);
+    try {
+      await _newSessionOnMachine(connectFlow, widget.workspace.activeSession);
+    } finally {
+      // A cancelled picker leaves no split waiting for the next session.
+      sync.clearSplit();
+    }
+  }
+
+  /// Alt+arrows: the pane that way, if there is one.
+  bool _focusPaneToward(int direction) {
+    final sync = _shellSync;
+    final shell = widget.shell;
+    if (sync == null || shell == null) return false;
+    final target = sync.rendered.neighbor(ShellDirection.values[direction]);
+    if (target == null) return false;
+    shell.controller.editLayout(
+      viewIds.toSet(),
+      (layout) => layout.focus(target),
+    );
+    return true;
   }
 
   @override
@@ -310,6 +470,13 @@ class _TerminalPageState extends State<TerminalPage>
   @override
   void dispose() {
     _desktopShortcuts.detach();
+    final shell = widget.shell;
+    if (shell != null) {
+      if (identical(shell.host, this)) shell.host = null;
+      shell.controller.removeListener(_handleShellControllerChanged);
+      _fileTabs.removeListener(_handleShellViewsChanged);
+      _shellSync?.dispose();
+    }
     unawaited(WakelockPlus.disable());
     _setSystemUiFullscreen(false);
     _shareTarget?.removeListener(_consumeSharedDraft);
@@ -669,6 +836,7 @@ class _TerminalPageState extends State<TerminalPage>
   }
 
   void _handleWorkspaceChanged() {
+    if (_shellSync != null) _handleShellViewsChanged();
     final open = {
       for (final session in widget.workspace.sessions) session.host.id,
     };
@@ -963,6 +1131,21 @@ class _TerminalPageState extends State<TerminalPage>
         _toggleFullscreen();
       case DesktopAction.showShortcuts:
         unawaited(_showDesktopShortcuts());
+      case DesktopAction.splitRight:
+      case DesktopAction.splitDown:
+        if (_shellSync == null || !_shellSync!.rendered.canSplit) return false;
+        unawaited(
+          _splitFocused(
+            match.action == DesktopAction.splitRight
+                ? ShellEdge.right
+                : ShellEdge.bottom,
+          ),
+        );
+      case DesktopAction.focusPane:
+        return _focusPaneToward(match.index);
+      case DesktopAction.nextUnread:
+        // The desktop shell's own handler (it knows the sidebar).
+        return false;
     }
     return true;
   }
@@ -970,8 +1153,23 @@ class _TerminalPageState extends State<TerminalPage>
   /// App shortcuts the terminal must not forward to the shell: the quick
   /// switcher, and on desktop the zoom / session / help keys (run by
   /// [_desktopShortcuts], which sees the key after the terminal does).
-  bool _keepFromSession(KeyEvent event) =>
-      isQuickSwitcherShortcut(event) || matchDesktopShortcut(event) != null;
+  bool _keepFromSession(KeyEvent event) {
+    if (isQuickSwitcherShortcut(event)) return true;
+    final match = matchDesktopShortcut(event);
+    if (match == null) return false;
+    return switch (match.action) {
+      // Only the desktop shell splits and has unread rows.
+      DesktopAction.splitRight ||
+      DesktopAction.splitDown ||
+      DesktopAction.nextUnread => _shellSync != null,
+      // Alt+arrows stay the shell's word motion unless a split lies that
+      // way.
+      DesktopAction.focusPane =>
+        _shellSync?.rendered.neighbor(ShellDirection.values[match.index]) !=
+            null,
+      _ => true,
+    };
+  }
 
   Future<void> _showDesktopShortcuts() async {
     await showDesktopShortcutsSheet(context);
@@ -1044,7 +1242,8 @@ class _TerminalPageState extends State<TerminalPage>
     await widget.workspace.close(session);
     if (!mounted) return;
     if (!widget.workspace.hasSessions && _fileTabs.tabs.isEmpty) {
-      Navigator.of(context).pop();
+      // The desktop shell shows its dashboard on its own.
+      if (widget.shell == null) Navigator.of(context).pop();
       return;
     }
     _showTerminal();
@@ -1200,6 +1399,7 @@ class _TerminalPageState extends State<TerminalPage>
   void _toggleFullscreen() {
     setState(() => _fullscreen = !_fullscreen);
     _setSystemUiFullscreen(_fullscreen);
+    widget.shell?.onFullscreenChanged?.call(_fullscreen);
   }
 
   Future<void> _openPromptComposer(TerminalSessionController session) async {
@@ -1866,6 +2066,9 @@ class _TerminalPageState extends State<TerminalPage>
     Brightness brightness,
   ) {
     final fontFamily = widget.themeController.terminalFont.fontFamily;
+    if (tab.viewBuilder case final builder?) {
+      return Builder(key: ValueKey(tab), builder: builder);
+    }
     return switch (tab) {
       DiffViewTab() => DiffView(
         key: ValueKey(tab),
@@ -1895,6 +2098,230 @@ class _TerminalPageState extends State<TerminalPage>
     };
   }
 
+  /// The back / home button, and the empty state's: the previous route,
+  /// or the desktop shell's dashboard.
+  void _leave() {
+    final shell = widget.shell;
+    if (shell != null) {
+      shell.onShowHome();
+    } else {
+      Navigator.of(context).pop();
+    }
+  }
+
+  /// The desktop shell's tab strip: every session and file-like view.
+  Widget _buildShellTabs(
+    TerminalSessionController? activeSession,
+    TerminalFileTab? activeFileTab,
+    List<TerminalFileTab> fileTabs,
+  ) {
+    final shell = widget.shell!;
+    final sessions = widget.workspace.sessions;
+    final rendered = _shellSync!.rendered;
+    ShellTabBadge badge(String viewId) =>
+        shell.badgeFor?.call(viewId) ?? const ShellTabBadge();
+    final tabs = <ShellTabData>[
+      for (final session in sessions)
+        () {
+          final viewId = sessionViewId(session);
+          final info = badge(viewId);
+          return ShellTabData(
+            viewId: viewId,
+            label: SessionTabs.labelFor(session, sessions),
+            tooltip: '${session.title}\n${session.host.endpoint}',
+            leading: SessionTabLeading(session: session),
+            dot: info.dot,
+            unread: info.unread,
+            isSession: true,
+          );
+        }(),
+      for (final tab in fileTabs)
+        ShellTabData(
+          viewId: tab.viewId,
+          label: tab.title,
+          tooltip: tab.tooltip,
+          leading: Icon(
+            tab.icon,
+            size: 13,
+            color: widget.themeController.palette.accent,
+          ),
+          dirty: tab.viewerKey.currentState?.isDirty ?? false,
+          listenable: tab.listenable,
+        ),
+    ];
+    return ShellTabStrip(
+      tabs: tabs,
+      focusedViewId: activeViewId,
+      visibleViews: rendered.visibleViews,
+      canSplit: rendered.canSplit,
+      onSelect: (viewId) {
+        activateView(viewId);
+        _showShellTerminalFocus(viewId);
+      },
+      onClose: (viewId) => unawaited(closeView(viewId)),
+      onAction: (viewId, action) {
+        final edge = edgeForTabAction(action);
+        if (edge == null) {
+          unawaited(closeView(viewId));
+          return;
+        }
+        _dropView(rendered.focusedPane.id, edge, viewId);
+      },
+    );
+  }
+
+  void _showShellTerminalFocus(String viewId) {
+    if (_sessionForView(viewId) != null) _focusNode.requestFocus();
+  }
+
+  /// A tab dropped on a pane (or its menu's split): split there, or show
+  /// it in that pane.
+  void _dropView(String paneId, ShellEdge edge, String viewId) {
+    final shell = widget.shell;
+    final sync = _shellSync;
+    if (shell == null || sync == null) return;
+    shell.controller.editLayout(viewIds.toSet(), (layout) {
+      // Splitting a pane with its own view: the old pane shows the most
+      // recent view that is on no pane.
+      final fallback = sync.recent
+          .where(
+            (view) => view != viewId && !layout.visibleViews.contains(view),
+          )
+          .firstOrNull;
+      return layout.split(paneId, edge, viewId, fallbackView: fallback);
+    });
+    _showShellTerminalFocus(viewId);
+  }
+
+  ShellPaneTitle _titleForView(String viewId) {
+    final session = _sessionForView(viewId);
+    final badge = widget.shell?.badgeFor?.call(viewId);
+    if (session != null) {
+      return ShellPaneTitle(
+        SessionTabs.labelFor(session, widget.workspace.sessions),
+        leading: SessionTabLeading(session: session),
+        dot: badge?.dot ?? SidebarDot.none,
+      );
+    }
+    final tab = _tabForView(viewId);
+    return ShellPaneTitle(
+      tab?.title ?? '',
+      leading: tab == null
+          ? null
+          : Icon(
+              tab.icon,
+              size: 13,
+              color: widget.themeController.palette.accent,
+            ),
+    );
+  }
+
+  /// The desktop shell's panes: every view built once, placed by the
+  /// saved split layout.
+  Widget _buildShellPanes(
+    List<Widget> overlays,
+    TerminalSessionController? activeSession,
+    TerminalFileTab? activeFileTab,
+    AppPalette palette,
+    Brightness brightness,
+  ) {
+    final shell = widget.shell!;
+    final views = <String, Widget>{
+      for (final session in widget.workspace.sessions)
+        sessionViewId(session): _sessionView(
+          session,
+          activeSession,
+          activeFileTab,
+          palette,
+          brightness,
+        ),
+      for (final tab in _fileTabs.tabs)
+        tab.viewId: _buildFileTab(tab, palette, brightness),
+    };
+    return ShellSplitArea(
+      key: const ValueKey('shell-split-area'),
+      layout: _shellSync!.rendered,
+      views: views,
+      focusedOverlay: overlays,
+      titleFor: _titleForView,
+      onFocusPane: (paneId) => shell.controller.editLayout(
+        views.keys.toSet(),
+        (layout) => layout.focus(paneId),
+      ),
+      onDrop: _dropView,
+      onResize: (path, ratio) => shell.controller.editLayout(
+        views.keys.toSet(),
+        (layout) => layout.resize(path, ratio),
+      ),
+      onClosePane: (paneId) => shell.controller.editLayout(
+        views.keys.toSet(),
+        (layout) => layout.closePane(paneId),
+      ),
+    );
+  }
+
+  /// One session's terminal (gestures, surface), as a tab's content or a
+  /// pane of the desktop shell.
+  Widget _sessionView(
+    TerminalSessionController session,
+    TerminalSessionController? activeSession,
+    TerminalFileTab? activeFileTab,
+    AppPalette palette,
+    Brightness brightness,
+  ) {
+    return TerminalGestureLayer(
+      key: ValueKey(session.host.id),
+      target: _gestureTargetFor(session),
+      herdrControl: _herdrControlFor(session),
+      onHerdrWorkspaceFocused: (workspaceId) =>
+          widget.connectFlow?.herdr.noteWorkspace(session, workspaceId),
+      preferences: widget.themeController.terminalGestures,
+      session: session,
+      fontSize: widget.themeController.terminalFontSize,
+      onFontSizeChanged: (fontSize) {
+        unawaited(widget.themeController.setTerminalFontSize(fontSize));
+      },
+      scrollMode: session == activeSession && _tmuxScrollMode,
+      onEnterScrollMode: () {
+        setState(() => _tmuxScrollMode = true);
+        _focusNode.requestFocus();
+      },
+      onExitScrollMode: () {
+        setState(() => _tmuxScrollMode = false);
+        _focusNode.requestFocus();
+      },
+      onOpenSessionGrid: _openSwitcher,
+      onOpenAgentPanel: _agentPanelOpener(),
+      child: TerminalSurface(
+        session: session,
+        autoConnect: widget.workspace.mayAutoConnect(session),
+        palette: palette,
+        brightness: brightness,
+        fontFamily: widget.themeController.terminalFont.fontFamily,
+        fontSize: widget.themeController.terminalFontSize,
+        predictiveEchoEnabled: session.host.predictiveEchoEnabled,
+        terminalMouseInput: widget.themeController.terminalMouseInput,
+        focusNode: session == activeSession && activeFileTab == null
+            ? _focusNode
+            : null,
+        tmuxScrollMode: session == activeSession && _tmuxScrollMode,
+        onExitTmuxScrollMode: () {
+          setState(() => _tmuxScrollMode = false);
+          _focusNode.requestFocus();
+        },
+        onPathTap: (path) => _handlePathTap(session, path),
+        onLinkTap: (url) => _handleLinkTap(session, url),
+        dragScrollsRemote:
+            widget.themeController.terminalGestures.dragScrollsRemote,
+        onEnterScrollMode: _dragScrollModeEntry(session),
+        onKeyEvent: (_, event) => _handleTerminalKey(session, event),
+        onLinkLongPress: (url, line) =>
+            _handleLinkLongPress(session, url, line),
+        onPasteImage: () => _pasteImageInto(session),
+      ),
+    );
+  }
+
   void _setTouchKeysVisible(bool visible) {
     setState(() => _touchKeysVisible = visible);
     _focusNode.requestFocus();
@@ -1907,10 +2334,16 @@ class _TerminalPageState extends State<TerminalPage>
       builder: (context, _) {
         final palette = widget.themeController.palette;
         return QuickSwitcherShortcut(
+          // In the desktop shell, the home page's switcher answers.
+          enabled: widget.shell == null,
           onInvoke: () => unawaited(_openSwitcher(fromKeyboard: true)),
           child: Scaffold(
             body: ListenableBuilder(
-              listenable: Listenable.merge([widget.workspace, _fileTabs]),
+              listenable: Listenable.merge([
+                widget.workspace,
+                _fileTabs,
+                ?widget.shell?.controller.layout,
+              ]),
               builder: (context, _) {
                 final activeSession = widget.workspace.activeSession;
                 final fileTabs = _fileTabs.tabs;
@@ -1921,9 +2354,7 @@ class _TerminalPageState extends State<TerminalPage>
                     palette: palette,
                     child: SafeArea(
                       bottom: shouldApplyBottomSafeArea(context),
-                      child: EmptyTerminalState(
-                        onBack: () => Navigator.of(context).pop(),
-                      ),
+                      child: EmptyTerminalState(onBack: _leave),
                     ),
                   );
                 }
@@ -1940,7 +2371,10 @@ class _TerminalPageState extends State<TerminalPage>
                     children: [
                       if (!_fullscreen)
                         ListenableBuilder(
-                          listenable: widget.agentAttention ?? _inertListenable,
+                          listenable: Listenable.merge([
+                            widget.agentAttention ?? _inertListenable,
+                            ?widget.shell?.controller.unreadChanges,
+                          ]),
                           builder: (context, _) {
                             final attention = widget.agentAttention;
                             final showAgents =
@@ -1956,7 +2390,21 @@ class _TerminalPageState extends State<TerminalPage>
                               activeSession: activeSession,
                               palette: palette,
                               brightness: brightness,
-                              onBack: () => Navigator.of(context).pop(),
+                              onBack: _leave,
+                              tabs: widget.shell == null
+                                  ? null
+                                  : _buildShellTabs(
+                                      activeSession,
+                                      activeFileTab,
+                                      fileTabs,
+                                    ),
+                              backIcon: widget.shell == null
+                                  ? Icons.chevron_left_rounded
+                                  : Icons.space_dashboard_outlined,
+                              backTooltip: widget.shell == null
+                                  ? 'Machines'
+                                  : 'Home',
+                              leavesWhenEmpty: widget.shell == null,
                               onOpenSettings: () => unawaited(_openSettings()),
                               onTabsChanged: _showTerminal,
                               fileTabs: fileTabs,
@@ -2055,231 +2503,126 @@ class _TerminalPageState extends State<TerminalPage>
                                 : const SizedBox.shrink(),
                           ),
                       Expanded(
-                        child: Stack(
-                          children: [
-                            Positioned.fill(
-                              child: Container(
-                                color: palette.terminalBackgroundFor(
-                                  brightness,
-                                ),
-                                child:
-                                    activeFileTab == null &&
-                                        activeSession == null
-                                    ? EmptyTerminalState(
-                                        onBack: () =>
-                                            Navigator.of(context).pop(),
-                                      )
-                                    : _slideIn(
-                                        IndexedStack(
-                                          index: activeFileTab != null
-                                              ? widget
-                                                        .workspace
-                                                        .sessions
-                                                        .length +
-                                                    fileTabs.indexOf(
-                                                      activeFileTab,
-                                                    )
-                                              : widget.workspace.sessions
-                                                    .indexOf(activeSession!),
-                                          children: [
-                                            for (final session
-                                                in widget.workspace.sessions)
-                                              TerminalGestureLayer(
-                                                key: ValueKey(session.host.id),
-                                                target: _gestureTargetFor(
-                                                  session,
-                                                ),
-                                                herdrControl: _herdrControlFor(
-                                                  session,
-                                                ),
-                                                onHerdrWorkspaceFocused:
-                                                    (workspaceId) => widget
-                                                        .connectFlow
-                                                        ?.herdr
-                                                        .noteWorkspace(
-                                                          session,
-                                                          workspaceId,
-                                                        ),
-                                                preferences: widget
-                                                    .themeController
-                                                    .terminalGestures,
-                                                session: session,
-                                                fontSize: widget
-                                                    .themeController
-                                                    .terminalFontSize,
-                                                onFontSizeChanged: (fontSize) {
-                                                  unawaited(
-                                                    widget.themeController
-                                                        .setTerminalFontSize(
-                                                          fontSize,
-                                                        ),
-                                                  );
-                                                },
-                                                scrollMode:
-                                                    session == activeSession &&
-                                                    _tmuxScrollMode,
-                                                onEnterScrollMode: () {
-                                                  setState(
-                                                    () =>
-                                                        _tmuxScrollMode = true,
-                                                  );
-                                                  _focusNode.requestFocus();
-                                                },
-                                                onExitScrollMode: () {
-                                                  setState(
-                                                    () =>
-                                                        _tmuxScrollMode = false,
-                                                  );
-                                                  _focusNode.requestFocus();
-                                                },
-                                                onOpenSessionGrid:
-                                                    _openSwitcher,
-                                                onOpenAgentPanel:
-                                                    _agentPanelOpener(),
-                                                child: TerminalSurface(
-                                                  session: session,
-                                                  autoConnect: widget.workspace
-                                                      .mayAutoConnect(session),
-                                                  palette: palette,
-                                                  brightness: brightness,
-                                                  fontFamily: widget
-                                                      .themeController
-                                                      .terminalFont
-                                                      .fontFamily,
-                                                  fontSize: widget
-                                                      .themeController
-                                                      .terminalFontSize,
-                                                  predictiveEchoEnabled: session
-                                                      .host
-                                                      .predictiveEchoEnabled,
-                                                  terminalMouseInput: widget
-                                                      .themeController
-                                                      .terminalMouseInput,
-                                                  focusNode:
-                                                      session ==
-                                                              activeSession &&
-                                                          activeFileTab == null
-                                                      ? _focusNode
-                                                      : null,
-                                                  tmuxScrollMode:
-                                                      session ==
-                                                          activeSession &&
-                                                      _tmuxScrollMode,
-                                                  onExitTmuxScrollMode: () {
-                                                    setState(
-                                                      () => _tmuxScrollMode =
-                                                          false,
-                                                    );
-                                                    _focusNode.requestFocus();
-                                                  },
-                                                  onPathTap: (path) =>
-                                                      _handlePathTap(
-                                                        session,
-                                                        path,
-                                                      ),
-                                                  onLinkTap: (url) =>
-                                                      _handleLinkTap(
-                                                        session,
-                                                        url,
-                                                      ),
-                                                  dragScrollsRemote: widget
-                                                      .themeController
-                                                      .terminalGestures
-                                                      .dragScrollsRemote,
-                                                  onEnterScrollMode:
-                                                      _dragScrollModeEntry(
-                                                        session,
-                                                      ),
-                                                  onKeyEvent: (_, event) =>
-                                                      _handleTerminalKey(
-                                                        session,
-                                                        event,
-                                                      ),
-                                                  onLinkLongPress:
-                                                      (url, line) =>
-                                                          _handleLinkLongPress(
-                                                            session,
-                                                            url,
-                                                            line,
-                                                          ),
-                                                  onPasteImage: () =>
-                                                      _pasteImageInto(session),
-                                                ),
-                                              ),
-                                            for (final tab in fileTabs)
-                                              _buildFileTab(
-                                                tab,
-                                                palette,
-                                                brightness,
-                                              ),
-                                          ],
-                                        ),
-                                      ),
-                              ),
-                            ),
-                            if (activeFileTab == null &&
-                                activeSession != null &&
-                                _muxLayout == MultiplexerTabsLayout.compact &&
-                                _muxTabs[activeSession.host.id] != null)
-                              Positioned.fill(
-                                child: MultiplexerTabOverlay(
-                                  key: ValueKey(
-                                    'mux-overlay-${activeSession.host.id}',
-                                  ),
-                                  controller: _muxTabs[activeSession.host.id]!,
-                                ),
-                              ),
-                            if (_pasteStatus case final status?)
-                              Positioned(
-                                top: 8,
-                                left: 8,
-                                child: _PasteStatusChip(text: status),
-                              ),
-                            if (activeFileTab == null &&
-                                activeSession != null &&
-                                activeSession.runsOnThisComputer &&
-                                activeSession.status ==
-                                    TerminalConnectionStatus.disconnected)
-                              Positioned(
-                                left: 16,
-                                right: 16,
-                                bottom: 16,
-                                child: Center(
-                                  child: _ShellExitedBar(
+                        child: Builder(
+                          builder: (context) {
+                            // Chips and bars of the focused session: over
+                            // the whole area, or its pane in the shell.
+                            final overlays = <Widget>[
+                              if (activeFileTab == null &&
+                                  activeSession != null &&
+                                  _muxLayout == MultiplexerTabsLayout.compact &&
+                                  _muxTabs[activeSession.host.id] != null)
+                                Positioned.fill(
+                                  child: MultiplexerTabOverlay(
                                     key: ValueKey(
-                                      'shell-exited-${activeSession.host.id}',
+                                      'mux-overlay-${activeSession.host.id}',
                                     ),
-                                    exitCode: activeSession.exitCode,
-                                    onRestart: () async {
-                                      await activeSession.connect();
-                                      _focusNode.requestFocus();
-                                    },
+                                    controller:
+                                        _muxTabs[activeSession.host.id]!,
                                   ),
                                 ),
-                              ),
-                            if (activeFileTab == null &&
-                                activeSession != null &&
-                                _previewWatchers[activeSession] != null)
-                              Positioned(
-                                top: 8,
-                                right: 8,
-                                child: PreviewReadyChip(
-                                  key: ValueKey(
-                                    'preview-ready-${activeSession.host.id}',
+                              if (_pasteStatus case final status?)
+                                Positioned(
+                                  top: 8,
+                                  left: 8,
+                                  child: _PasteStatusChip(text: status),
+                                ),
+                              if (activeFileTab == null &&
+                                  activeSession != null &&
+                                  activeSession.runsOnThisComputer &&
+                                  activeSession.status ==
+                                      TerminalConnectionStatus.disconnected)
+                                Positioned(
+                                  left: 16,
+                                  right: 16,
+                                  bottom: 16,
+                                  child: Center(
+                                    child: _ShellExitedBar(
+                                      key: ValueKey(
+                                        'shell-exited-${activeSession.host.id}',
+                                      ),
+                                      exitCode: activeSession.exitCode,
+                                      onRestart: () async {
+                                        await activeSession.connect();
+                                        _focusNode.requestFocus();
+                                      },
+                                    ),
                                   ),
-                                  controller: _previewWatchers[activeSession]!,
-                                  hidden: (offer) =>
-                                      _previewShows(activeSession, offer),
-                                  onOpen: (offer) => unawaited(
-                                    _openLivePreview(
+                                ),
+                              if (activeFileTab == null &&
+                                  activeSession != null &&
+                                  _previewWatchers[activeSession] != null)
+                                Positioned(
+                                  top: 8,
+                                  right: 8,
+                                  child: PreviewReadyChip(
+                                    key: ValueKey(
+                                      'preview-ready-${activeSession.host.id}',
+                                    ),
+                                    controller:
+                                        _previewWatchers[activeSession]!,
+                                    hidden: (offer) =>
+                                        _previewShows(activeSession, offer),
+                                    onOpen: (offer) => unawaited(
+                                      _openLivePreview(
+                                        activeSession,
+                                        port: offer.port,
+                                        path: offer.path,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ];
+                            final content = Container(
+                              color: palette.terminalBackgroundFor(brightness),
+                              child:
+                                  activeFileTab == null && activeSession == null
+                                  ? EmptyTerminalState(onBack: _leave)
+                                  : widget.shell != null
+                                  ? _buildShellPanes(
+                                      overlays,
                                       activeSession,
-                                      port: offer.port,
-                                      path: offer.path,
+                                      activeFileTab,
+                                      palette,
+                                      brightness,
+                                    )
+                                  : _slideIn(
+                                      IndexedStack(
+                                        index: activeFileTab != null
+                                            ? widget.workspace.sessions.length +
+                                                  fileTabs.indexOf(
+                                                    activeFileTab,
+                                                  )
+                                            : widget.workspace.sessions.indexOf(
+                                                activeSession!,
+                                              ),
+                                        children: [
+                                          for (final session
+                                              in widget.workspace.sessions)
+                                            _sessionView(
+                                              session,
+                                              activeSession,
+                                              activeFileTab,
+                                              palette,
+                                              brightness,
+                                            ),
+                                          for (final tab in fileTabs)
+                                            _buildFileTab(
+                                              tab,
+                                              palette,
+                                              brightness,
+                                            ),
+                                        ],
+                                      ),
                                     ),
-                                  ),
-                                ),
-                              ),
-                          ],
+                            );
+                            return Stack(
+                              children: [
+                                Positioned.fill(child: content),
+                                if (widget.shell == null) ...overlays,
+                              ],
+                            );
+                          },
                         ),
                       ),
                       // Menu → buttons: tappable choices for prompts on screen.

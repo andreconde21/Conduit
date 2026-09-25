@@ -188,7 +188,7 @@ class _SessionTabsState extends State<SessionTabs> {
                     onTap: () => widget.onOpenMultiplexerTabs?.call(session),
                   ),
             tooltip: '${session.title}\n${session.host.endpoint}',
-            leading: _SessionLeading(session: session),
+            leading: SessionTabLeading(session: session),
             selected: selected,
             palette: widget.palette,
             brightness: widget.brightness,
@@ -227,10 +227,10 @@ class _SessionTabsState extends State<SessionTabs> {
 
 final Listenable _inertListenable = ChangeNotifier();
 
-/// A session tab's status dot, followed by the tmux or Herdr logo when the
+/// A session tab's connection dot, followed by the tmux or Herdr logo when the
 /// session runs in one.
-class _SessionLeading extends StatelessWidget {
-  const _SessionLeading({required this.session});
+class SessionTabLeading extends StatelessWidget {
+  const SessionTabLeading({required this.session, super.key});
 
   final TerminalSessionController session;
 

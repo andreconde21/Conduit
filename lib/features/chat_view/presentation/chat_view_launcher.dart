@@ -8,6 +8,7 @@ import 'package:conduit/features/agent_attention/presentation/agent_attention_co
 import 'package:conduit/features/chat_view/data/conductore_chat_client.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_controller.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_page.dart';
+import 'package:conduit/features/chat_view/presentation/chat_view_presenter.dart';
 import 'package:conduit/features/companion_setup/data/companion_probe.dart';
 import 'package:conduit/features/companion_setup/domain/companion_status.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_setup_controller.dart';
@@ -354,7 +355,8 @@ ChatViewAccess _blockedBy(CompanionStatus status, SavedHost host) {
   };
 }
 
-/// Opens the chat view for [agent] on [host] as a full-screen route.
+/// Opens the chat view for [agent] on [host] as a full-screen route, or
+/// through the nearest [ChatViewPresenter] (the desktop shell's tabs).
 /// [onOpenTerminal] runs after the route is popped by its Terminal button
 /// (the caller shows that session's TUI).
 Future<void> openChatView({
@@ -402,6 +404,31 @@ Future<void> openChatView({
     decide: decide,
     agentChanges: changes,
   );
+  // The desktop shell shows the chat as a tab in its panes.
+  final presenter = ChatViewPresenter.maybeOf(context);
+  if (presenter != null) {
+    final companion = CompanionSetupScope.maybeOf(context);
+    final presented = presenter.present(
+      ChatViewRequest(
+        host: host,
+        agent: agent,
+        controller: controller,
+        onOpenTerminal: onOpenTerminal,
+        onDispose: changes.dispose,
+        dictation: dictation,
+        initialDraft: initialDraft,
+        imageAttacher: imageAttacher,
+        pasteImages: pasteImages,
+        onSetUpCompanion: companion == null || !context.mounted
+            ? null
+            : () => showCompanionSetup(context, host),
+        onEnableMonitoring: attention.monitoringEnabled(host)
+            ? null
+            : () => attention.enableMonitoring(host),
+      ),
+    );
+    if (presented) return;
+  }
   var toTerminal = false;
   await Navigator.of(context).push(
     MaterialPageRoute<void>(
