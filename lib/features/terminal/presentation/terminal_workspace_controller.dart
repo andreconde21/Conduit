@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/terminal/domain/network_connectivity.dart';
 import 'package:conduit/features/terminal/domain/ssh_terminal_repository.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
@@ -14,6 +15,10 @@ class TerminalWorkspaceController extends ChangeNotifier {
   final NetworkConnectivity? _connectivity;
 
   final List<TerminalSessionController> _sessions = [];
+
+  /// The connect target each session was opened with, when the caller
+  /// passed one (it keeps the Herdr label, which the derived id drops).
+  final Map<TerminalSessionController, ConnectTarget> _targets = {};
   int _activeIndex = 0;
   TerminalEnterSequence _enterSequence = TerminalEnterSequence.cr;
 
@@ -47,8 +52,13 @@ class TerminalWorkspaceController extends ChangeNotifier {
 
   /// Opens (or activates) the session for [host]. [startupCommand] is typed
   /// into the shell once connected; it only applies to a newly created
-  /// session.
-  TerminalSessionController open(SavedHost host, {String? startupCommand}) {
+  /// session. [target] records what the session attaches to, for the list
+  /// kept between app runs.
+  TerminalSessionController open(
+    SavedHost host, {
+    String? startupCommand,
+    ConnectTarget? target,
+  }) {
     final existingIndex = _sessions.indexWhere(
       (session) => session.host.id == host.id,
     );
@@ -67,10 +77,35 @@ class TerminalWorkspaceController extends ChangeNotifier {
       enterSequence: _enterSequence,
     );
     session.addListener(notifyListeners);
+    if (target != null) _targets[session] = target;
     _sessions.add(session);
     _activeIndex = _sessions.length - 1;
     notifyListeners();
     return session;
+  }
+
+  /// What [session] attaches to: the target it was opened with, else the
+  /// one encoded in its host id, else a plain shell.
+  ConnectTarget targetOf(TerminalSessionController session) =>
+      _targets[session] ??
+      ConnectTarget.fromSessionHostId(session.host.id) ??
+      const ConnectTarget.shell();
+
+  /// Moves the session at [from] to [to] (both indexes into [sessions]),
+  /// keeping the same session active.
+  void move(int from, int to) {
+    if (from < 0 ||
+        from >= _sessions.length ||
+        to < 0 ||
+        to >= _sessions.length ||
+        from == to) {
+      return;
+    }
+    final active = activeSession;
+    final session = _sessions.removeAt(from);
+    _sessions.insert(to, session);
+    _activeIndex = active == null ? 0 : _sessions.indexOf(active);
+    notifyListeners();
   }
 
   void activate(TerminalSessionController session) {
@@ -89,6 +124,7 @@ class TerminalWorkspaceController extends ChangeNotifier {
     }
 
     _sessions.removeAt(index);
+    _targets.remove(session);
     if (_sessions.isEmpty) {
       _activeIndex = 0;
     } else if (_activeIndex >= _sessions.length) {
@@ -106,6 +142,7 @@ class TerminalWorkspaceController extends ChangeNotifier {
   Future<void> closeAll() async {
     final sessions = List<TerminalSessionController>.from(_sessions);
     _sessions.clear();
+    _targets.clear();
     _activeIndex = 0;
     notifyListeners();
 

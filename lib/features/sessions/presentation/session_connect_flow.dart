@@ -193,6 +193,7 @@ class SessionConnectFlow {
     return workspace.open(
       target.apply(host),
       startupCommand: target.startupCommand,
+      target: target,
     );
   }
 

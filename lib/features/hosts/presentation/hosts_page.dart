@@ -1157,6 +1157,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
       widget.workspaceController.open(
         target.apply(host),
         startupCommand: target.startupCommand,
+        target: target,
       );
     }
     if (!mounted) return;
