@@ -1,0 +1,6 @@
+tags:
+  # README screenshots (test/screenshots): slow-ish and write PNGs into
+  # docs/screenshots, so the normal suite skips them. Render them with
+  # tools/render-screenshots.sh.
+  screenshots:
+    skip: "README screenshots: run tools/render-screenshots.sh"

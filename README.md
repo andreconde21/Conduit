@@ -9,6 +9,16 @@ Drive Claude Code, Herdr and tmux sessions on your own machines from your phone,
 Conductore is an Android app (iOS is not built yet). It is a fork of
 [Conduit](https://github.com/gwitko/Conduit) by gwitko.
 
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/01-home.png" width="260" alt="Home screen with live session previews"><br><sub>Home: live sessions and other workspaces</sub></td>
+    <td align="center"><img src="docs/screenshots/03-chat-view.png" width="260" alt="Chat View of a Claude Code session"><br><sub>Chat View with an approval</sub></td>
+    <td align="center"><img src="docs/screenshots/02-terminal.png" width="260" alt="Terminal on a Herdr session running Claude Code"><br><sub>Terminal on a Herdr session</sub></td>
+  </tr>
+</table>
+
+More in [Screenshots](#screenshots).
+
 ## Why
 
 - **Your machines, your keys.** Hosts, keys and trusted fingerprints stay on
@@ -110,6 +120,24 @@ Both are first-class: everything below works for Herdr and for tmux.
   "Follow Omarchy theme from machine". The app reads its current Omarchy
   theme and font over SSH when it starts or comes back, including your own
   custom themes.
+
+## Screenshots
+
+Rendered from the app's own widgets with demo data by
+`tools/render-screenshots.sh` (Everforest theme, a 1080x2400 phone).
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/04-agents-inbox.png" width="260" alt="Agents inbox"><br><sub>Inbox: approvals on top, then working and done agents by machine</sub></td>
+    <td align="center"><img src="docs/screenshots/05-herdr-navigator.png" width="260" alt="Herdr navigator sheet"><br><sub>Herdr navigator: split, new tab or workspace, and every pane with its agent state</sub></td>
+    <td align="center"><img src="docs/screenshots/06-menu-buttons.png" width="260" alt="Menu buttons over a Claude Code permission prompt"><br><sub>Menu buttons answer a Claude Code prompt in one tap</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/07-appearance.png" width="260" alt="Appearance sheet with Omarchy themes"><br><sub>Appearance: the Omarchy themes</sub></td>
+    <td align="center"><img src="docs/screenshots/08-agent-hooks.png" width="260" alt="Agent hooks screen showing Active"><br><sub>Agent hooks: companion status and doctor checks</sub></td>
+    <td></td>
+  </tr>
+</table>
 
 ## Install
 
