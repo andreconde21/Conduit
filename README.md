@@ -37,18 +37,26 @@ Most of this needs the [host companion](#host-companion) on the machine.
 
 ### Herdr and tmux
 
-- **Live session grid** on the home screen with previews of each session,
-  Mosh/SSH badges, and tiles for your other Herdr workspaces.
-- **Navigator** with tab 1-9, pane switching, quick splits, new tab, jump,
-  zoom, kill pane and detach.
-- **Gestures**: swipe for tabs, two fingers for panes and workspaces, pinch to
-  zoom a pane or change the font size. Every mapping is configurable.
-- **Deep links** from notifications, the home grid and the inbox open an agent
-  at its workspace, tab and pane.
+Both are first-class: everything below works for Herdr and for tmux.
+
+- **Home screen built around your servers**: pick one, several or all machines;
+  your open sessions show as live previews (grid, large tiles or a list) with
+  Mosh/SSH badges and each agent's state, and **Other workspaces** lists the
+  Herdr workspaces and tmux sessions you have not opened yet.
+- **Navigators** for Herdr and tmux: every pane with its agent and state, tap to
+  switch, one-tap **Split right / Split down / New tab / New workspace** (tmux:
+  new window), windows or tabs 1-9, zoom, kill pane and detach. Long-press the
+  toolbar's Herdr or tmux button for the split menu.
+- **Gestures**: swipe for tabs or windows, two fingers sideways for panes, two
+  fingers up/down for workspaces (Herdr) or scrollback (tmux), pinch for the
+  font size. Every mapping is configurable.
+- **Deep links** from notifications, the home screen and the inbox open an
+  agent at its exact workspace, tab and pane, in Herdr or tmux.
 - **The host's own keybindings**: Herdr keys are read from the machine's
   `~/.config/herdr/config.toml`, falling back to Herdr's defaults.
 - **Configurable multiplexer prefix**, including Ctrl+Space.
-- Per-host tmux auto attach/create, start directory and scrollback mode.
+- Official tmux and Herdr logos, per-host tmux auto attach/create, start
+  directory and scrollback mode.
 
 ### Terminal
 
@@ -129,7 +137,17 @@ permission, ended) and lets the phone answer permission prompts. The phone
 talks to it only through SSH exec commands. It opens no ports and needs no
 relay.
 
-<!-- TODO: fill in the measured footprint (RSS, CPU, disk) once numbers are in. -->
+It is built to stay out of the way. Claude Code hooks and the status line are
+small POSIX `sh` scripts that hand each event to a background daemon and exit;
+only the daemon and the commands the phone runs use Node.js. Measured on a
+Linux server with companion 0.4.0:
+
+| | Cost |
+|---|---|
+| Per hook event | about 2.5 ms and 1.9 MB |
+| Per status line refresh | about 3 ms and 1.9 MB |
+| Daemon when idle | no CPU, no wakeups; about 7 MB private memory |
+| Disk | under 200 KB, no dependencies |
 It is light: no npm dependencies, not a service, and it exits by itself after
 24 hours without a request.
 
@@ -160,6 +178,12 @@ What it changes on the host:
 
 Details, the command reference and the JSON contract are in
 [host/README.md](host/README.md).
+
+## Branches
+
+- `main`: Conductore. Releases are tagged `v0.1.0-conductore.N`.
+- `master`: an unmodified mirror of upstream Conduit, kept for merging upstream
+  fixes.
 
 ## Building from source
 
