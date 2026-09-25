@@ -191,26 +191,24 @@ class AppPalette {
   /// The terminal background: every surface starts from it.
   Color get canvas => colors.background;
 
-  /// Cards and bars: the background nudged a few percent toward the text.
-  Color get panel => mixOmarchyColor(
-    colors.background,
-    colors.foreground,
-    isDark ? 0.045 : 0.035,
-  );
+  /// Cards and bars: the background with Omarchy's 4% foreground fill
+  /// (normal-fill-alpha in shell/Commons/Style.qml).
+  Color get panel =>
+      mixOmarchyColor(colors.background, colors.foreground, 0.04);
 
-  /// Sheets, dialogs and menus.
-  Color get panelElevated => mixOmarchyColor(
-    colors.background,
-    colors.foreground,
-    isDark ? 0.085 : 0.06,
-  );
+  /// Sheets, dialogs and menus: the 8% hover fill.
+  Color get panelElevated =>
+      mixOmarchyColor(colors.background, colors.foreground, 0.08);
 
-  /// The thin 1px border every card and field draws: Omarchy's muted
-  /// colour, softened toward the background.
-  Color get hairline => mixOmarchyColor(colors.background, colors.muted, 0.7);
+  /// The thin 1px border on cards, fields and sheets: Omarchy's muted.
+  Color get hairline => colors.muted;
 
-  /// A stronger border (outlined buttons, focused outlines): muted itself.
-  Color get border => colors.muted;
+  /// A stronger border (outlined buttons): muted a quarter toward the text.
+  Color get border => mixOmarchyColor(colors.muted, colors.foreground, 0.25);
+
+  /// Selected rows and segments: the accent at Omarchy's 18% selected fill.
+  Color get selectedFill =>
+      Color.alphaBlend(accent.withValues(alpha: 0.18), panel);
 
   Color get foreground => colors.foreground;
   Color get mutedForeground =>

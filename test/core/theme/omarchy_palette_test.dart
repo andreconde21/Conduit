@@ -104,9 +104,9 @@ void main() {
 
       test('chrome is flat and derived from the theme background', () {
         expect(palette.canvas, palette.colors.background);
-        expect(palette.border, palette.colors.muted);
+        expect(palette.hairline, palette.colors.muted);
         expect(contrast(palette.panel, palette.canvas), lessThan(1.25));
-        expect(palette.hairline, isNot(palette.canvas));
+        expect(palette.border, isNot(palette.canvas));
       });
     });
   }
