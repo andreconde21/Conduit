@@ -89,6 +89,18 @@ String encodeWheelEvent({
   }
 }
 
+/// The Up or Down arrow as a scroll notch: `ESC O A` in application
+/// cursor-key mode (DECSET 1, set by less, vim and most full-screen
+/// programs), `ESC [ A` otherwise, as xterm sends for alternate scroll.
+/// (conduit_vt's key encoder follows the keypad mode, DECKPAM, instead.)
+String encodeScrollArrow({
+  required bool up,
+  required bool applicationCursorKeys,
+}) {
+  final final_ = up ? 'A' : 'B';
+  return applicationCursorKeys ? '\x1bO$final_' : '\x1b[$final_';
+}
+
 /// Turns finger travel into wheel notches (or arrow presses): one per
 /// [step] pixels, keeping the remainder between moves so slow drags still
 /// scroll.

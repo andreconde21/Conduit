@@ -139,6 +139,16 @@ void main() {
     });
   });
 
+  test('encodeScrollArrow follows DECSET 1', () {
+    expect(encodeScrollArrow(up: true, applicationCursorKeys: false), '\x1b[A');
+    expect(
+      encodeScrollArrow(up: false, applicationCursorKeys: false),
+      '\x1b[B',
+    );
+    expect(encodeScrollArrow(up: true, applicationCursorKeys: true), '\x1bOA');
+    expect(encodeScrollArrow(up: false, applicationCursorKeys: true), '\x1bOB');
+  });
+
   group('RemoteScrollAccumulator', () {
     test('one notch per 14 px, keeping the remainder', () {
       final acc = RemoteScrollAccumulator();
