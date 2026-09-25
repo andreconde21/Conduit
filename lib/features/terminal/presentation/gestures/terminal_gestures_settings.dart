@@ -82,8 +82,9 @@ class TerminalGesturesSettings extends StatelessWidget {
             secondary: const Icon(Icons.pinch_rounded),
             title: const Text('Pinch to zoom'),
             subtitle: Text(
-              'Pinch to change the terminal font size. In Herdr it follows '
-              '"Pinch in Herdr" below.',
+              'Pinch to change the terminal font size, in tmux, Herdr and '
+              'plain shells. Herdr can zoom the pane instead (see "Pinch in '
+              'Herdr" below).',
               style: captionStyle,
             ),
             value: preferences.pinchZoom,
@@ -124,7 +125,7 @@ class TerminalGesturesSettings extends StatelessWidget {
             title: const Text('Two-finger swipe switches pane'),
             subtitle: Text(
               'Swipe left or right with two fingers to focus the pane on the '
-              'right or left.',
+              'right or left. Also in tmux sessions.',
               style: captionStyle,
             ),
             value: preferences.herdrTwoFingerPanes,
@@ -148,8 +149,8 @@ class TerminalGesturesSettings extends StatelessWidget {
             key: const ValueKey('herdr-pinch'),
             title: 'Pinch in Herdr',
             caption:
-                'Zoom pane: spread to zoom the focused pane full-screen, pinch '
-                'in to restore it.',
+                'Font size (default): like everywhere else. Zoom pane: spread '
+                'to zoom the focused pane full-screen, pinch in to restore it.',
             captionStyle: captionStyle,
             values: HerdrPinchAction.values,
             label: (value) => value.label,

@@ -19,7 +19,10 @@ void main() {
     await themeController.load();
   });
 
-  Future<TerminalWorkspaceController> pumpTerminal(WidgetTester tester) async {
+  Future<TerminalWorkspaceController> pumpTerminal(
+    WidgetTester tester, {
+    bool withVerifier = false,
+  }) async {
     tester.view.physicalSize = const Size(1080, 2400);
     tester.view.devicePixelRatio = 2.6;
     addTearDown(tester.view.reset);
@@ -46,6 +49,7 @@ void main() {
           workspace: workspace,
           themeController: themeController,
           sftpRepository: NoNetworkSftpRepository(),
+          hostKeyVerifier: withVerifier ? NoopVerifier() : null,
         ),
       ),
     );
@@ -178,5 +182,72 @@ void main() {
       ),
       findsOneWidget,
     );
+  });
+
+  testWidgets('the row has one overflow menu that holds the session tools', (
+    tester,
+  ) async {
+    await pumpTerminal(tester, withVerifier: true);
+
+    // One three-dot button, not a second one for the tools.
+    expect(find.byIcon(Icons.more_vert_rounded), findsOneWidget);
+    expect(find.byTooltip('Session tools'), findsNothing);
+
+    await tester.tap(find.byTooltip('More'));
+    await tester.pumpAndSettle();
+    expect(find.text('Git diff'), findsOneWidget);
+    expect(find.text('Live preview'), findsOneWidget);
+    expect(find.text('Reconnect'), findsOneWidget);
+    expect(find.text('Close session'), findsOneWidget);
+    // Title, tools, session control, close: three dividers between them.
+    expect(find.byType(PopupMenuDivider), findsNWidgets(3));
+  });
+
+  testWidgets('overflow entries call back with the chosen tool', (
+    tester,
+  ) async {
+    final workspace = TerminalWorkspaceController(
+      ImmediateTerminalRepository(TrackableTerminalSession()),
+    );
+    addTearDown(workspace.dispose);
+    final session = workspace.open(buildHost('a'));
+    final tools = <SessionTool>[];
+    var chats = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: TerminalHeader(
+            workspace: workspace,
+            activeSession: session,
+            palette: themeController.palette,
+            brightness: Brightness.dark,
+            onBack: () {},
+            onTabsChanged: () {},
+            fileTabs: const [],
+            activeFileTab: null,
+            onFileTabSelected: (_) {},
+            onFileTabClosed: (_) {},
+            onOpenChatView: () => chats += 1,
+            onOpenSessionTool: tools.add,
+          ),
+        ),
+      ),
+    );
+
+    Future<void> choose(String label) async {
+      await tester.tap(find.byTooltip('More'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(label));
+      await tester.pumpAndSettle();
+    }
+
+    await choose('Git diff');
+    await choose('Live preview');
+    await choose('Open chat view');
+
+    expect(tools, [SessionTool.gitDiff, SessionTool.livePreview]);
+    expect(chats, 1);
+    expect(find.byIcon(Icons.more_vert_rounded), findsOneWidget);
   });
 }

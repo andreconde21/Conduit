@@ -11,6 +11,7 @@ import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_launcher.dart';
+import 'package:conduit/features/companion_setup/presentation/companion_setup_controller.dart';
 import 'package:conduit/features/diff_view/data/ssh_git_diff_source.dart';
 import 'package:conduit/features/diff_view/presentation/diff_view.dart';
 import 'package:conduit/features/diff_view/presentation/diff_view_controller.dart';
@@ -55,7 +56,6 @@ import 'package:conduit/features/terminal/presentation/widgets/floating_toolbar.
 import 'package:conduit/features/terminal/presentation/widgets/image_crop_page.dart';
 import 'package:conduit/features/terminal/presentation/widgets/prompt_composer_sheet.dart';
 import 'package:conduit/features/terminal/presentation/widgets/recent_directories_sheet.dart';
-import 'package:conduit/features/terminal/presentation/widgets/session_tools_menu.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_header.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_link_sheet.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_surface.dart';
@@ -298,6 +298,97 @@ class _TerminalPageState extends State<TerminalPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focusNode.requestFocus();
     });
+  }
+
+  /// The pill's Chat button: Chat View when the session shows a Claude
+  /// session the companion knows, else the inline composer. Long-press
+  /// always toggles the composer.
+  void _handleChatButton(TerminalSessionController session) {
+    _maybeShowChatButtonHint();
+    if (_composeMode) {
+      setState(() => _composeMode = false);
+      _focusNode.requestFocus();
+      return;
+    }
+    final attention = widget.agentAttention;
+    final host = session.host;
+    if (attention == null || host.isLocal) {
+      setState(() => _composeMode = true);
+      return;
+    }
+    final agent = chatAgentForSession(attention, host);
+    if (agent != null) {
+      _openChat(attention, host, agent);
+      return;
+    }
+    // Not monitored through the companion, but the Agent hooks check
+    // found it working: ask the machine for its sessions.
+    final companion = CompanionSetupScope.maybeOf(context);
+    final known = companion?.statusFor(host.copyWith(id: baseHostId(host.id)));
+    if (!chatViewAvailable(attention, host) &&
+        (known?.state.isWorking ?? false)) {
+      unawaited(_openChatOrComposer(attention, session));
+      return;
+    }
+    setState(() => _composeMode = true);
+  }
+
+  void _openChat(
+    AgentAttentionController attention,
+    SavedHost host,
+    AgentInfo agent,
+  ) {
+    unawaited(
+      openChatView(
+        context: context,
+        attention: attention,
+        host: host,
+        agent: agent,
+        dictation: _dictation,
+        onOpenTerminal: () => _showAgentTerminal(attention, host, agent),
+      ),
+    );
+  }
+
+  Future<void> _openChatOrComposer(
+    AgentAttentionController attention,
+    TerminalSessionController session,
+  ) async {
+    final host = session.host;
+    final access = await checkChatViewAccessWithProgress(
+      context,
+      attention: attention,
+      host: host,
+    );
+    if (!mounted) return;
+    final agent = access != null && access.ready
+        ? matchChatAgent(host, access.agents)
+        : null;
+    if (agent != null) {
+      _openChat(attention, host, agent);
+    } else {
+      setState(() => _composeMode = true);
+    }
+  }
+
+  void _maybeShowChatButtonHint() {
+    final themeController = widget.themeController;
+    if (!mounted || themeController.chatButtonHintSeen) {
+      return;
+    }
+    unawaited(themeController.markChatButtonHintSeen());
+    // Floating well above the bottom edge: the chat bar (or Chat View's
+    // input) that just opened lives there and must stay tappable.
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        behavior: SnackBarBehavior.floating,
+        margin: EdgeInsets.fromLTRB(16, 0, 16, 112),
+        content: Text(
+          'Chat opens Chat View for Claude sessions. Long-press it for the '
+          'composer.',
+        ),
+      ),
+    );
   }
 
   void _maybeShowTouchModeHint() {
@@ -620,28 +711,39 @@ class _TerminalPageState extends State<TerminalPage> {
       },
       onOpenChat: (host, agent) {
         Navigator.of(context).pop();
-        if (!chatViewAvailable(attention, host)) {
-          // Herdr-only machines have no transcript or prompt relay.
-          unawaited(
-            showChatViewUnavailable(context, attention: attention, host: host),
-          );
-          return;
-        }
-        unawaited(
-          openChatView(
-            context: context,
-            attention: attention,
-            host: host,
-            agent: agent,
-            dictation: _dictation,
-            onOpenTerminal: () => _showAgentTerminal(attention, host, agent),
-          ),
-        );
+        unawaited(_openChatForAgent(attention, host, agent));
       },
     );
     if (mounted) {
       _focusNode.requestFocus();
     }
+  }
+
+  /// The Agents panel's Chat button: the companion on [host] decides, not
+  /// the monitor's provider (Herdr-monitored machines can have it too).
+  Future<void> _openChatForAgent(
+    AgentAttentionController attention,
+    SavedHost host,
+    AgentInfo agent,
+  ) async {
+    final access = await checkChatViewAccessWithProgress(
+      context,
+      attention: attention,
+      host: host,
+    );
+    if (access == null || !mounted) return;
+    if (!access.ready) {
+      await showChatViewUnavailable(context, host: host, access: access);
+      return;
+    }
+    await openChatView(
+      context: context,
+      attention: attention,
+      host: host,
+      agent: agent,
+      dictation: _dictation,
+      onOpenTerminal: () => _showAgentTerminal(attention, host, agent),
+    );
   }
 
   /// After the chat view: show the agent's session and focus its pane.
@@ -704,15 +806,19 @@ class _TerminalPageState extends State<TerminalPage> {
     return herdr.controlFor(session);
   }
 
-  /// The multiplexer a session's gestures drive: the one it was opened on,
-  /// or null (the Gestures preference) for plain shells.
+  /// The multiplexer a session's gestures drive: the one it was opened on
+  /// (a host that starts tmux on connect is a tmux session too), or null
+  /// (the Gestures preference) for plain shells.
   static TerminalWindowSwitchTarget? _gestureTargetFor(
     TerminalSessionController session,
   ) {
     return switch (ConnectTarget.fromSessionHostId(session.host.id)?.kind) {
       ConnectTargetKind.herdr => TerminalWindowSwitchTarget.herdr,
       ConnectTargetKind.tmux => TerminalWindowSwitchTarget.tmux,
-      ConnectTargetKind.shell || ConnectTargetKind.directory || null => null,
+      ConnectTargetKind.shell || ConnectTargetKind.directory || null =>
+        session.host.startTmuxOnConnect
+            ? TerminalWindowSwitchTarget.tmux
+            : null,
     };
   }
 
@@ -969,16 +1075,13 @@ class _TerminalPageState extends State<TerminalPage> {
                                 .themeController
                                 .terminalGestures
                                 .headerSwipeOpensSessions,
-                            actions: [
-                              if (activeSession != null &&
-                                  widget.hostKeyVerifier != null &&
-                                  !activeSession.host.isLocal)
-                                SessionToolsMenu(
-                                  color: palette.foregroundFor(brightness),
-                                  onSelected: (tool) =>
-                                      _openSessionTool(activeSession, tool),
-                                ),
-                            ],
+                            onOpenSessionTool:
+                                activeSession != null &&
+                                    widget.hostKeyVerifier != null &&
+                                    !activeSession.host.isLocal
+                                ? (tool) =>
+                                      _openSessionTool(activeSession, tool)
+                                : null,
                           );
                         },
                       ),
@@ -1175,6 +1278,7 @@ class _TerminalPageState extends State<TerminalPage> {
                         composeActive: _composeMode,
                         onToggleCompose: () =>
                             setState(() => _composeMode = !_composeMode),
+                        onChatButton: () => _handleChatButton(activeSession),
                         tmuxPrefixKey: activeSession.host.tmuxPrefixKey,
                         tmuxScrollMode: _tmuxScrollMode,
                         terminalMouseInput:
@@ -1283,9 +1387,12 @@ class _ComposeInputBarState extends State<_ComposeInputBar> {
       );
     }
     _controller.addListener(_notifyChanged);
-    WidgetsBinding.instance.addPostFrameCallback(
-      (_) => _focusNode.requestFocus(),
-    );
+    // Ask for focus now, not after the first frame: the request is applied
+    // as soon as the field is in the tree, so the keyboard comes up in the
+    // same frame the bar replaces the pill. A post-frame request let the
+    // terminal drop its input connection first (keyboard starts hiding)
+    // and then reopen it, so the terminal resized twice, a frame late.
+    _focusNode.requestFocus();
   }
 
   void _notifyChanged() {

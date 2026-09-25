@@ -24,6 +24,7 @@ class TerminalKeyboardBar extends StatelessWidget {
     required this.onToggleFullscreen,
     this.composeActive = false,
     this.onToggleCompose,
+    this.onChatButton,
     required this.onEnterTmuxScrollMode,
     required this.onExitTmuxScrollMode,
     required this.tmuxPrefixKey,
@@ -45,6 +46,12 @@ class TerminalKeyboardBar extends StatelessWidget {
   final VoidCallback onToggleFullscreen;
   final bool composeActive;
   final VoidCallback? onToggleCompose;
+
+  /// What a tap on the floating pill's Chat button does, when it should do
+  /// more than [onToggleCompose] (the page opens Chat View for a Claude
+  /// session). A long-press then toggles the composer. Null: the tap
+  /// toggles the composer.
+  final VoidCallback? onChatButton;
   final VoidCallback onEnterTmuxScrollMode;
   final VoidCallback onExitTmuxScrollMode;
 

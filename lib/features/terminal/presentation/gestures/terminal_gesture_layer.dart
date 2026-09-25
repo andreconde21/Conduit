@@ -121,6 +121,19 @@ class TerminalGestureCommands {
     );
   }
 
+  /// tmux: the neighbouring pane, with tmux's default `prefix Left/Right/
+  /// Up/Down` (`select-pane -L/-R/-U/-D`). Typed into this session, so it
+  /// reaches exactly the client the app is attached through.
+  void selectTmuxPane(HerdrDirection direction) {
+    session.sendPrefix(prefixKey);
+    session.sendKey(switch (direction) {
+      HerdrDirection.left => TerminalKey.arrowLeft,
+      HerdrDirection.right => TerminalKey.arrowRight,
+      HerdrDirection.up => TerminalKey.arrowUp,
+      HerdrDirection.down => TerminalKey.arrowDown,
+    });
+  }
+
   void scrollBack(int lines) {
     for (var i = 0; i < lines; i += 1) {
       session.sendKey(TerminalKey.arrowUp);
@@ -144,7 +157,12 @@ enum _TwoFingerKind { pinch, scroll, paneSwipe, workspaceSwipe, ignored }
 /// * pinch changes the terminal font size;
 /// * two-finger vertical swipe scrolls back through history (entering the
 ///   app's scroll mode on the way in, leaving it again when swiped past the
-///   bottom).
+///   bottom). It stays scrollback in tmux: tmux has no workspaces above its
+///   sessions for it to switch;
+/// * in a tmux session ([target] is [TerminalWindowSwitchTarget.tmux]),
+///   two-finger left/right focuses the pane to the right/left
+///   (`prefix Right` / `prefix Left`), under the same setting as Herdr's
+///   pane swipe.
 ///
 /// For Herdr ([target] is [TerminalWindowSwitchTarget.herdr]):
 ///
@@ -336,6 +354,13 @@ class _TerminalGestureLayerState extends State<TerminalGestureLayer> {
   bool get _paneSwipeEnabled =>
       widget.enabled && _herdr && widget.preferences.herdrTwoFingerPanes;
 
+  /// Only for sessions attached to tmux: in a plain shell the prefix and
+  /// an arrow would reach the shell.
+  bool get _tmuxPaneSwipeEnabled =>
+      widget.enabled &&
+      widget.target == TerminalWindowSwitchTarget.tmux &&
+      widget.preferences.herdrTwoFingerPanes;
+
   bool get _workspaceSwipeEnabled =>
       widget.enabled &&
       _herdr &&
@@ -378,8 +403,8 @@ class _TerminalGestureLayerState extends State<TerminalGestureLayer> {
     }
   }
 
-  /// Sorts a Herdr two-finger gesture into one of its mappings, or null
-  /// while it has not moved far enough to tell.
+  /// Sorts a Herdr (or tmux pane-swipe) two-finger gesture into one of its
+  /// mappings, or null while it has not moved far enough to tell.
   _TwoFingerKind? _classifyHerdr(TwoFingerUpdate update) {
     const threshold = TerminalGestureLayer.classifyThreshold;
     final first = update.firstDelta;
@@ -414,7 +439,7 @@ class _TerminalGestureLayerState extends State<TerminalGestureLayer> {
     }
     if (dx > dy) {
       // Changing pane under an open copy mode would strand it.
-      return _paneSwipeEnabled && !_scrollMode
+      return (_paneSwipeEnabled || _tmuxPaneSwipeEnabled) && !_scrollMode
           ? _TwoFingerKind.paneSwipe
           : _TwoFingerKind.ignored;
     }
@@ -429,7 +454,10 @@ class _TerminalGestureLayerState extends State<TerminalGestureLayer> {
 
   void _handleTwoFingerUpdate(TwoFingerUpdate update) {
     var kind = _twoFingerKind;
-    if (kind == null && _herdr) {
+    // tmux sessions with the pane swipe share Herdr's classifier: it tells a
+    // sideways two-finger swipe from a pinch whose fingers report one at a
+    // time. Vertical stays scrollback there (no workspace swipe).
+    if (kind == null && (_herdr || _tmuxPaneSwipeEnabled)) {
       kind = _classifyHerdr(update);
       if (kind == null) {
         return;
@@ -481,9 +509,12 @@ class _TerminalGestureLayerState extends State<TerminalGestureLayer> {
           _fired = true;
           // Like the one-finger tab swipe: leftwards brings in what is on
           // the right.
-          _commands.focusHerdrPane(
-            dx < 0 ? HerdrDirection.right : HerdrDirection.left,
-          );
+          final direction = dx < 0 ? HerdrDirection.right : HerdrDirection.left;
+          if (_herdr) {
+            _commands.focusHerdrPane(direction);
+          } else {
+            _commands.selectTmuxPane(direction);
+          }
         }
       case _TwoFingerKind.workspaceSwipe:
         final dy = update.focalDelta.dy;
@@ -598,6 +629,7 @@ class _TerminalGestureLayerState extends State<TerminalGestureLayer> {
             _pinchEnabled ||
             _twoFingerScrollEnabled ||
             _paneSwipeEnabled ||
+            _tmuxPaneSwipeEnabled ||
             _workspaceSwipeEnabled;
         // See TerminalPointerMember for why a Listener feeds the members
         // instead of a RawGestureDetector.

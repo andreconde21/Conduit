@@ -66,8 +66,11 @@ class TerminalSessionController extends ChangeNotifier {
   int _pixelWidth = 0;
   int _pixelHeight = 0;
   Timer? _resizeTimer;
+  bool _resizePending = false;
   int _pendingColumns = 0;
   int _pendingRows = 0;
+  int _sentColumns = 0;
+  int _sentRows = 0;
   bool _disconnecting = false;
   bool _disposed = false;
   bool _predictiveEchoEnabled = false;
@@ -110,13 +113,13 @@ class TerminalSessionController extends ChangeNotifier {
   /// [osc52MaxBytes]; read requests are never answered. Whether it reaches
   /// the phone clipboard is the listener's decision (a user setting).
   Stream<String> get remoteClipboardWrites => _remoteClipboardWrites.stream;
+
   /// The shell's working directory as last reported with OSC 7 (bash with
   /// vte.sh, zsh on most distros, fish), null until one arrives.
   String? get workingDirectory => _workingDirectory;
 
   /// Each change of [workingDirectory].
-  Stream<String> get workingDirectoryReports =>
-      _workingDirectoryReports.stream;
+  Stream<String> get workingDirectoryReports => _workingDirectoryReports.stream;
   bool get isConnected => _status == TerminalConnectionStatus.connected;
   bool get predictiveEchoEnabled => _predictiveEchoEnabled;
   TerminalEnterSequence get enterSequence => _enterSequence;
@@ -219,6 +222,8 @@ class TerminalSessionController extends ChangeNotifier {
         _pixelWidth,
         _pixelHeight,
       );
+      _sentColumns = terminal.viewWidth;
+      _sentRows = terminal.viewHeight;
 
       _stdoutSubscription = session.stdout
           .cast<List<int>>()
@@ -289,6 +294,7 @@ class TerminalSessionController extends ChangeNotifier {
 
     _resizeTimer?.cancel();
     _resizeTimer = null;
+    _resizePending = false;
     await _stdoutSubscription?.cancel();
     await _stderrSubscription?.cancel();
     await _doneSubscription?.cancel();
@@ -527,8 +533,17 @@ class TerminalSessionController extends ChangeNotifier {
       _pixelHeight = pixelHeight;
       _pendingColumns = columns;
       _pendingRows = rows;
-      _resizeTimer?.cancel();
-      _resizeTimer = Timer(const Duration(milliseconds: 250), _flushResize);
+      // Leading edge: the first change reaches the remote app at once, so
+      // a layout change (the chat bar replacing the toolbar, the keyboard
+      // opening) redraws the TUI straight away. Changes within the next
+      // [resizeCoalesce] (a keyboard animation, a pinch) are coalesced and
+      // the final size follows when it ends.
+      if (_resizeTimer?.isActive ?? false) {
+        _resizePending = true;
+        return;
+      }
+      _flushResize();
+      _resizeTimer = Timer(resizeCoalesce, _resizeCooldownEnded);
     };
     terminal.onOutput = _sendTerminalOutput;
     terminal.onTitleChange = (title) {
@@ -685,9 +700,26 @@ class TerminalSessionController extends ChangeNotifier {
     _flushResize();
   }
 
+  /// How long resizes after one sent to the server are gathered into one
+  /// (sent when the window closes). At most two sends per window.
+  static const resizeCoalesce = Duration(milliseconds: 250);
+
+  void _resizeCooldownEnded() {
+    if (!_resizePending) {
+      return;
+    }
+    _resizePending = false;
+    _flushResize();
+  }
+
   void _flushResize() {
     final session = _session;
     if (session == null) return;
+    if (_pendingColumns == _sentColumns && _pendingRows == _sentRows) {
+      return;
+    }
+    _sentColumns = _pendingColumns;
+    _sentRows = _pendingRows;
     if (kDebugMode) {
       debugPrint(
         '[term ${host.name}] -> server ${_pendingColumns}x$_pendingRows',

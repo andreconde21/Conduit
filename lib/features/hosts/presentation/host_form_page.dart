@@ -58,7 +58,9 @@ class _HostFormPageState extends State<HostFormPage> {
   bool _showPassword = false;
   bool _showPassphrase = false;
   bool _useMosh = false;
-  bool _agentAttentionEnabled = false;
+  // On for new machines: Chat View, approvals and the Agents panel all
+  // need it, and it costs nothing on a machine without agents.
+  bool _agentAttentionEnabled = true;
   bool _agentNotifyInput = true;
   bool _agentNotifyFinished = true;
   AgentMonitorKind _agentMonitor = AgentMonitorKind.auto;

@@ -66,8 +66,9 @@ void main() {
       HerdrVerticalSwipe.scrollback,
     );
 
-    await toggle('Font size');
     expect(controller.terminalGestures.herdrPinch, HerdrPinchAction.fontSize);
+    await toggle('Zoom pane');
+    expect(controller.terminalGestures.herdrPinch, HerdrPinchAction.zoomPane);
 
     // Everything went through the repository.
     final saved = await repository.load();

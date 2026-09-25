@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
+import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/companion_setup/data/companion_bundle.dart';
 import 'package:conduit/features/companion_setup/data/companion_commands.dart';
 import 'package:conduit/features/companion_setup/data/companion_installer.dart';
@@ -240,16 +241,27 @@ class CompanionSetupScope extends InheritedWidget {
   const CompanionSetupScope({
     required this.controller,
     required super.child,
+    this.agentAttention,
     super.key,
   });
 
   final CompanionSetupController controller;
 
+  /// The app's agent monitor, so the Agent hooks screen can offer to turn
+  /// monitoring on for a machine whose companion is working.
+  final AgentAttentionController? agentAttention;
+
   static CompanionSetupController? maybeOf(BuildContext context) => context
       .dependOnInheritedWidgetOfExactType<CompanionSetupScope>()
       ?.controller;
 
+  static AgentAttentionController? agentAttentionOf(BuildContext context) =>
+      context
+          .dependOnInheritedWidgetOfExactType<CompanionSetupScope>()
+          ?.agentAttention;
+
   @override
   bool updateShouldNotify(CompanionSetupScope oldWidget) =>
-      controller != oldWidget.controller;
+      controller != oldWidget.controller ||
+      agentAttention != oldWidget.agentAttention;
 }

@@ -151,15 +151,34 @@ class _AgentAttentionSheetState extends State<AgentAttentionSheet>
               ],
             ),
             const SizedBox(height: 8),
-            if (hosts.isEmpty)
-              const _EmptyState(
-                icon: Icons.monitor_heart_outlined,
-                message:
-                    'No machines are being monitored. Enable agent '
-                    "monitoring in a machine's settings, then connect "
-                    'to it.',
-              )
-            else ...[
+            for (final host in controller.unmonitoredHosts)
+              Card(
+                key: ValueKey('agents-monitoring-off-${host.id}'),
+                margin: const EdgeInsets.only(bottom: 8),
+                child: ListTile(
+                  leading: const Icon(Icons.monitor_heart_outlined),
+                  title: Text(
+                    host.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: const Text('Agent monitoring is off'),
+                  trailing: TextButton(
+                    onPressed: () => controller.enableMonitoring(host),
+                    child: const Text('Turn on'),
+                  ),
+                ),
+              ),
+            if (hosts.isEmpty) ...[
+              if (controller.unmonitoredHosts.isEmpty)
+                const _EmptyState(
+                  icon: Icons.monitor_heart_outlined,
+                  message:
+                      'No machines are being monitored. Enable agent '
+                      "monitoring in a machine's settings, then connect "
+                      'to it.',
+                ),
+            ] else ...[
               if (_tabs.index == 0)
                 ..._inboxChildren(context, inbox, grouped: hosts.length > 1)
               else
