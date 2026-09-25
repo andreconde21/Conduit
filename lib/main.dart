@@ -67,6 +67,12 @@ import 'package:conduit/features/terminal/presentation/recent_directory_tracker.
 import 'package:conduit/features/terminal/presentation/terminal_background_keepalive.dart';
 import 'package:conduit/features/terminal/presentation/terminal_page.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
+import 'package:conduit/features/this_computer/data/desktop_terminal_repository.dart';
+import 'package:conduit/features/this_computer/data/device_local_sync.dart';
+import 'package:conduit/features/this_computer/data/host_channels.dart';
+import 'package:conduit/features/this_computer/data/local_agent_command_runner.dart';
+import 'package:conduit/features/this_computer/data/local_file_repository.dart';
+import 'package:conduit/features/this_computer/data/secure_this_computer_store.dart';
 import 'package:conduit/features/voice/presentation/voice_settings_scope.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -90,8 +96,13 @@ void main() {
     LocalAppAuthenticator(),
     enabled: PlatformFeatures.appLock,
   );
+  // "This computer" (desktops): the device itself as a machine, with
+  // per-device settings that never join the synced machine list.
   final hostsController = HostsController(
     const SecureSavedHostsRepository(secureStorage),
+    thisComputerStore: PlatformFeatures.thisComputer
+        ? const SecureThisComputerStore(secureStorage)
+        : null,
   );
   final promptCoordinator = HostKeyPromptCoordinator();
   final hostKeyVerifier = SecureHostKeyVerifier(
@@ -99,6 +110,16 @@ void main() {
     promptCoordinator,
   );
   final localShellController = LocalShellController();
+  // Commands, files and port forwards per machine: SSH, or the desktop
+  // itself for "This computer".
+  final hostChannels = HostChannels(
+    hostKeyVerifier: hostKeyVerifier,
+    localRunner: () => LocalAgentCommandRunner(
+      windowsShell: () => hostsController.windowsShell,
+    ),
+    sshFiles: DartSshSftpRepository(hostKeyVerifier),
+    localFiles: const LocalFileRepository(),
+  );
   final terminalRepository = RoutingTerminalRepository(
     ssh: DartSshTerminalRepository(hostKeyVerifier),
     mosh: MoshTerminalRepository(
@@ -108,23 +129,26 @@ void main() {
     local: LocalTerminalRepository(
       resolveLaunch: localShellController.requireLaunch,
     ),
+    thisComputer: PlatformFeatures.thisComputer
+        ? DesktopTerminalRepository(
+            windowsShell: () => hostsController.windowsShell,
+          )
+        : null,
   );
   final workspaceController = TerminalWorkspaceController(
     terminalRepository,
     ConnectivityPlusNetwork(),
   );
-  final sftpRepository = DartSshSftpRepository(hostKeyVerifier);
+  final sftpRepository = hostChannels.files;
   const sftpBookmarksRepository = SecureSftpBookmarksRepository(secureStorage);
   final agentAttention = AgentAttentionController(
     workspace: workspaceController,
-    runnerFactory: (host) => SshAgentCommandRunner(hostKeyVerifier, host),
+    runnerFactory: hostChannels.runner,
     provider: const HerdrAttentionProvider(),
     companionProvider: const ConductoreHostAttentionProvider(),
     notifier: const PlatformAgentAttentionNotifier(),
     persistMonitoringEnabled: (savedHostId) async {
-      final host = hostsController.hosts
-          .where((host) => host.id == savedHostId)
-          .firstOrNull;
+      final host = hostsController.findById(savedHostId);
       if (host != null && !host.agentAttentionEnabled) {
         await hostsController.upsert(
           host.copyWith(agentAttentionEnabled: true),
@@ -138,7 +162,7 @@ void main() {
   final connectFlow = SessionConnectFlow(
     hostsController: hostsController,
     workspace: workspaceController,
-    runnerFactory: (host) => SshAgentCommandRunner(hostKeyVerifier, host),
+    runnerFactory: hostChannels.runner,
     preferences: const SecureConnectPreferencesRepository(secureStorage),
     recentDirectories: recentDirectories,
   );
@@ -147,7 +171,7 @@ void main() {
   RecentDirectoryTracker(
     workspace: workspaceController,
     directories: recentDirectories,
-    runnerFactory: (host) => SshAgentCommandRunner(hostKeyVerifier, host),
+    runnerFactory: hostChannels.runner,
     agentAttention: agentAttention,
   );
   // Mirrors the agent dashboard onto the Android home-screen widget and
@@ -166,7 +190,7 @@ void main() {
   // Agent hooks screen: companion status per machine, shared by every
   // entry point through the scope around the whole app.
   final companionSetup = CompanionSetupController(
-    runnerFactory: (host) => SshAgentCommandRunner(hostKeyVerifier, host),
+    runnerFactory: hostChannels.runner,
     sftpRepository: sftpRepository,
   );
 
@@ -176,9 +200,9 @@ void main() {
     theme: themeController,
     hosts: () async {
       await hostsController.firstLoad;
-      return hostsController.hosts;
+      return hostsController.machines;
     },
-    runnerFactory: (host) => SshAgentCommandRunner(hostKeyVerifier, host),
+    runnerFactory: hostChannels.runner,
   );
   themeController.omarchySync = omarchyThemeSync;
   final themeLoaded = themeController.load();
@@ -192,9 +216,7 @@ void main() {
     repository: const SecureSessionSnapshotRepository(secureStorage),
     findHost: (hostId) async {
       await hostsController.firstLoad;
-      return hostsController.hosts
-          .where((host) => host.id == hostId)
-          .firstOrNull;
+      return hostsController.findById(hostId);
     },
     ready: themeLoaded.then((_) {
       sessionRestore.enabled = themeController.restoreSessionsOnLaunch;
@@ -209,16 +231,24 @@ void main() {
     hosts: hostsController,
     theme: themeController,
     hostKeys: hostKeyVerifier,
-    connectPreferences: const SecureJsonMapStore(
-      secureStorage,
-      SecureConnectPreferencesRepository.storageKey,
+    // "This computer" is per device: its connect-picker memory and its
+    // sessions stay out of backups and sync.
+    connectPreferences: const DeviceLocalJsonMapStore(
+      SecureJsonMapStore(
+        secureStorage,
+        SecureConnectPreferencesRepository.storageKey,
+      ),
     ),
-    recentDirectoriesStore: const SecureJsonMapStore(
-      secureStorage,
-      SecureRecentDirectoriesStore.storageKey,
+    recentDirectoriesStore: const DeviceLocalJsonMapStore(
+      SecureJsonMapStore(
+        secureStorage,
+        SecureRecentDirectoriesStore.storageKey,
+      ),
     ),
     recentDirectories: recentDirectories,
-    sessions: const SecureSessionSnapshotRepository(secureStorage),
+    sessions: const DeviceLocalSessionSnapshots(
+      SecureSessionSnapshotRepository(secureStorage),
+    ),
     ready: themeLoaded,
   );
   final backupService = AppBackupService(
@@ -285,6 +315,7 @@ void main() {
               connectFlow: connectFlow,
               shareTarget: shareTarget,
               sessionRestore: sessionRestore,
+              hostChannels: hostChannels,
             ),
           ),
         ),
@@ -311,6 +342,7 @@ class ConduitApp extends StatefulWidget {
     this.connectFlow,
     this.shareTarget,
     this.sessionRestore,
+    this.hostChannels,
     super.key,
   });
 
@@ -332,6 +364,10 @@ class ConduitApp extends StatefulWidget {
   /// Share-to-agent flow; null disables the Android share target.
   final ShareTargetController? shareTarget;
   final SessionRestoreController? sessionRestore;
+
+  /// Commands and port forwards per machine (SSH or This computer); null
+  /// means SSH only.
+  final HostChannels? hostChannels;
 
   @override
   State<ConduitApp> createState() => _ConduitAppState();
@@ -457,6 +493,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
       sftpRepository: widget.sftpRepository,
       agentAttention: widget.agentAttention,
       connectFlow: widget.connectFlow,
+      hostChannels: widget.hostChannels,
     );
   }
 
@@ -493,9 +530,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
       source: PlatformAgentOpenRequests.instance,
       findHost: (hostId) async {
         await widget.hostsController.firstLoad;
-        return widget.hostsController.hosts
-            .where((host) => host.id == hostId)
-            .firstOrNull;
+        return widget.hostsController.findById(hostId);
       },
       onOpen: (host, agent) async {
         await flow.openAgent(host, agent);
@@ -567,6 +602,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
                 fileExport: widget.fileExport,
                 connectFlow: widget.connectFlow,
                 sessionRestore: widget.sessionRestore,
+                hostChannels: widget.hostChannels,
               );
               return _wrapShareTargetHost(
                 AgentStatusLaunchListener(
@@ -579,9 +615,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
                     agentAttention: widget.agentAttention,
                     findHost: (hostId) async {
                       await widget.hostsController.firstLoad;
-                      return widget.hostsController.hosts
-                          .where((host) => host.id == hostId)
-                          .firstOrNull;
+                      return widget.hostsController.findById(hostId);
                     },
                     child: _wrapNotificationOpen(home),
                   ),

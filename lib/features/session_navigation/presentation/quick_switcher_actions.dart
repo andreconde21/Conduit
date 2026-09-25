@@ -40,10 +40,11 @@ class QuickSwitcherSource {
   Listenable get changes =>
       Listenable.merge([workspace, ?attention, ?homeBoards]);
 
-  /// The saved remote machines, in the home page's order.
+  /// The machines ("This computer" on a desktop, then the saved remote
+  /// ones), in the home page's order.
   List<SavedHost> get machines => [
     for (final host
-        in connectFlow?.hostsController.sortedHosts ?? const <SavedHost>[])
+        in connectFlow?.hostsController.sortedMachines ?? const <SavedHost>[])
       if (!host.isLocal) host,
   ];
 

@@ -216,7 +216,7 @@ void main() {
         await pumpEventQueue();
         expect(controller.status, TerminalConnectionStatus.disconnected);
         expect(controller.exitCode, 7);
-        expect(controller.isLocalShell, isTrue);
+        expect(controller.runsOnThisComputer, isTrue);
         final text = screen(controller);
         expect(text, contains('hi from xterm-256color'));
         expect(text, contains('[Shell exited (code 7)]'));

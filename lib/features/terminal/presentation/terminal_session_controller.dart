@@ -103,9 +103,10 @@ class TerminalSessionController extends ChangeNotifier {
       _status == TerminalConnectionStatus.disconnected ? _exitCode : null;
   int? _exitCode;
 
-  /// Whether this session's shell runs on the device itself, so it ends
-  /// with an exit code and restarts instead of reconnecting.
-  bool get isLocalShell => host.isThisComputer || host.isLocal;
+  /// Whether this session's shell runs on the desktop itself ("This
+  /// computer"), so it ends with an exit code and restarts instead of
+  /// reconnecting.
+  bool get runsOnThisComputer => host.isThisComputer;
   String get title => _customTitle ?? host.name;
 
   /// Name the user gave this session (long-press › Rename on the home
