@@ -12,6 +12,7 @@ import 'package:conduit/features/companion_setup/presentation/companion_setup_pa
 import 'package:conduit/features/home_widget/data/platform_agent_status_widget_channel.dart';
 import 'package:conduit/features/home_widget/presentation/quick_settings_tile_controls.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/session_navigation/presentation/session_view_widgets.dart';
 import 'package:conduit/features/settings/presentation/settings_catalog.dart';
 import 'package:conduit/features/settings/presentation/settings_services.dart';
@@ -20,8 +21,11 @@ import 'package:conduit/features/sync/domain/sync_category.dart';
 import 'package:conduit/features/sync/presentation/sync_scope.dart';
 import 'package:conduit/features/terminal/presentation/gestures/terminal_gestures_settings.dart';
 import 'package:conduit/features/terminal/presentation/trusted_keys_page.dart';
+import 'package:conduit/features/terminal/presentation/widgets/desktop_shortcuts_sheet.dart';
 import 'package:conduit/features/terminal/presentation/widgets/pill_configurator_sheet.dart';
+import 'package:conduit/features/this_computer/domain/local_shell_launch.dart';
 import 'package:conduit/features/voice/presentation/speech_settings_controls.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 /// The settings of one [section], as a scrolling column of cards.
@@ -89,6 +93,25 @@ class SettingsSectionBody extends StatelessWidget {
   ];
 
   List<Widget> _terminal(ThemeController theme) => [
+    if (services.hostsController case final hosts?
+        when showsWindowsShellSetting(hosts)) ...[
+      ListenableBuilder(
+        listenable: hosts,
+        builder: (context, _) => SettingsSegmentCard<WindowsShellKind>(
+          key: const ValueKey('settings-windows-shell'),
+          icon: Icons.computer_rounded,
+          title: 'This computer: shell',
+          description:
+              'What a local session on this PC opens. Kept on this device, '
+              'never synced.',
+          values: WindowsShellKind.values,
+          label: (value) => value.label,
+          selected: hosts.windowsShell,
+          onChanged: hosts.setWindowsShell,
+        ),
+      ),
+      _gap,
+    ],
     SettingsSegmentCard<TerminalEnterSequence>(
       icon: Icons.keyboard_return_rounded,
       title: 'Enter sends',
@@ -208,6 +231,21 @@ class SettingsSectionBody extends StatelessWidget {
     _gap,
     KeyRowsTile(controller: theme),
     _gap,
+    if (PlatformFeatures.isDesktop) ...[
+      SettingsCard(
+        child: ListTile(
+          key: const ValueKey('settings-keyboard-shortcuts'),
+          leading: const Icon(Icons.keyboard_outlined),
+          title: const Text('Keyboard shortcuts'),
+          subtitle: const Text(
+            'Every desktop shortcut: tabs, panes, zoom, the quick switcher.',
+          ),
+          trailing: const Icon(Icons.chevron_right_rounded),
+          onTap: () => showDesktopShortcutsSheet(context),
+        ),
+      ),
+      _gap,
+    ],
     const SettingsHeading('Gestures'),
     TerminalGesturesSettings(controller: theme),
   ];
@@ -419,6 +457,12 @@ class SettingsSectionBody extends StatelessWidget {
 
   static const _gap = SizedBox(height: 14);
 }
+
+/// Whether Settings › Terminal offers the Windows shell of "This
+/// computer" (a Windows desktop with its local machine entry).
+bool showsWindowsShellSetting(HostsController hosts) =>
+    defaultTargetPlatform == TargetPlatform.windows &&
+    hosts.thisComputer != null;
 
 /// A heading over a group of settings (plain case, unlike the uppercase
 /// section labels elsewhere).

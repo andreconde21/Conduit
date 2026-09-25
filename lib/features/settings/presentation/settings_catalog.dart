@@ -1,4 +1,5 @@
 import 'package:conduit/core/platform_features.dart';
+import 'package:conduit/features/settings/presentation/settings_sections.dart';
 import 'package:conduit/features/settings/presentation/settings_services.dart';
 import 'package:flutter/material.dart';
 
@@ -98,6 +99,9 @@ bool _trustedKeys(SettingsServices s) => s.hostKeyVerifier != null;
 bool _lock(SettingsServices s) => s.onLockNow != null;
 bool _sessionViews(SettingsServices s) => s.hasSessionViews;
 bool _sync(SettingsServices s) => s.hasSync;
+bool _desktop(SettingsServices _) => PlatformFeatures.isDesktop;
+bool _windowsShell(SettingsServices s) =>
+    s.hostsController != null && showsWindowsShellSetting(s.hostsController!);
 
 /// Every setting the page offers, section by section. A test walks this
 /// list and checks each title on its section page, so nothing that used to
@@ -131,6 +135,12 @@ const List<SettingsEntry> settingsCatalog = [
     keywords: ['home', 'local terminal'],
   ),
   // Terminal
+  SettingsEntry(
+    SettingsSection.terminal,
+    'This computer: shell',
+    keywords: ['windows', 'powershell', 'cmd', 'command prompt', 'wsl'],
+    availableWhen: _windowsShell,
+  ),
   SettingsEntry(
     SettingsSection.terminal,
     'Enter sends',
@@ -192,6 +202,12 @@ const List<SettingsEntry> settingsCatalog = [
     SettingsSection.input,
     'Key rows',
     keywords: ['keys', 'shortcuts', 'ctrl', 'esc', 'tab', 'keyboard'],
+  ),
+  SettingsEntry(
+    SettingsSection.input,
+    'Keyboard shortcuts',
+    keywords: ['hotkeys', 'desktop', 'keys', 'ctrl'],
+    availableWhen: _desktop,
   ),
   SettingsEntry(
     SettingsSection.input,

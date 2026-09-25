@@ -10,6 +10,8 @@ import 'package:conduit/features/settings/presentation/settings_catalog.dart';
 import 'package:conduit/features/settings/presentation/settings_page.dart';
 import 'package:conduit/features/settings/presentation/settings_services.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
+import 'package:conduit/features/this_computer/domain/local_shell_launch.dart';
+import 'package:conduit/features/this_computer/domain/this_computer_settings.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -124,6 +126,8 @@ void main() {
       'Restore sessions on launch',
       'Open Claude sessions in',
       'Multiplexer tabs on phone',
+      'This computer: shell',
+      'Keyboard shortcuts',
       'Global snippets',
       'Toolbar style',
       'Pill buttons',
@@ -353,4 +357,40 @@ void main() {
     await tester.pumpAndSettle();
     expect(hosts.hosts.single.agentNotifyLevel, AgentNotifyLevel.none);
   });
+
+  testWidgets(
+    'Windows desktop: Settings is a page, with the shell and shortcuts',
+    (tester) async {
+      desktop(tester);
+      final local = HostsController(
+        FakeHostsRepository(),
+        thisComputerStore: InMemoryThisComputerStore(
+          ThisComputerSettings(host: SavedHost.thisComputer()),
+        ),
+      );
+      await local.load();
+      services = SettingsServices(theme: theme, hostsController: local);
+      await pumpLauncher(tester);
+
+      // A route of its own, not a bottom sheet or a dialog.
+      expect(find.byType(BottomSheet), findsNothing);
+      expect(find.byKey(const ValueKey('adaptive-modal-dialog')), findsNothing);
+      expect(find.byKey(const ValueKey('settings-two-pane')), findsOneWidget);
+
+      await tester.tap(sectionTile(SettingsSection.terminal));
+      await tester.pumpAndSettle();
+      expect(find.text('This computer: shell'), findsOneWidget);
+      await tester.tap(find.text('WSL'));
+      await tester.pumpAndSettle();
+      expect(local.windowsShell, WindowsShellKind.wsl);
+
+      await tester.tap(sectionTile(SettingsSection.input));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Keyboard shortcuts'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('adaptive-modal-dialog')), findsOne);
+      expect(find.byType(BottomSheet), findsNothing);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.windows),
+  );
 }
