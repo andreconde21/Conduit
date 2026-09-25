@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:conduit/core/telemetry/telemetry.dart';
+import 'package:conduit/core/telemetry/telemetry_events.dart';
 import 'package:conduit/features/voice/domain/speech_event.dart';
 import 'package:conduit/features/voice/domain/speech_recognizer.dart';
 import 'package:conduit/features/voice/domain/voice_preferences.dart';
@@ -200,6 +202,9 @@ class DictationController extends ChangeNotifier {
     if (_status != DictationStatus.idle) {
       return;
     }
+    Telemetry.instance.track(
+      TelemetryEvent.voiceUsed(TelemetryVoice.dictation),
+    );
     _message = null;
     _pause = null;
     _sink = sink;

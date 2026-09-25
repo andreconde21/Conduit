@@ -2,6 +2,8 @@
 
 import 'dart:async';
 
+import 'package:conduit/core/telemetry/telemetry.dart';
+import 'package:conduit/core/telemetry/telemetry_events.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/chat_view/domain/chat_items.dart';
 import 'package:conduit/features/voice/domain/voice_answers.dart';
@@ -162,6 +164,7 @@ class TalkController extends ChangeNotifier {
   /// Starts the loop by listening.
   void start() {
     if (active || _disposed) return;
+    Telemetry.instance.track(TelemetryEvent.voiceUsed(TelemetryVoice.talk));
     _readAloud
       ..stop()
       ..conversation = true;

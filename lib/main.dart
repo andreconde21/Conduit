@@ -6,6 +6,7 @@ import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/secure_storage.dart';
+import 'package:conduit/core/telemetry/telemetry_setup.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/core/theme/omarchy_theme_sync_controller.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
@@ -110,6 +111,12 @@ void main() {
     thisComputerStore: PlatformFeatures.thisComputer
         ? const SecureThisComputerStore(secureStorage)
         : null,
+  );
+  // Crash reports and anonymous usage counts (Settings › Privacy).
+  startTelemetry(
+    storage: secureStorage,
+    hosts: hostsController,
+    theme: themeController,
   );
   final promptCoordinator = HostKeyPromptCoordinator();
   final hostKeyVerifier = SecureHostKeyVerifier(
