@@ -75,13 +75,32 @@ Dart implementation of the protocol, and the terminal is
 - Chat mode: the Chat key opens a line composer, expandable into a full
   multiline editor for prompting Claude Code and other agents, with drafts per
   session, voice dictation via the system keyboard, and safe bracketed-paste
-  delivery into TUIs, with insert-only or insert-and-send.
+  delivery into TUIs, with insert-only or insert-and-send. The image button
+  attaches a photo from the gallery, the camera, or the clipboard, with an
+  optional crop: it is uploaded over SFTP to the host's share inbox and its
+  path is inserted into the prompt, which Claude Code reads as an image.
 - Optional Agent Attention dashboard: opt a machine in to poll
   [Herdr](https://herdr.dev)'s JSON CLI while connected and see which coding
   agents are working, need input, or finished, with edge-triggered local
   notifications on Android and one-tap focus of an agent's pane.
 - Saved global and per-machine snippets from the key row, with hidden snippets
   for passwords or secrets and optional per-machine run-on-connect snippets.
+- Recent directories per machine (last 20): collected from the shell's OSC 7
+  reports (bash with `vte.sh`, fish, most zsh setups), from tmux's
+  `#{pane_current_path}` when a tmux session detaches or disconnects, and from
+  the companion's agents (`conductore-hostd status` `cwd`). The connect
+  picker's Recent tab lists them as "Recent dirs" (opens a shell there), and
+  "cd to…" in the Tmux+ menu and the Herdr navigator types `cd`, opens a new
+  tmux window, or a new Herdr tab (`herdr tab create --cwd`) in one.
+- Tappable links: tap an http(s) link in the output to open or copy it; long
+  press for Open in browser, Open in in-app preview (localhost links), Copy
+  link or Copy text.
+- Remote clipboard (OSC 52): text a program on the host copies (vim, Neovim,
+  Claude Code, tmux) lands on the phone clipboard with a "Copied from <host>"
+  note. Capped at 1 MB; the host can never read the phone clipboard. Turn it
+  off under Appearance. Inside tmux, forward copies with
+  `set -g set-clipboard on` in `~/.tmux.conf` (tmux 3.3+ may also need
+  `set -g allow-passthrough on` for programs that wrap OSC 52 themselves).
 - Optional device-auth app lock for protecting saved machines and credentials.
 - Built-in terminal themes, font sizing, palette choices, and appearance controls.
 - On-device **local Arch Linux shell** (Android, arm64) with `pacman`, running

@@ -31,6 +31,7 @@ class TerminalKeyboardBar extends StatelessWidget {
     this.terminalMouseInput = false,
     this.onTerminalMouseInputChanged,
     this.onRemoteMouseTrackingActivated,
+    this.onOpenRecentDirectories,
     super.key,
   });
 
@@ -61,6 +62,10 @@ class TerminalKeyboardBar extends StatelessWidget {
   /// Called once each time the remote application turns mouse tracking on,
   /// so the page can surface a one-time discoverability hint.
   final VoidCallback? onRemoteMouseTrackingActivated;
+
+  /// Opens the "cd to…" recent-directories sheet; offered first in the
+  /// Tmux+ menu and in the Herdr navigator. Null hides the entry.
+  final VoidCallback? onOpenRecentDirectories;
 
   @override
   Widget build(BuildContext context) {
@@ -233,16 +238,17 @@ class TerminalKeyboardBar extends StatelessWidget {
         onSelected: _triggerTmuxAction,
         items: [
           for (final action in _TmuxAction.values)
-            PopupMenuItem(
-              value: action,
-              child: Row(
-                children: [
-                  Icon(action.icon, size: 18),
-                  const SizedBox(width: 10),
-                  Text(action.label),
-                ],
+            if (action != _TmuxAction.cdTo || onOpenRecentDirectories != null)
+              PopupMenuItem(
+                value: action,
+                child: Row(
+                  children: [
+                    Icon(action.icon, size: 18),
+                    const SizedBox(width: 10),
+                    Text(action.label),
+                  ],
+                ),
               ),
-            ),
         ],
       ),
       TerminalKeyboardAction.herdrMenu => _MenuKey<HerdrShortcut>(
@@ -413,6 +419,10 @@ class TerminalKeyboardBar extends StatelessWidget {
   }
 
   void _triggerTmuxAction(_TmuxAction action) {
+    if (action == _TmuxAction.cdTo) {
+      onOpenRecentDirectories?.call();
+      return;
+    }
     _sendTmuxPrefix();
     final key = action.key;
     if (key != null) {
@@ -563,6 +573,7 @@ class _SnippetMenuRow extends StatelessWidget {
 }
 
 enum _TmuxAction {
+  cdTo('cd to…', Icons.folder_open_rounded),
   newWindow('New window', Icons.add_box_rounded, text: 'c'),
   previousWindow('Previous window', Icons.skip_previous_rounded, text: 'p'),
   nextWindow('Next window', Icons.skip_next_rounded, text: 'n'),

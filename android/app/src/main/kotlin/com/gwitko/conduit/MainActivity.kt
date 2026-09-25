@@ -50,6 +50,11 @@ class MainActivity : FlutterFragmentActivity() {
         share.attach(shareChannel)
         // A cold start from the share sheet: the launching intent is the share.
         share.consume(intent)
+        val clipboardImage = ClipboardImageBridge(this) // Chat composer "Paste image"
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            ClipboardImageBridge.CHANNEL,
+        ).setMethodCallHandler { call, result -> clipboardImage.handle(call, result) }
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             BACKGROUND_KEEPALIVE_CHANNEL,

@@ -41,9 +41,12 @@ import 'package:conduit/features/terminal/data/dart_ssh_terminal_repository.dart
 import 'package:conduit/features/terminal/data/mosh_terminal_repository.dart';
 import 'package:conduit/features/terminal/data/routing_terminal_repository.dart';
 import 'package:conduit/features/terminal/data/secure_host_key_verifier.dart';
+import 'package:conduit/features/terminal/data/secure_recent_directories_store.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:conduit/features/terminal/domain/ssh_terminal_repository.dart';
 import 'package:conduit/features/terminal/presentation/host_key_prompt_coordinator.dart';
+import 'package:conduit/features/terminal/presentation/recent_directories_controller.dart';
+import 'package:conduit/features/terminal/presentation/recent_directory_tracker.dart';
 import 'package:conduit/features/terminal/presentation/terminal_background_keepalive.dart';
 import 'package:conduit/features/terminal/presentation/terminal_page.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
@@ -91,11 +94,23 @@ void main() {
     companionProvider: const ConductoreHostAttentionProvider(),
     notifier: const PlatformAgentAttentionNotifier(),
   );
+  final recentDirectories = RecentDirectoriesController(
+    const SecureRecentDirectoriesStore(secureStorage),
+  );
   final connectFlow = SessionConnectFlow(
     hostsController: hostsController,
     workspace: workspaceController,
     runnerFactory: (host) => SshAgentCommandRunner(hostKeyVerifier, host),
     preferences: const SecureConnectPreferencesRepository(secureStorage),
+    recentDirectories: recentDirectories,
+  );
+  // Collects recent directories (OSC 7, tmux on detach, companion agents)
+  // for the app's whole lifetime, like the widget pusher below.
+  RecentDirectoryTracker(
+    workspace: workspaceController,
+    directories: recentDirectories,
+    runnerFactory: (host) => SshAgentCommandRunner(hostKeyVerifier, host),
+    agentAttention: agentAttention,
   );
   // Mirrors the agent dashboard onto the Android home-screen widget and
   // quick-settings tile for the app's whole lifetime.
