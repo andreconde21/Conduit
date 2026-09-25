@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:conduit/core/theme/app_palette.dart';
+import 'package:conduit/core/theme/omarchy_theme_sync.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/terminal_pill_items.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
@@ -12,7 +13,7 @@ class ThemePreferences {
   const ThemePreferences({
     required this.themeMode,
     required this.palette,
-    this.terminalFont = TerminalFontOption.atkynsonNerdFont,
+    this.terminalFont = defaultTerminalFont,
     this.terminalFontSize = terminalFontSizeDefault,
     this.terminalKeyboardRows = defaultTerminalKeyboardRows,
     this.terminalSnippets = const [],
@@ -27,6 +28,8 @@ class ThemePreferences {
     this.terminalGestures = TerminalGesturePreferences.defaults,
     this.speechLanguage = '',
     this.remoteClipboardEnabled = true,
+    this.omarchySyncHostId,
+    this.omarchySyncedTheme,
   });
 
   final ThemeMode themeMode;
@@ -66,14 +69,30 @@ class ThemePreferences {
   /// Whether text the remote copies with OSC 52 lands on the phone
   /// clipboard. On by default, like most desktop terminals.
   final bool remoteClipboardEnabled;
+
+  /// The saved machine whose Omarchy theme the app follows; null when the
+  /// app uses [palette].
+  final String? omarchySyncHostId;
+
+  /// The theme last read from that machine (cached for the next start).
+  final OmarchySyncedTheme? omarchySyncedTheme;
 }
 
 class ThemePreferencesRepository {
   const ThemePreferencesRepository(this._storage);
 
   static const _themeModeKey = 'conduit.theme_mode.v1';
-  static const _paletteKey = 'conduit.palette.v1';
-  static const _terminalFontKey = 'conduit.terminal_font.v1';
+
+  /// Conduit's palette enum names (v1) and Omarchy theme ids (v2).
+  static const _legacyPaletteKey = 'conduit.palette.v1';
+  static const _paletteKey = 'conductore.palette.v2';
+
+  /// v1 always held the old default (Atkynson) once anything was saved, so
+  /// only an explicit "system" choice carries over to v2.
+  static const _legacyTerminalFontKey = 'conduit.terminal_font.v1';
+  static const _terminalFontKey = 'conductore.terminal_font.v2';
+  static const _omarchySyncHostKey = 'conductore.omarchy_sync_host.v1';
+  static const _omarchySyncedThemeKey = 'conductore.omarchy_synced_theme.v1';
   static const _terminalFontSizeKey = 'conduit.terminal_font_size.v1';
   static const _terminalKeyboardActionsKey =
       'conduit.terminal_keyboard_actions.v1';
@@ -98,8 +117,17 @@ class ThemePreferencesRepository {
 
   Future<ThemePreferences> load() async {
     final rawMode = await _storage.read(key: _themeModeKey);
-    final rawPalette = await _storage.read(key: _paletteKey);
+    final rawPalette =
+        await _storage.read(key: _paletteKey) ??
+        await _storage.read(key: _legacyPaletteKey);
     final rawTerminalFont = await _storage.read(key: _terminalFontKey);
+    final rawLegacyTerminalFont = rawTerminalFont == null
+        ? await _storage.read(key: _legacyTerminalFontKey)
+        : null;
+    final rawOmarchySyncHost = await _storage.read(key: _omarchySyncHostKey);
+    final rawOmarchySyncedTheme = await _storage.read(
+      key: _omarchySyncedThemeKey,
+    );
     final rawTerminalFontSize = await _storage.read(key: _terminalFontSizeKey);
     final rawTerminalKeyboardActions = await _storage.read(
       key: _terminalKeyboardActionsKey,
@@ -153,14 +181,8 @@ class ThemePreferencesRepository {
         (mode) => mode.name == rawMode,
         orElse: () => ThemeMode.dark,
       ),
-      palette: AppPalette.values.firstWhere(
-        (palette) => palette.name == rawPalette,
-        orElse: () => AppPalette.synthwave,
-      ),
-      terminalFont: TerminalFontOption.values.firstWhere(
-        (font) => font.name == rawTerminalFont,
-        orElse: () => TerminalFontOption.atkynsonNerdFont,
-      ),
+      palette: AppPalette.fromStoredId(rawPalette),
+      terminalFont: _parseTerminalFont(rawTerminalFont, rawLegacyTerminalFont),
       terminalFontSize: terminalFontSize == null
           ? terminalFontSizeDefault
           : clampTerminalFontSize(terminalFontSize),
@@ -186,7 +208,34 @@ class ThemePreferencesRepository {
       remoteClipboardEnabled:
           rawRemoteClipboardEnabled == null ||
           rawRemoteClipboardEnabled == 'true',
+      omarchySyncHostId: (rawOmarchySyncHost?.trim().isEmpty ?? true)
+          ? null
+          : rawOmarchySyncHost!.trim(),
+      omarchySyncedTheme: _parseSyncedTheme(rawOmarchySyncedTheme),
     );
+  }
+
+  static TerminalFontOption _parseTerminalFont(String? raw, String? legacy) {
+    if (raw == null) {
+      return legacy == TerminalFontOption.systemMonospace.name
+          ? TerminalFontOption.systemMonospace
+          : defaultTerminalFont;
+    }
+    return TerminalFontOption.values.firstWhere(
+      (font) => font.name == raw,
+      orElse: () => defaultTerminalFont,
+    );
+  }
+
+  static OmarchySyncedTheme? _parseSyncedTheme(String? raw) {
+    if (raw == null || raw.trim().isEmpty) {
+      return null;
+    }
+    try {
+      return OmarchySyncedTheme.fromJson(jsonDecode(raw));
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> save(ThemePreferences preferences) async {
@@ -269,6 +318,15 @@ class ThemePreferencesRepository {
     await _storage.write(
       key: _remoteClipboardEnabledKey,
       value: preferences.remoteClipboardEnabled.toString(),
+    );
+    await _storage.write(
+      key: _omarchySyncHostKey,
+      value: preferences.omarchySyncHostId ?? '',
+    );
+    final synced = preferences.omarchySyncedTheme;
+    await _storage.write(
+      key: _omarchySyncedThemeKey,
+      value: synced == null ? '' : jsonEncode(synced.toJson()),
     );
   }
 

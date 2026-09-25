@@ -386,7 +386,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
             brightness: Brightness.dark,
             palette: widget.themeController.palette,
           ),
-          themeMode: widget.themeController.themeMode,
+          themeMode: widget.themeController.effectiveThemeMode,
           builder: (context, child) {
             final overlayStyle = AppTheme.systemUiOverlayStyle(
               Theme.of(context).brightness,

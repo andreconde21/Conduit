@@ -129,7 +129,8 @@ class AppBackupService {
   Map<String, Object?> _themeToJson({required bool includeSecrets}) {
     return {
       'themeMode': _themeController.themeMode.name,
-      'palette': _themeController.palette.name,
+      'palette': _themeController.selectedPalette.name,
+      'omarchySyncHostId': _themeController.omarchySyncHostId,
       'terminalFont': _themeController.terminalFont.name,
       'terminalFontSize': _themeController.terminalFontSize,
       'terminalKeyboardRows': [
@@ -169,12 +170,16 @@ class AppBackupService {
         orElse: () => _themeController.themeMode,
       ),
     );
+    final rawPalette = json['palette'];
     await _themeController.setPalette(
-      AppPalette.values.firstWhere(
-        (palette) => palette.name == json['palette'],
-        orElse: () => _themeController.palette,
-      ),
+      rawPalette is String
+          ? AppPalette.fromStoredId(rawPalette)
+          : _themeController.selectedPalette,
     );
+    final syncHostId = json['omarchySyncHostId'];
+    if (syncHostId is String && syncHostId.isNotEmpty) {
+      await _themeController.setOmarchySyncHost(syncHostId);
+    }
     await _themeController.setTerminalFont(
       TerminalFontOption.values.firstWhere(
         (font) => font.name == json['terminalFont'],

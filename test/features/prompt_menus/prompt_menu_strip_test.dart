@@ -53,7 +53,7 @@ void main() {
               const Expanded(child: SizedBox.expand()),
               PromptMenuStrip(
                 session: session,
-                palette: AppPalette.synthwave,
+                palette: AppPalette.everforest,
                 brightness: Brightness.dark,
                 onSent: () => sentCount += 1,
               ),

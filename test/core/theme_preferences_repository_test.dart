@@ -69,7 +69,7 @@ void main() {
       await repository.save(
         const ThemePreferences(
           themeMode: ThemeMode.dark,
-          palette: AppPalette.synthwave,
+          palette: AppPalette.everforest,
           terminalKeyboardRows: [
             TerminalKeyboardRow(
               items: [
@@ -116,7 +116,7 @@ void main() {
       await repository.save(
         const ThemePreferences(
           themeMode: ThemeMode.dark,
-          palette: AppPalette.synthwave,
+          palette: AppPalette.everforest,
           terminalKeyboardRows: rows,
         ),
       );
@@ -144,7 +144,7 @@ void main() {
       await repository.save(
         const ThemePreferences(
           themeMode: ThemeMode.dark,
-          palette: AppPalette.synthwave,
+          palette: AppPalette.everforest,
           terminalKeyboardRows: rows,
         ),
       );
@@ -161,7 +161,7 @@ void main() {
       await repository.save(
         const ThemePreferences(
           themeMode: ThemeMode.dark,
-          palette: AppPalette.synthwave,
+          palette: AppPalette.everforest,
           showLocalShell: false,
         ),
       );
@@ -183,7 +183,7 @@ void main() {
         await repository.save(
           const ThemePreferences(
             themeMode: ThemeMode.dark,
-            palette: AppPalette.synthwave,
+            palette: AppPalette.everforest,
             terminalMouseInput: true,
           ),
         );
@@ -203,7 +203,7 @@ void main() {
       await repository.save(
         const ThemePreferences(
           themeMode: ThemeMode.dark,
-          palette: AppPalette.synthwave,
+          palette: AppPalette.everforest,
           terminalEnterSequence: TerminalEnterSequence.crlf,
         ),
       );
@@ -224,7 +224,7 @@ void main() {
         await repository.save(
           const ThemePreferences(
             themeMode: ThemeMode.dark,
-            palette: AppPalette.synthwave,
+            palette: AppPalette.everforest,
             touchModeHintSeen: true,
           ),
         );
@@ -245,7 +245,7 @@ void main() {
       await repository.save(
         const ThemePreferences(
           themeMode: ThemeMode.dark,
-          palette: AppPalette.synthwave,
+          palette: AppPalette.everforest,
           terminalToolbarStyle: TerminalToolbarStyle.keyRows,
         ),
       );
@@ -280,7 +280,7 @@ void main() {
       await repository.save(
         const ThemePreferences(
           themeMode: ThemeMode.dark,
-          palette: AppPalette.synthwave,
+          palette: AppPalette.everforest,
           terminalPillItems: custom,
         ),
       );
@@ -346,7 +346,7 @@ void main() {
       await repository.save(
         const ThemePreferences(
           themeMode: ThemeMode.dark,
-          palette: AppPalette.synthwave,
+          palette: AppPalette.everforest,
           menuButtonsEnabled: false,
         ),
       );
@@ -370,7 +370,7 @@ void main() {
       await repository.save(
         const ThemePreferences(
           themeMode: ThemeMode.dark,
-          palette: AppPalette.synthwave,
+          palette: AppPalette.everforest,
           terminalGestures: gestures,
         ),
       );
@@ -396,7 +396,7 @@ void main() {
       await repository.save(
         const ThemePreferences(
           themeMode: ThemeMode.dark,
-          palette: AppPalette.synthwave,
+          palette: AppPalette.everforest,
           terminalSnippets: [snippet],
         ),
       );
