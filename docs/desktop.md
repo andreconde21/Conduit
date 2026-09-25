@@ -187,6 +187,60 @@ narrower than 900 dp, keep the phone layout.
   the terminal reflows on resize. F11 hides the sidebar and the right
   panel with the terminal's own chrome.
 
+## This computer and a synced entry for the same PC
+
+A phone usually has an SSH entry for the PC (say *omarchy*, at its
+Tailscale IP). Device sync copies it to the PC, where it would duplicate
+*This computer* and SSH into itself, which mostly fails: keys don't sync
+and sshd may be off. So each desktop recognises a saved machine that is
+itself and folds it into *This computer* there. The other devices keep it
+as a normal SSH machine, and *This computer* itself never syncs.
+
+**How the match is decided** (`SelfMachineMatcher`,
+`lib/features/this_computer/`). Linux, macOS and Windows only; phones
+never probe.
+
+1. **Host key (strong).** When the saved machine has a trusted host key
+   (known hosts sync with the machines) and this device's own SSH host
+   public keys are readable (`/etc/ssh/ssh_host_*_key.pub`,
+   `%ProgramData%\ssh` on Windows), the key decides both ways. Same key:
+   it is this device. Different key: it is another machine, whatever its
+   address says (a VM or container behind a forwarded port).
+2. **Address.** Otherwise the machine's host field, case-insensitively,
+   must be one of this device's addresses *on port 22*: any IP of its
+   network interfaces (Tailscale's 100.x and `fd7a:115c:a1e0::` ones
+   included), `localhost`, `127.0.0.1`, `::1`, the host name, the host
+   name plus `.local`, or its MagicDNS name (`omarchy.<tailnet>.ts.net`,
+   from `tailscale status --json` when `tailscale` is on PATH, 3 s
+   timeout). IPv6 is compared in canonical form.
+
+The device is probed lazily in the background, cached for the session,
+and probed again on a network change or app resume. The machines are
+matched again after a sync pull or import. A failing probe only drops its
+own signal. Restores and deep links wait up to 4 s for the first match.
+
+**What changes on the matching device:**
+
+- The machine is left out of every machine list: the home and the
+  machine switcher, the desktop sidebar and dashboard, the quick switcher
+  and the connect picker. It stays in storage and in sync untouched, and
+  so does its place in a manual machine order.
+- *This computer* shows its name: *This computer · omarchy*.
+- Whatever targets it opens *This computer* locally: restored sessions,
+  a synced session list, notifications and deep links, and sidebar pins,
+  groups and order made for it.
+- Per-host preferences *This computer* has no value of its own for
+  follow the matched machine, read-only: tmux/Herdr on open, session name
+  and start directory, the multiplexer prefix, a session's *Open in*
+  choice and the live preview port. Set one on *This computer* and it
+  becomes its own. Nothing is ever written to the synced machine.
+- **Settings › Sync & backup › This computer on your other devices** says
+  *Also shown as omarchy on your other devices*, with a switch *Show it
+  separately here too* (per device, off by default) for SSH-to-self.
+
+If the PC is also the sync hub, sync itself still reaches it through that
+saved machine over SSH, as before.
+
 ## What each platform supports
 
 | Feature | Linux | Windows | macOS | Why |
