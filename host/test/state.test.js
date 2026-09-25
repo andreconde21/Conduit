@@ -172,3 +172,18 @@ test('transcript_path is recorded and kept when later events omit it', () => {
   assert.equal(st.agents.s1.transcriptPath, '/home/u/.claude/projects/p/s1.jsonl')
   assert.equal(fresh(ev('Stop')).agents.s1.transcriptPath, null)
 })
+
+test('names drop Claude title glyphs; a bare "claude" window falls back to cwd', () => {
+  const named = win => fresh(ev('SessionStart', { tmux: { session: 'main', window: 1, paneId: '%1', windowName: win } })).agents.s1.name
+  assert.equal(named('⚠ claude'), 'proj')
+  assert.equal(named('✳ Fix the tests'), 'Fix the tests')
+  assert.equal(named('✻  reviewer'), 'reviewer')
+  assert.equal(named('● ◐ api'), 'api')
+  assert.equal(named('⚠️ deploy'), 'deploy')
+  assert.equal(named('🤖 bot'), 'bot')
+  assert.equal(named('⠋ spinner'), 'spinner')
+  assert.equal(named('✳'), 'proj')
+  assert.equal(named('C++ port'), 'C++ port')
+  assert.equal(fresh(ev('SessionStart', { herdr: { paneId: 'w1:p1', name: '✳ builder' } })).agents.s1.name, 'builder')
+  assert.equal(state.cleanName('  plain '), 'plain')
+})

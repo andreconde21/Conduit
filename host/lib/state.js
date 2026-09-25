@@ -72,9 +72,21 @@ function summarize (toolName, input) {
   return truncate((line || JSON.stringify(input)).replace(/\s+/g, ' ').trim(), SUMMARY_MAX)
 }
 
+// Claude Code prefixes its terminal title (which tmux copies into the window
+// name) with status glyphs: "⚠ claude", "✳ Fix tests", "● …". Strip leading
+// symbols, emoji, variation selectors and whitespace so names stay readable.
+const LEADING_GLYPHS = /^[\s\p{So}\p{Sm}\p{Sk}\p{Po}\p{Pd}\p{Extended_Pictographic}\u2190-\u23ff\u2500-\u27bf\u2800-\u28ff\ufe0f\u200d]+/u
+
+function cleanName (name) {
+  if (typeof name !== 'string') return null
+  const cleaned = name.replace(LEADING_GLYPHS, '').trim()
+  return cleaned || null
+}
+
 function pickName (event, cwd) {
-  const win = event.tmux && event.tmux.windowName
-  if (event.herdr && event.herdr.name) return event.herdr.name
+  const herdrName = event.herdr && cleanName(event.herdr.name)
+  if (herdrName) return herdrName
+  const win = event.tmux && cleanName(event.tmux.windowName)
   if (win && !GENERIC_WINDOW_NAMES.has(win.toLowerCase())) return win
   if (cwd) return path.basename(cwd) || cwd
   return null
@@ -251,5 +263,6 @@ module.exports = {
   prune,
   snapshot,
   summarize,
+  cleanName,
   clone
 }

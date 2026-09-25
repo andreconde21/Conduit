@@ -1,8 +1,9 @@
 # Changelog — host companion
 
-## Unreleased
+## 0.2.0 (2026-09-25)
 
 - feat: chat view support: agents carry `transcriptPath`; new `transcript` (incremental, capped JSONL reader with `--since` / `--before` / `--tail-bytes`), `send` (types a prompt into the agent's Herdr or tmux pane, no shell) and `interrupt` (Escape) commands.
+- fix: agent names drop the status glyphs Claude Code puts in the terminal title ("⚠ claude", "✳ Fix tests"); a bare "claude" window name falls back to the cwd basename.
 
 ## 0.1.0 (2026-09-24)
 

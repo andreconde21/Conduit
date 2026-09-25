@@ -126,7 +126,9 @@ Every command prints one JSON document on stdout and exits 0, or prints
 ```
 
 * `name`: Herdr agent name, else the tmux window name (unless it is a generic
-  process name like `node`), else the basename of `cwd`.
+  process name like `node` or `claude`), else the basename of `cwd`. Leading
+  status glyphs from Claude Code's terminal title (`⚠`, `✳`, `●`, emoji,
+  spinner dots) are stripped first.
 * `tmux` / `herdr` are `null` when unknown. `transcriptPath` is the
   `transcript_path` of the latest hook event (null until one carried it).
 * `lastMessage`: last assistant text (Stop), notification text, or the
@@ -268,7 +270,7 @@ Prints `{"ok":true,"sessionId":"…","via":"tmux","paneId":"%5","key":"Escape"}`
 * `install` / `uninstall`: `{"ok":true,"settings":"…/settings.json","events":[…]}` / `{"ok":true,"removed":[…],"daemonStopped":true}`
 * `doctor`: `{"ok":true,"user":"andre","checks":[{"name":"hooks registered","ok":true,"detail":"9 events"}, …]}`
 * `stop`: `{"ok":true,"running":true,"stopped":true}` or `{"ok":true,"running":false}`
-* `version`: `{"version":"0.1.0","protocol":1,"node":"22.23.1"}`
+* `version`: `{"version":"0.2.0","protocol":1,"node":"22.23.1"}`
 
 ## Permission decisions
 
