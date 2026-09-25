@@ -198,17 +198,6 @@ class _TmuxNavigatorSheetState extends State<TmuxNavigatorSheet> {
         controller: scrollController,
         padding: EdgeInsets.fromLTRB(16, 8, 16, 16 + bottomInset),
         children: [
-          Center(
-            child: Container(
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(
-                color: _muted,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
           Row(
             children: [
               const MultiplexerIcon(MultiplexerKind.tmux, size: 24),
