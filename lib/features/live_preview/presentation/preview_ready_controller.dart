@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/companion_setup/data/companion_commands.dart';
 import 'package:conduit/features/live_preview/domain/dev_server_detection.dart';
@@ -144,8 +143,9 @@ class PreviewReadyController extends ChangeNotifier {
         _source = PreviewPortSource.ss;
       }
       await _pollSs();
-    } on AppFailure {
-      // Unreachable for now (the session is reconnecting): try next time.
+    } on Object {
+      // Unreachable for now (the session is reconnecting), or the runner
+      // failed in a way that says nothing about ports: try next time.
     } finally {
       _polling = false;
     }

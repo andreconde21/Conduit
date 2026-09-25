@@ -9,6 +9,7 @@ import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/data/remote_tool_command.dart';
 import 'package:conduit/features/agent_attention/data/ssh_agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
+import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_launcher.dart';
@@ -365,8 +366,7 @@ class _TerminalPageState extends State<TerminalPage>
       final watcher = _previewWatchers[session] ??=
           (widget.previewWatcherFactory?.call(session) ??
                 PreviewReadyController(
-                  runnerFactory: () =>
-                      SshAgentCommandRunner(verifier!, session.host),
+                  runnerFactory: () => _previewRunnerFor(session, verifier),
                   canPoll: () => session.isConnected,
                 ))
             ..attachScreen(
@@ -375,6 +375,23 @@ class _TerminalPageState extends State<TerminalPage>
             );
       watcher.setForeground(_appResumed && session == active);
     }
+  }
+
+  /// A command runner for [session]'s port polls: the connect flow's (the
+  /// app's SSH exec channels), else the agent monitor's, else one from the
+  /// host key verifier.
+  AgentCommandRunner _previewRunnerFor(
+    TerminalSessionController session,
+    HostKeyVerifier? verifier,
+  ) {
+    final flow = widget.connectFlow;
+    if (flow != null) return flow.runnerFactory(session.host);
+    final attention = widget.agentAttention;
+    if (attention != null) {
+      final (runner, :owned) = attention.runnerFor(session.host);
+      return owned ? runner : _BorrowedRunner(runner);
+    }
+    return SshAgentCommandRunner(verifier!, session.host);
   }
 
   /// The Live preview tab of [host], when one is open.
@@ -2128,4 +2145,19 @@ class _TerminalScreen implements Listenable {
       for (var row = start; row < lines.length; row++) lines[row].getText(),
     ];
   }
+}
+
+/// A runner someone else owns (the agent monitor's connection): closing it
+/// is left to the owner.
+class _BorrowedRunner implements AgentCommandRunner {
+  const _BorrowedRunner(this._runner);
+
+  final AgentCommandRunner _runner;
+
+  @override
+  Future<AgentCommandResult> run(String command, {required Duration timeout}) =>
+      _runner.run(command, timeout: timeout);
+
+  @override
+  Future<void> close() async {}
 }
