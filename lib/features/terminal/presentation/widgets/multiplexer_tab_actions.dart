@@ -229,9 +229,12 @@ Future<void> showMultiplexerTabsSheet(
   final pace = controller.pollInterval;
   controller.setPollInterval(MultiplexerTabsController.listPollInterval);
   final noun = multiplexerTabNoun(controller);
+  // On desktop a popover at the session tab's label (the click that
+  // opened it), like a tab overflow list.
   await showAdaptiveModal<void>(
     context: context,
     kind: AdaptiveModalKind.menu,
+    desktopMaxWidth: 360,
     useSafeArea: true,
     isScrollControlled: true,
     sheetAnimationStyle: MediaQuery.maybeDisableAnimationsOf(context) ?? false
