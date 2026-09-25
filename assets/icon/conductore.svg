@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 108 108">
+  <!-- Conductore launcher icon: prompt chevron and conductor's baton on
+       Omarchy's Everforest background. The adaptive foreground is this
+       without the rect (android/app/src/main/res/drawable/ic_launcher_foreground.xml). -->
+  <rect width="108" height="108" fill="#2D353B"/>
+  <path d="M32.4 39.6L49.2 54L32.4 68.4" fill="none" stroke="#A7C080" stroke-width="6.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M55.8 70.8L76.8 36" fill="none" stroke="#D3C6AA" stroke-width="3.3" stroke-linecap="round"/>
+  <circle cx="55.8" cy="70.8" r="5.1" fill="#E09D7F"/>
+</svg>

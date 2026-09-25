@@ -1,4 +1,13 @@
-enum TerminalFontOption { systemMonospace, atkynsonNerdFont }
+/// Bundled terminal fonts. JetBrains Mono Nerd Font is Omarchy's default
+/// monospace font and the app default.
+enum TerminalFontOption {
+  jetBrainsMonoNerdFont,
+  atkynsonNerdFont,
+  systemMonospace,
+}
+
+const TerminalFontOption defaultTerminalFont =
+    TerminalFontOption.jetBrainsMonoNerdFont;
 
 enum TerminalEnterSequence { cr, lf, crlf }
 
@@ -37,14 +46,34 @@ double normalizeTerminalFontSize(double size) {
 
 extension TerminalFontOptionDetails on TerminalFontOption {
   String get label => switch (this) {
-    TerminalFontOption.systemMonospace => 'System mono',
-    TerminalFontOption.atkynsonNerdFont => 'Nerd Font',
+    TerminalFontOption.jetBrainsMonoNerdFont => 'JetBrains Mono',
+    TerminalFontOption.atkynsonNerdFont => 'Atkynson',
+    TerminalFontOption.systemMonospace => 'System',
   };
 
   String get fontFamily => switch (this) {
-    TerminalFontOption.systemMonospace => 'monospace',
+    TerminalFontOption.jetBrainsMonoNerdFont => 'JetBrainsMonoNerdFontMono',
     TerminalFontOption.atkynsonNerdFont => 'AtkynsonMonoNerdFontMono',
+    TerminalFontOption.systemMonospace => 'monospace',
   };
+
+  /// Whether the font carries the Nerd Font icons (powerline, nf-*).
+  bool get hasNerdGlyphs => this != TerminalFontOption.systemMonospace;
+}
+
+/// The bundled font for a font family name a machine reports (Omarchy's
+/// `fc-match monospace`, alacritty's `family`), or null when none matches.
+/// Nerd Font naming variants (`JetBrainsMono Nerd Font`, `... NF`,
+/// `... Nerd Font Mono`, `JetBrains Mono`) all match.
+TerminalFontOption? terminalFontForFamily(String family) {
+  final key = family.toLowerCase().replaceAll(RegExp(r'[^a-z]'), '');
+  if (key.startsWith('jetbrainsmono')) {
+    return TerminalFontOption.jetBrainsMonoNerdFont;
+  }
+  if (key.startsWith('atkynsonmono') || key.startsWith('atkinsonmono')) {
+    return TerminalFontOption.atkynsonNerdFont;
+  }
+  return null;
 }
 
 extension TerminalEnterSequenceDetails on TerminalEnterSequence {

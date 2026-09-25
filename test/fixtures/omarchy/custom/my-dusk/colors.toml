@@ -1,0 +1,13 @@
+# A user theme written with the legacy ANSI names only.
+accent = "#e0a458"
+selection = "#3a3450"
+color0 = "#1b1726"
+color1 = "#e06c75"
+color2 = "#98c379"
+color3 = "#e5c07b"
+color4 = "#61afef"
+color5 = "#c678dd"
+color6 = "#56b6c2"
+color7 = "#dcd6ea"
+color8 = "#5c5470"
+color15 = "#ffffff"

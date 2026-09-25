@@ -241,7 +241,11 @@ void main() {
 
     await tester.tap(find.text('Appearance'));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.widgetWithText(TextButton, 'Edit'));
+    await tester.scrollUntilVisible(
+      find.widgetWithText(TextButton, 'Edit'),
+      120,
+      scrollable: find.byType(Scrollable).last,
+    );
     await tester.pumpAndSettle();
     final initialCount = controller.terminalKeyboardRows.first.items.length;
     await tester.tap(find.widgetWithText(TextButton, 'Edit'));

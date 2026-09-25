@@ -2,12 +2,14 @@ import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/app_theme.dart';
+import 'package:conduit/core/theme/omarchy_theme_sync_controller.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
 import 'package:conduit/features/backup/presentation/backup_sheet.dart';
 import 'package:conduit/features/home_widget/data/platform_agent_status_widget_channel.dart';
 import 'package:conduit/features/home_widget/presentation/quick_settings_tile_controls.dart';
+import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/snippets/presentation/snippet_editor.dart';
 import 'package:conduit/features/terminal/presentation/gestures/terminal_gestures_settings.dart';
 import 'package:conduit/features/voice/presentation/speech_settings_controls.dart';
@@ -63,15 +65,19 @@ class _ThemeSheet extends StatelessWidget {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'Pick a developer palette. The home screen, editor, and dialogs share the same look.',
+                    'Omarchy themes. The terminal, home screen and dialogs share one look.',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
                   const SizedBox(height: 18),
-                  const ConduitSectionLabel('Mode'),
+                  const ConduitSectionLabel('Theme'),
                   const SizedBox(height: 10),
-                  _ModeSelector(controller: controller),
+                  if (controller.omarchySync case final sync?) ...[
+                    OmarchySyncControls(sync: sync),
+                    const SizedBox(height: 14),
+                  ],
+                  _ThemeGrid(controller: controller),
                   const SizedBox(height: 22),
                   const ConduitSectionLabel('Terminal'),
                   const SizedBox(height: 10),
@@ -101,29 +107,6 @@ class _ThemeSheet extends StatelessWidget {
                     _BackupControls(backupService: backupService!),
                   ],
                   const SizedBox(height: 22),
-                  const ConduitSectionLabel('Palette'),
-                  const SizedBox(height: 10),
-                  GridView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          crossAxisSpacing: 12,
-                          mainAxisSpacing: 12,
-                          childAspectRatio: 1.25,
-                        ),
-                    itemCount: AppPalette.values.length,
-                    itemBuilder: (context, index) {
-                      final palette = AppPalette.values[index];
-                      return _PaletteCard(
-                        palette: palette,
-                        selected: controller.palette == palette,
-                        onTap: () => controller.setPalette(palette),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 22),
                   const ConduitSectionLabel('About'),
                   const SizedBox(height: 10),
                   const _AboutControls(),
@@ -150,7 +133,7 @@ class _HomeAppearanceControls extends StatelessWidget {
       color: colorScheme.surface,
       shape: RoundedRectangleBorder(
         side: BorderSide(color: colorScheme.outlineVariant),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: AppTheme.borderRadius,
       ),
       clipBehavior: Clip.antiAlias,
       child: SwitchListTile(
@@ -182,7 +165,7 @@ class _BackupControls extends StatelessWidget {
       color: colorScheme.surface,
       shape: RoundedRectangleBorder(
         side: BorderSide(color: colorScheme.outlineVariant),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: AppTheme.borderRadius,
       ),
       clipBehavior: Clip.antiAlias,
       child: ListTile(
@@ -198,38 +181,6 @@ class _BackupControls extends StatelessWidget {
         onTap: () =>
             showBackupSheet(context: context, backupService: backupService),
       ),
-    );
-  }
-}
-
-class _ModeSelector extends StatelessWidget {
-  const _ModeSelector({required this.controller});
-
-  final ThemeController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    return SegmentedButton<ThemeMode>(
-      segments: const [
-        ButtonSegment(
-          value: ThemeMode.system,
-          icon: Icon(Icons.brightness_auto),
-          label: Text('System'),
-        ),
-        ButtonSegment(
-          value: ThemeMode.dark,
-          icon: Icon(Icons.dark_mode),
-          label: Text('Dark'),
-        ),
-        ButtonSegment(
-          value: ThemeMode.light,
-          icon: Icon(Icons.light_mode),
-          label: Text('Light'),
-        ),
-      ],
-      selected: {controller.themeMode},
-      onSelectionChanged: (selection) =>
-          controller.setThemeMode(selection.single),
     );
   }
 }
@@ -251,12 +202,10 @@ class _TerminalAppearanceControls extends StatelessWidget {
             for (final font in TerminalFontOption.values)
               ButtonSegment(
                 value: font,
-                icon: Icon(
-                  font == TerminalFontOption.atkynsonNerdFont
-                      ? Icons.extension_rounded
-                      : Icons.terminal_rounded,
+                label: Text(
+                  font.label,
+                  style: TextStyle(fontFamily: font.fontFamily),
                 ),
-                label: Text(font.label),
               ),
           ],
           selected: {controller.terminalFont},
@@ -268,7 +217,7 @@ class _TerminalAppearanceControls extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
           decoration: BoxDecoration(
             color: colorScheme.surface,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: AppTheme.borderRadius,
             border: Border.all(color: colorScheme.outlineVariant),
           ),
           child: Column(
@@ -306,11 +255,13 @@ class _TerminalAppearanceControls extends StatelessWidget {
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
             color: colorScheme.surface,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: AppTheme.borderRadius,
             border: Border.all(color: colorScheme.outlineVariant),
           ),
           child: Text(
-            r'  ~/conduit  ❯ git status',
+            controller.terminalFont.hasNerdGlyphs
+                ? '\u{F07B} ~/conductore \u{E0A0} main ❯ git status'
+                : '~/conductore main > git status',
             style: TextStyle(
               fontFamily: controller.terminalFont.fontFamily,
               fontSize: controller.terminalFontSize,
@@ -325,7 +276,7 @@ class _TerminalAppearanceControls extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
           decoration: BoxDecoration(
             color: colorScheme.surface,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: AppTheme.borderRadius,
             border: Border.all(color: colorScheme.outlineVariant),
           ),
           child: Row(
@@ -356,7 +307,7 @@ class _TerminalAppearanceControls extends StatelessWidget {
           color: colorScheme.surface,
           shape: RoundedRectangleBorder(
             side: BorderSide(color: colorScheme.outlineVariant),
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: AppTheme.borderRadius,
           ),
           clipBehavior: Clip.antiAlias,
           child: Padding(
@@ -404,7 +355,7 @@ class _TerminalAppearanceControls extends StatelessWidget {
           color: colorScheme.surface,
           shape: RoundedRectangleBorder(
             side: BorderSide(color: colorScheme.outlineVariant),
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: AppTheme.borderRadius,
           ),
           clipBehavior: Clip.antiAlias,
           child: Padding(
@@ -452,7 +403,7 @@ class _TerminalAppearanceControls extends StatelessWidget {
           color: colorScheme.surface,
           shape: RoundedRectangleBorder(
             side: BorderSide(color: colorScheme.outlineVariant),
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: AppTheme.borderRadius,
           ),
           clipBehavior: Clip.antiAlias,
           child: SwitchListTile(
@@ -473,7 +424,7 @@ class _TerminalAppearanceControls extends StatelessWidget {
           color: colorScheme.surface,
           shape: RoundedRectangleBorder(
             side: BorderSide(color: colorScheme.outlineVariant),
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: AppTheme.borderRadius,
           ),
           clipBehavior: Clip.antiAlias,
           child: SwitchListTile(
@@ -495,7 +446,7 @@ class _TerminalAppearanceControls extends StatelessWidget {
           color: colorScheme.surface,
           shape: RoundedRectangleBorder(
             side: BorderSide(color: colorScheme.outlineVariant),
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: AppTheme.borderRadius,
           ),
           clipBehavior: Clip.antiAlias,
           child: SwitchListTile(
@@ -517,7 +468,7 @@ class _TerminalAppearanceControls extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
           decoration: BoxDecoration(
             color: colorScheme.surface,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: AppTheme.borderRadius,
             border: Border.all(color: colorScheme.outlineVariant),
           ),
           child: SnippetListEditor(
@@ -992,7 +943,7 @@ Widget _reorderProxyDecorator(
           color: Colors.transparent,
           elevation: 8 * elevation,
           shadowColor: Colors.black.withValues(alpha: 0.22),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: AppTheme.borderRadius,
           child: child,
         ),
       );
@@ -1195,11 +1146,89 @@ IconData _keyboardActionIcon(TerminalKeyboardAction action) {
   };
 }
 
-class _PaletteCard extends StatelessWidget {
-  const _PaletteCard({
+/// The bundled Omarchy themes, dark first, as tappable previews.
+class _ThemeGrid extends StatelessWidget {
+  const _ThemeGrid({required this.controller});
+
+  final ThemeController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final following = controller.omarchySyncedTheme != null;
+    final active = controller.palette;
+    // Two per row, in plain rows: the sheet is the only scrollable.
+    Widget grid(List<AppPalette> palettes) => Column(
+      children: [
+        for (var i = 0; i < palettes.length; i += 2) ...[
+          if (i > 0) const SizedBox(height: 10),
+          Row(
+            children: [
+              for (var j = i; j < i + 2; j++) ...[
+                if (j > i) const SizedBox(width: 10),
+                Expanded(
+                  child: AspectRatio(
+                    aspectRatio: 1.55,
+                    child: j < palettes.length
+                        ? PaletteCard(
+                            palette: palettes[j],
+                            selected: palettes[j].id == active.id,
+                            onTap: () => controller.setPalette(palettes[j]),
+                          )
+                        : null,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ],
+      ],
+    );
+    final dark = [
+      for (final palette in AppPalette.values)
+        if (palette.isDark) palette,
+    ];
+    final light = [
+      for (final palette in AppPalette.values)
+        if (!palette.isDark) palette,
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (following) ...[
+          Text(
+            'Picking a theme below stops following the machine.',
+            style: theme.textTheme.bodySmall,
+          ),
+          const SizedBox(height: 10),
+        ],
+        if (active.custom) ...[
+          SizedBox(
+            height: 92,
+            child: PaletteCard(palette: active, selected: true, onTap: () {}),
+          ),
+          const SizedBox(height: 14),
+        ],
+        Text('Dark', style: theme.textTheme.labelMedium),
+        const SizedBox(height: 8),
+        grid(dark),
+        const SizedBox(height: 14),
+        Text('Light', style: theme.textTheme.labelMedium),
+        const SizedBox(height: 8),
+        grid(light),
+      ],
+    );
+  }
+}
+
+/// A theme preview in the theme's own colours: a prompt line and its
+/// ANSI colours on the theme background, like a tiny terminal.
+class PaletteCard extends StatelessWidget {
+  const PaletteCard({
     required this.palette,
     required this.selected,
     required this.onTap,
+    super.key,
   });
 
   final AppPalette palette;
@@ -1208,131 +1237,90 @@ class _PaletteCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final brightness = theme.brightness;
-    return Padding(
-      padding: const EdgeInsets.all(1.5),
+    final terminal = palette.terminalTheme;
+    final mono = AppTheme.monoFontFamily;
+    final ansi = [
+      terminal.red,
+      terminal.green,
+      terminal.yellow,
+      terminal.blue,
+      terminal.magenta,
+      terminal.cyan,
+      palette.colors.orange,
+      terminal.white,
+    ];
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: '${palette.label} theme',
       child: Material(
-        color: Colors.transparent,
+        color: palette.canvas,
+        shape: RoundedRectangleBorder(
+          borderRadius: AppTheme.borderRadius,
+          side: BorderSide(
+            color: selected ? palette.accent : palette.hairline,
+            width: selected ? 2 : 1,
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
         child: InkWell(
-          borderRadius: BorderRadius.circular(14),
           onTap: onTap,
-          child: Container(
-            decoration: BoxDecoration(
-              color: palette.panelFor(brightness),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            foregroundDecoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: selected
-                    ? palette.accent
-                    : palette.hairlineFor(brightness),
-                width: selected ? 1.5 : 1,
-              ),
-            ),
-            clipBehavior: Clip.antiAlias,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 9, 10, 9),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Expanded(
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [palette.canvas, palette.panelElevated],
-                          ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        palette.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: palette.foreground,
+                          fontFamily: mono,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12.5,
                         ),
                       ),
-                      Positioned(
-                        top: -30,
-                        right: -30,
-                        child: Container(
-                          width: 80,
-                          height: 80,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            gradient: RadialGradient(
-                              colors: [
-                                palette.accent.withValues(alpha: 0.55),
-                                palette.accent.withValues(alpha: 0),
-                              ],
-                            ),
-                          ),
-                        ),
+                    ),
+                    if (selected)
+                      Icon(
+                        Icons.check_rounded,
+                        color: palette.accent,
+                        size: 16,
                       ),
-                      Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            ConduitGlyph(size: 22, color: palette.accent),
-                            const Spacer(),
-                            Row(
-                              children: [
-                                _Swatch(color: palette.accent),
-                                const SizedBox(width: 4),
-                                _Swatch(color: palette.accentSecondary),
-                                const SizedBox(width: 4),
-                                _Swatch(color: palette.success),
-                                const SizedBox(width: 4),
-                                _Swatch(color: palette.warning),
-                                const SizedBox(width: 4),
-                                _Swatch(color: palette.danger),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
+                  ],
                 ),
-                Container(
-                  color: palette.panelElevated,
-                  padding: const EdgeInsets.fromLTRB(10, 9, 10, 9),
-                  child: Row(
+                const Spacer(),
+                Text.rich(
+                  TextSpan(
                     children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              palette.label,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: palette.foreground,
-                                fontWeight: FontWeight.w800,
-                                fontSize: 13,
-                              ),
-                            ),
-                            const SizedBox(height: 1),
-                            Text(
-                              palette.caption,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: palette.mutedForeground,
-                                fontSize: 10.5,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ),
+                      TextSpan(
+                        text: '❯ ',
+                        style: TextStyle(color: palette.accent),
                       ),
-                      if (selected)
-                        Icon(
-                          Icons.check_circle_rounded,
-                          color: colorScheme.primary,
-                          size: 18,
-                        ),
+                      TextSpan(
+                        text: 'claude ',
+                        style: TextStyle(color: palette.foreground),
+                      ),
+                      TextSpan(
+                        text: '--resume',
+                        style: TextStyle(color: palette.mutedForeground),
+                      ),
                     ],
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.clip,
+                  style: TextStyle(fontFamily: mono, fontSize: 11),
+                ),
+                const SizedBox(height: 7),
+                Row(
+                  children: [
+                    for (final color in ansi)
+                      Expanded(child: Container(height: 6, color: color)),
+                  ],
                 ),
               ],
             ),
@@ -1343,21 +1331,127 @@ class _PaletteCard extends StatelessWidget {
   }
 }
 
-class _Swatch extends StatelessWidget {
-  const _Swatch({required this.color});
+/// "Follow Omarchy theme from machine": none or one saved machine, its
+/// sync status and a Sync now button.
+class OmarchySyncControls extends StatefulWidget {
+  const OmarchySyncControls({required this.sync, super.key});
 
-  final Color color;
+  final OmarchyThemeSyncController sync;
+
+  @override
+  State<OmarchySyncControls> createState() => _OmarchySyncControlsState();
+}
+
+class _OmarchySyncControlsState extends State<OmarchySyncControls> {
+  late Future<List<SavedHost>> _machines = widget.sync.machines();
+
+  @override
+  void didUpdateWidget(OmarchySyncControls oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.sync != widget.sync) {
+      _machines = widget.sync.machines();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 14,
-      height: 14,
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(4),
-      ),
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    return ListenableBuilder(
+      listenable: Listenable.merge([widget.sync, widget.sync.theme]),
+      builder: (context, _) {
+        final sync = widget.sync;
+        final hostId = sync.theme.omarchySyncHostId;
+        return Container(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+          decoration: BoxDecoration(
+            color: colorScheme.surface,
+            borderRadius: AppTheme.borderRadius,
+            border: Border.all(color: colorScheme.outlineVariant),
+          ),
+          child: FutureBuilder<List<SavedHost>>(
+            future: _machines,
+            builder: (context, snapshot) {
+              final machines = snapshot.data ?? const <SavedHost>[];
+              final known = machines.any((host) => host.id == hostId);
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Follow Omarchy theme from machine',
+                    style: theme.textTheme.labelLarge,
+                  ),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<String?>(
+                    key: ValueKey('omarchy-sync-machine-$hostId-$known'),
+                    initialValue: known ? hostId : null,
+                    isExpanded: true,
+                    items: [
+                      const DropdownMenuItem<String?>(child: Text('None')),
+                      for (final host in machines)
+                        DropdownMenuItem<String?>(
+                          value: host.id,
+                          child: Text(
+                            host.name,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                    ],
+                    onChanged: sync.follow,
+                  ),
+                  if (hostId != null) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            _status(sync),
+                            key: const ValueKey('omarchy-sync-status'),
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: sync.state == OmarchySyncState.failed
+                                  ? colorScheme.error
+                                  : colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: sync.state == OmarchySyncState.syncing
+                              ? null
+                              : () => sync.refresh(explicit: true),
+                          icon: const Icon(Icons.sync_rounded, size: 18),
+                          label: const Text('Sync now'),
+                        ),
+                      ],
+                    ),
+                  ] else ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      'Reads the theme and font of an Omarchy PC over SSH '
+                      'when the app starts or comes back.',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ],
+                ],
+              );
+            },
+          ),
+        );
+      },
     );
+  }
+
+  String _status(OmarchyThemeSyncController sync) {
+    if (sync.message.isNotEmpty) {
+      return sync.message;
+    }
+    final synced = sync.theme.omarchySyncedTheme;
+    if (synced != null) {
+      final time = synced.syncedAt.toLocal();
+      return '${synced.palette.label}, synced at '
+          '${time.hour.toString().padLeft(2, '0')}:'
+          '${time.minute.toString().padLeft(2, '0')}';
+    }
+    return 'Not synced yet.';
   }
 }
 

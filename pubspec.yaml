@@ -53,15 +53,19 @@ dev_dependencies:
   flutter_launcher_icons: ^0.14.4
   webview_flutter_platform_interface: ^2.15.1
 
+# The Android adaptive icon is hand-written vector XML
+# (res/drawable/ic_launcher_foreground.xml); the PNGs come from
+# tools/render_launcher_icon.py. Re-running flutter_launcher_icons would
+# replace the vectors with inset PNGs, so prefer the script.
 flutter_launcher_icons:
   android: "ic_launcher"
   ios: true
   remove_alpha_ios: true
   image_path: "assets/icon/icon.png"
   min_sdk_android: 21
-  adaptive_icon_background: "#000000"
+  adaptive_icon_background: "#2D353B"
   adaptive_icon_foreground: "assets/icon/icon_foreground.png"
-  adaptive_icon_monochrome: "assets/icon/icon_foreground.png"
+  adaptive_icon_monochrome: "assets/icon/icon_monochrome.png"
 
 flutter:
   uses-material-design: true
@@ -73,7 +77,18 @@ flutter:
     - assets/companion/
     - assets/companion/bin/
     - assets/companion/lib/
+    # Licence texts of the bundled fonts, shown in the app's licence page.
+    - assets/fonts/LICENSE-JetBrainsMonoNerdFont.txt
+    - assets/fonts/README-JetBrainsMonoNerdFont.md
+    - assets/fonts/LICENSE-AtkynsonMono.txt
   fonts:
+    # Omarchy's default monospace font (Nerd Fonts v3.5.1, "Mono" variant so
+    # icons keep one terminal cell), unmodified. SIL OFL 1.1.
+    - family: JetBrainsMonoNerdFontMono
+      fonts:
+        - asset: assets/fonts/JetBrainsMonoNerdFontMono-Regular.ttf
+        - asset: assets/fonts/JetBrainsMonoNerdFontMono-Bold.ttf
+          weight: 700
     - family: AtkynsonMonoNerdFontMono
       fonts:
         - asset: assets/fonts/AtkynsonMonoNerdFontMono-Regular.otf

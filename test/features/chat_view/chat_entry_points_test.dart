@@ -122,7 +122,7 @@ void main() {
           body: TerminalHeader(
             workspace: workspace,
             activeSession: session,
-            palette: AppPalette.synthwave,
+            palette: AppPalette.everforest,
             brightness: Brightness.dark,
             onBack: () {},
             onTabsChanged: () {},

@@ -1,4 +1,6 @@
 import 'package:conduit/core/theme/app_palette.dart';
+import 'package:conduit/core/theme/omarchy_theme_sync.dart';
+import 'package:conduit/core/theme/omarchy_theme_sync_controller.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/terminal_pill_items.dart';
 import 'package:conduit/core/theme/theme_preferences_repository.dart';
@@ -11,9 +13,16 @@ class ThemeController extends ChangeNotifier {
 
   final ThemePreferencesRepository _repository;
 
+  /// Reads the followed machine's Omarchy theme; set once at startup so the
+  /// Appearance settings can offer "Follow Omarchy theme". Null in tests
+  /// and builds without it.
+  OmarchyThemeSyncController? omarchySync;
+
   ThemeMode _themeMode = ThemeMode.dark;
-  AppPalette _palette = AppPalette.synthwave;
-  TerminalFontOption _terminalFont = TerminalFontOption.atkynsonNerdFont;
+  AppPalette _palette = AppPalette.defaultPalette;
+  TerminalFontOption _terminalFont = defaultTerminalFont;
+  String? _omarchySyncHostId;
+  OmarchySyncedTheme? _omarchySyncedTheme;
   double _terminalFontSize = terminalFontSizeDefault;
   List<TerminalKeyboardRow> _terminalKeyboardRows = defaultTerminalKeyboardRows;
   List<TerminalSnippet> _terminalSnippets = const [];
@@ -32,8 +41,36 @@ class ThemeController extends ChangeNotifier {
       TerminalGesturePreferences.defaults;
   String _speechLanguage = '';
 
+  /// The stored light/dark choice. Omarchy themes are dark or light
+  /// themselves, so the app follows [effectiveThemeMode]; this stays for
+  /// backups and older builds.
   ThemeMode get themeMode => _themeMode;
-  AppPalette get palette => _palette;
+
+  /// The brightness the app renders in: the active theme's.
+  ThemeMode get effectiveThemeMode => palette.themeMode;
+
+  /// The active theme: the followed machine's Omarchy theme when that is
+  /// set and has been read, else the theme picked in the app.
+  AppPalette get palette {
+    final synced = _omarchySyncedTheme;
+    if (_omarchySyncHostId != null && synced?.hostId == _omarchySyncHostId) {
+      return synced!.palette;
+    }
+    return _palette;
+  }
+
+  /// The theme picked in the app (used when not following a machine).
+  AppPalette get selectedPalette => _palette;
+
+  /// The saved machine whose Omarchy theme the app follows, or null.
+  String? get omarchySyncHostId => _omarchySyncHostId;
+
+  /// The theme last read from the followed machine.
+  OmarchySyncedTheme? get omarchySyncedTheme =>
+      _omarchySyncHostId != null &&
+          _omarchySyncedTheme?.hostId == _omarchySyncHostId
+      ? _omarchySyncedTheme
+      : null;
   TerminalFontOption get terminalFont => _terminalFont;
   double get terminalFontSize => _terminalFontSize;
   List<TerminalKeyboardRow> get terminalKeyboardRows =>
@@ -78,6 +115,8 @@ class ThemeController extends ChangeNotifier {
     _remoteClipboardEnabled = preferences.remoteClipboardEnabled;
     _terminalGestures = preferences.terminalGestures;
     _speechLanguage = preferences.speechLanguage;
+    _omarchySyncHostId = preferences.omarchySyncHostId;
+    _omarchySyncedTheme = preferences.omarchySyncedTheme;
     notifyListeners();
   }
 
@@ -90,12 +129,52 @@ class ThemeController extends ChangeNotifier {
     await _save();
   }
 
+  /// Picks a theme. Picking one while following a machine stops
+  /// following it: the pick is what the user asked to see.
   Future<void> setPalette(AppPalette palette) async {
-    if (_palette == palette) {
+    if (_palette == palette && _omarchySyncHostId == null) {
       return;
     }
     _palette = palette;
+    _omarchySyncHostId = null;
     notifyListeners();
+    await _save();
+  }
+
+  /// Follows the Omarchy theme of the saved machine [hostId] (null stops).
+  /// The cached theme of another machine is dropped; the next sync fills
+  /// it in, and the picked theme shows until then.
+  Future<void> setOmarchySyncHost(String? hostId) async {
+    if (_omarchySyncHostId == hostId) {
+      return;
+    }
+    _omarchySyncHostId = hostId;
+    if (_omarchySyncedTheme?.hostId != hostId) {
+      _omarchySyncedTheme = null;
+    }
+    notifyListeners();
+    await _save();
+  }
+
+  /// Applies a theme read from the followed machine. Its font becomes the
+  /// terminal font when it is one the app bundles. Ignored when the app no
+  /// longer follows that machine (the user switched while it was running).
+  Future<void> applyOmarchySync(OmarchySyncedTheme synced) async {
+    if (synced.hostId != _omarchySyncHostId) {
+      return;
+    }
+    final font = synced.font;
+    final unchanged =
+        _omarchySyncedTheme?.palette == synced.palette &&
+        _omarchySyncedTheme?.fontFamily == synced.fontFamily &&
+        (font == null || font == _terminalFont);
+    _omarchySyncedTheme = synced;
+    if (font != null) {
+      _terminalFont = font;
+    }
+    if (!unchanged) {
+      notifyListeners();
+    }
     await _save();
   }
 
@@ -303,6 +382,8 @@ class ThemeController extends ChangeNotifier {
         terminalGestures: _terminalGestures,
         speechLanguage: _speechLanguage,
         remoteClipboardEnabled: _remoteClipboardEnabled,
+        omarchySyncHostId: _omarchySyncHostId,
+        omarchySyncedTheme: _omarchySyncedTheme,
       ),
     );
   }
