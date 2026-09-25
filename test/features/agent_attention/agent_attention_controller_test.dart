@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:conduit/features/agent_attention/data/herdr_attention_provider.dart';
+import 'package:conduit/features/agent_attention/domain/agent_attention_notifier.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
@@ -92,6 +93,32 @@ void main() {
     await controller.pollNow('h');
     await controller.pollNow('h');
     expect(notifier.shown, hasLength(2));
+  });
+
+  test('a notification opens the agent at its Herdr place', () async {
+    const herdrWorking =
+        '[{"name": "builder", "state": "working", "pane_id": "w2:p3",'
+        ' "tab_id": "w2:t1", "workspace_id": "w2"}]';
+    const herdrBlocked =
+        '[{"name": "builder", "state": "blocked", "pane_id": "w2:p3",'
+        ' "tab_id": "w2:t1", "workspace_id": "w2"}]';
+    final (workspace, controller, _, notifier) = build([
+      agents(herdrWorking),
+      agents(herdrBlocked),
+    ]);
+    await workspace.open(monitoredHost('h')).connect();
+    await pumpEventQueue();
+
+    await controller.pollNow('h');
+    final id = notifier.shown.single.$1;
+    expect(
+      notifier.openTargets[id],
+      isA<AgentOpenTarget>()
+          .having((target) => target.hostId, 'hostId', 'h')
+          .having((target) => target.workspaceId, 'workspaceId', 'w2')
+          .having((target) => target.tabId, 'tabId', 'w2:t1')
+          .having((target) => target.paneId, 'paneId', 'w2:p3'),
+    );
   });
 
   test('notifies when background work finishes', () async {

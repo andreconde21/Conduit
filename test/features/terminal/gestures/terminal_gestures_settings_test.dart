@@ -30,7 +30,9 @@ void main() {
     );
 
     Future<void> toggle(String title) async {
-      await tester.tap(find.text(title));
+      await tester.ensureVisible(find.text(title).first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(title).first);
       await tester.pumpAndSettle();
     }
 
@@ -49,12 +51,23 @@ void main() {
     await toggle('Edge swipe opens agents');
     expect(controller.terminalGestures.edgeSwipeOpensAgents, isFalse);
 
-    await tester.tap(find.text('Herdr'));
-    await tester.pumpAndSettle();
+    await toggle('Herdr');
     expect(
       controller.terminalGestures.windowSwitchTarget,
       TerminalWindowSwitchTarget.herdr,
     );
+
+    await toggle('Two-finger swipe switches pane');
+    expect(controller.terminalGestures.herdrTwoFingerPanes, isFalse);
+
+    await toggle('Scrollback');
+    expect(
+      controller.terminalGestures.herdrTwoFingerVertical,
+      HerdrVerticalSwipe.scrollback,
+    );
+
+    await toggle('Font size');
+    expect(controller.terminalGestures.herdrPinch, HerdrPinchAction.fontSize);
 
     // Everything went through the repository.
     final saved = await repository.load();

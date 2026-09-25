@@ -36,10 +36,12 @@ import 'package:conduit/features/share_target/presentation/share_target_controll
 import 'package:conduit/features/share_target/presentation/share_target_scope.dart';
 import 'package:conduit/features/terminal/data/platform_prompt_image_source.dart';
 import 'package:conduit/features/terminal/data/prompt_image_preparer.dart';
+import 'package:conduit/features/terminal/domain/herdr_remote_control.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:conduit/features/terminal/domain/prompt_image.dart';
 import 'package:conduit/features/terminal/domain/recent_directories.dart';
 import 'package:conduit/features/terminal/domain/security_key_interaction.dart';
+import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
 import 'package:conduit/features/terminal/domain/terminal_link_detector.dart';
 import 'package:conduit/features/terminal/presentation/gestures/terminal_gesture_layer.dart';
 import 'package:conduit/features/terminal/presentation/security_key_picker_dialog.dart';
@@ -596,6 +598,14 @@ class _TerminalPageState extends State<TerminalPage> {
       context: context,
       controller: attention,
       onOpenAgent: (host, agent) {
+        final flow = widget.connectFlow;
+        if (flow != null) {
+          // The agent's exact workspace, tab and pane, in the right tab.
+          unawaited(flow.openAgent(host, agent));
+          Navigator.of(context).pop();
+          _focusNode.requestFocus();
+          return;
+        }
         // Navigate as close as possible: activate the host's terminal tab
         // and ask the provider to focus the agent in the remote UI.
         final session = widget.workspace.sessions
@@ -641,6 +651,14 @@ class _TerminalPageState extends State<TerminalPage> {
     AgentInfo agent,
   ) {
     if (!mounted) return;
+    final flow = widget.connectFlow;
+    if (flow != null) {
+      // The agent's exact Herdr workspace, tab and pane, in the right tab
+      // (a plain tab id match misses tabs opened on a Herdr target).
+      unawaited(flow.openAgent(host, agent));
+      _showTerminal();
+      return;
+    }
     final session = widget.workspace.sessions
         .where((session) => session.host.id == host.id)
         .firstOrNull;
@@ -665,6 +683,37 @@ class _TerminalPageState extends State<TerminalPage> {
     await connectFlow.pickHostAndConnect(context);
     if (!mounted) return;
     _showTerminal();
+  }
+
+  /// The Herdr command channel for [session]'s gestures. For a session
+  /// that drives Herdr it also has the machine's Herdr keymap read (once,
+  /// read-only), so key-labelled shortcuts and key fallbacks use its own
+  /// bindings.
+  HerdrRemoteControl? _herdrControlFor(TerminalSessionController session) {
+    final herdr = widget.connectFlow?.herdr;
+    if (herdr == null) {
+      return null;
+    }
+    final drivesHerdr =
+        (_gestureTargetFor(session) ??
+            widget.themeController.terminalGestures.windowSwitchTarget) ==
+        TerminalWindowSwitchTarget.herdr;
+    if (drivesHerdr) {
+      herdr.ensureKeymap(session);
+    }
+    return herdr.controlFor(session);
+  }
+
+  /// The multiplexer a session's gestures drive: the one it was opened on,
+  /// or null (the Gestures preference) for plain shells.
+  static TerminalWindowSwitchTarget? _gestureTargetFor(
+    TerminalSessionController session,
+  ) {
+    return switch (ConnectTarget.fromSessionHostId(session.host.id)?.kind) {
+      ConnectTargetKind.herdr => TerminalWindowSwitchTarget.herdr,
+      ConnectTargetKind.tmux => TerminalWindowSwitchTarget.tmux,
+      ConnectTargetKind.shell || ConnectTargetKind.directory || null => null,
+    };
   }
 
   /// Gesture hook: swipe in from the right edge opens the agent attention
@@ -952,6 +1001,14 @@ class _TerminalPageState extends State<TerminalPage> {
                                       in widget.workspace.sessions)
                                     TerminalGestureLayer(
                                       key: ValueKey(session.host.id),
+                                      target: _gestureTargetFor(session),
+                                      herdrControl: _herdrControlFor(session),
+                                      onHerdrWorkspaceFocused: (workspaceId) =>
+                                          widget.connectFlow?.herdr
+                                              .noteWorkspace(
+                                                session,
+                                                workspaceId,
+                                              ),
                                       preferences: widget
                                           .themeController
                                           .terminalGestures,

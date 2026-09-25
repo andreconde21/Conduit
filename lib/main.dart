@@ -9,6 +9,7 @@ import 'package:conduit/features/agent_attention/data/herdr_attention_provider.d
 import 'package:conduit/features/agent_attention/data/platform_agent_notifier.dart';
 import 'package:conduit/features/agent_attention/data/ssh_agent_command_runner.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
+import 'package:conduit/features/agent_attention/presentation/agent_notification_open_listener.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_permission_action_listener.dart';
 import 'package:conduit/features/app_lock/data/local_app_authenticator.dart';
 import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart';
@@ -347,6 +348,28 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
     return ShareTargetScope(controller: shareTarget, child: app);
   }
 
+  /// Notification taps open the agent's exact place (Herdr workspace, tab
+  /// and pane) through the connect flow.
+  Widget _wrapNotificationOpen(Widget home) {
+    final flow = widget.connectFlow;
+    if (flow == null) {
+      return home;
+    }
+    return AgentNotificationOpenListener(
+      source: PlatformAgentOpenRequests.instance,
+      findHost: (hostId) async {
+        await widget.hostsController.firstLoad;
+        return widget.hostsController.hosts
+            .where((host) => host.id == hostId)
+            .firstOrNull;
+      },
+      onOpen: (host, agent) async {
+        await flow.openAgent(host, agent);
+      },
+      child: home,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -415,6 +438,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
                   channel: PlatformAgentStatusWidgetChannel.instance,
                   agentAttention: widget.agentAttention,
                   workspace: widget.workspaceController,
+                  connectFlow: widget.connectFlow,
                   child: AgentPermissionActionListener(
                     source: PlatformAgentPermissionActions.instance,
                     agentAttention: widget.agentAttention,
@@ -424,7 +448,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
                           .where((host) => host.id == hostId)
                           .firstOrNull;
                     },
-                    child: home,
+                    child: _wrapNotificationOpen(home),
                   ),
                 ),
               );

@@ -20,8 +20,14 @@ class PlatformAgentAttentionNotifier implements AgentAttentionNotifier {
     required String id,
     required String title,
     required String body,
+    AgentOpenTarget? open,
   }) {
-    return _invoke('show', {'id': id, 'title': title, 'body': body});
+    return _invoke('show', {
+      'id': id,
+      'title': title,
+      'body': body,
+      ...?open?.toArguments(),
+    });
   }
 
   @override
@@ -31,6 +37,7 @@ class PlatformAgentAttentionNotifier implements AgentAttentionNotifier {
     required String body,
     required String hostId,
     required String requestId,
+    AgentOpenTarget? open,
   }) {
     return _invoke('showPermissionRequest', {
       'id': id,
@@ -38,8 +45,33 @@ class PlatformAgentAttentionNotifier implements AgentAttentionNotifier {
       'body': body,
       'hostId': hostId,
       'requestId': requestId,
+      ...?open?.toArguments(),
     });
   }
+
+  /// Routes native-to-Dart calls on [channel] to the permission action and
+  /// open-agent listeners; the channel has one handler slot for both.
+  static void _installHandler() {
+    if (_handlerInstalled || defaultTargetPlatform != TargetPlatform.android) {
+      return;
+    }
+    _handlerInstalled = true;
+    channel.setMethodCallHandler((call) async {
+      switch (call.method) {
+        case 'permissionActionAvailable':
+          // Tells the native side whether the tap is being completed; if
+          // not (app locked), it asks the user to open the app.
+          return PlatformAgentPermissionActions.instance._listener?.call() ??
+              false;
+        case 'openAgentAvailable':
+          PlatformAgentOpenRequests.instance._listener?.call();
+          return null;
+      }
+      return null;
+    });
+  }
+
+  static bool _handlerInstalled = false;
 
   @override
   Future<void> cancel({required String id}) => _invoke('cancel', {'id': id});
@@ -70,22 +102,11 @@ class PlatformAgentPermissionActions implements AgentPermissionActionSource {
   static final instance = PlatformAgentPermissionActions._();
 
   bool Function()? _listener;
-  bool _handlerInstalled = false;
 
   @override
   void setListener(bool Function()? listener) {
     _listener = listener;
-    if (!_handlerInstalled && defaultTargetPlatform == TargetPlatform.android) {
-      _handlerInstalled = true;
-      PlatformAgentAttentionNotifier.channel.setMethodCallHandler((call) async {
-        if (call.method == 'permissionActionAvailable') {
-          // Tells the native side whether the tap is being completed; if
-          // not (app locked), it asks the user to open the app.
-          return _listener?.call() ?? false;
-        }
-        return null;
-      });
-    }
+    PlatformAgentAttentionNotifier._installHandler();
   }
 
   @override
@@ -120,5 +141,38 @@ class PlatformAgentPermissionActions implements AgentPermissionActionSource {
               verdict: item['verdict'] as String? ?? '',
             ),
     ];
+  }
+}
+
+/// Notification body taps that should open an agent, from the Android
+/// side of the same channel. The native side keeps the last tap (a cold
+/// start included) until [consume] takes it.
+class PlatformAgentOpenRequests implements AgentOpenRequestSource {
+  PlatformAgentOpenRequests._();
+
+  static final instance = PlatformAgentOpenRequests._();
+
+  void Function()? _listener;
+
+  @override
+  void setListener(void Function()? listener) {
+    _listener = listener;
+    PlatformAgentAttentionNotifier._installHandler();
+  }
+
+  @override
+  Future<AgentOpenTarget?> consume() async {
+    if (defaultTargetPlatform != TargetPlatform.android) {
+      return null;
+    }
+    try {
+      final raw = await PlatformAgentAttentionNotifier.channel
+          .invokeMethod<Object?>('consumeOpenAgent');
+      return AgentOpenTarget.fromMap(raw);
+    } on MissingPluginException {
+      return null;
+    } on PlatformException {
+      return null;
+    }
   }
 }

@@ -2,12 +2,14 @@ import 'dart:async';
 
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_theme.dart';
+import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/sessions/domain/connect_preferences.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/presentation/connect_picker_sheet.dart';
+import 'package:conduit/features/sessions/presentation/herdr_session_focus.dart';
 import 'package:conduit/features/terminal/presentation/recent_directories_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
@@ -26,7 +28,10 @@ class SessionConnectFlow {
     required this.runnerFactory,
     required this.preferences,
     this.recentDirectories,
-  });
+  }) : herdr = HerdrSessionFocus(
+         workspace: workspace,
+         runnerFactory: runnerFactory,
+       );
 
   final HostsController hostsController;
   final TerminalWorkspaceController workspace;
@@ -36,6 +41,70 @@ class SessionConnectFlow {
   /// Recent working directories per host: the picker's "Recent dirs" and
   /// the terminal's "cd to…". Null hides both.
   final RecentDirectoriesController? recentDirectories;
+
+  /// Herdr focus across the app's sessions: re-focus on tab switch, deep
+  /// links, and the command channel behind the Herdr gestures.
+  final HerdrSessionFocus herdr;
+
+  /// Opens [host] at an agent's exact place in Herdr (see
+  /// [HerdrSessionFocus.openAgentLocation]).
+  Future<TerminalSessionController?> openAgentLocation(
+    SavedHost host, {
+    required String workspaceId,
+    String tabId = '',
+    String paneId = '',
+    String label = '',
+  }) async {
+    await hostsController.markConnected(host);
+    return herdr.openAgentLocation(
+      host,
+      workspaceId: workspaceId,
+      tabId: tabId,
+      paneId: paneId,
+      label: label,
+      open: (target) => open(host, target),
+    );
+  }
+
+  /// Bumped when a deep link wants the terminal on screen; the home page
+  /// listens and opens the terminal workspace if it is not showing.
+  final ValueNotifier<int> terminalRequests = ValueNotifier<int>(0);
+
+  /// Deep link to [agent] on [host] (a notification, the agent sheet, the
+  /// home-screen widget): with a Herdr location, the exact workspace, tab
+  /// and pane; otherwise the host's open session, if any. Asks for the
+  /// terminal to be shown when something was opened.
+  Future<TerminalSessionController?> openAgent(
+    SavedHost host,
+    AgentInfo agent,
+  ) async {
+    final workspaceId = agent.workspace ?? '';
+    TerminalSessionController? session;
+    if (workspaceId.isNotEmpty && !host.isLocal) {
+      session = await openAgentLocation(
+        host,
+        workspaceId: workspaceId,
+        tabId: agent.tab ?? '',
+        paneId: agent.pane ?? '',
+      );
+    } else {
+      session = workspace.sessions
+          .where((candidate) => baseHostId(candidate.host.id) == host.id)
+          .firstOrNull;
+      if (session != null) {
+        workspace.activate(session);
+      }
+    }
+    if (session != null) {
+      terminalRequests.value += 1;
+    }
+    return session;
+  }
+
+  void dispose() {
+    unawaited(herdr.dispose());
+    terminalRequests.dispose();
+  }
 
   /// Target keys with an open session for [host], for the "Active" badges.
   Set<String> activeTargetKeysFor(SavedHost host) => {

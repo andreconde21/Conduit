@@ -3,6 +3,7 @@ import 'package:conduit/features/agent_attention/data/herdr_attention_provider.d
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/sessions/domain/remote_session_listing.dart';
+import 'package:conduit/features/terminal/domain/herdr_remote_control.dart';
 
 /// One row of the Herdr pane switcher: an agent pane, or a tab with no
 /// agent in it (a plain shell), located as workspace › tab › pane.
@@ -134,10 +135,15 @@ abstract final class HerdrNavigator {
   static String tabFocusCommand(String tabId) =>
       HerdrAttentionProvider.remoteCommand('tab focus ${_quote(tabId)}');
 
-  static Future<HerdrPaneListing> load(AgentCommandRunner runner) async {
+  /// Lists the panes of the Herdr server [session] (empty: the default
+  /// session).
+  static Future<HerdrPaneListing> load(
+    AgentCommandRunner runner, {
+    String session = '',
+  }) async {
     try {
       final workspacesResult = await runner.run(
-        RemoteSessionListing.herdrWorkspaceListCommand,
+        RemoteSessionListing.herdrWorkspaceListFor(session),
         timeout: _timeout,
       );
       final workspaces = RemoteSessionListing.interpretHerdrWorkspaces(
@@ -157,7 +163,7 @@ abstract final class HerdrNavigator {
 
       var tabs = const <HerdrTabInfo>[];
       final tabsResult = await runner.run(
-        RemoteSessionListing.herdrTabListCommand,
+        RemoteSessionListing.herdrTabListFor(session),
         timeout: _timeout,
       );
       if (tabsResult.exitCode == null || tabsResult.exitCode == 0) {
@@ -170,7 +176,7 @@ abstract final class HerdrNavigator {
 
       var agents = const <AgentInfo>[];
       final agentsResult = await runner.run(
-        agentListCommand,
+        HerdrCommands(session).agentList,
         timeout: _timeout,
       );
       if (agentsResult.exitCode == null || agentsResult.exitCode == 0) {
@@ -297,14 +303,16 @@ abstract final class HerdrNavigator {
   /// the prefix bindings.
   static Future<bool> focus(
     AgentCommandRunner runner,
-    HerdrPaneEntry entry,
-  ) async {
+    HerdrPaneEntry entry, {
+    String session = '',
+  }) async {
     final paneId = entry.paneId;
+    final commands = HerdrCommands(session);
     final String command;
     if (paneId != null && paneId.isNotEmpty) {
-      command = paneFocusCommand(paneId);
+      command = commands.agentFocus(paneId);
     } else if (entry.tabId.isNotEmpty) {
-      command = tabFocusCommand(entry.tabId);
+      command = commands.tabFocus(entry.tabId);
     } else {
       return false;
     }

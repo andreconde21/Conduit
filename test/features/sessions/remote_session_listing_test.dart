@@ -195,4 +195,40 @@ void main() {
       );
     });
   });
+
+  group('Herdr sessions', () {
+    test('parses herdr session list --json from Herdr 0.9.1', () {
+      final sessions = RemoteSessionListing.parseHerdrSessions(
+        '{"sessions":[{"default":true,"name":"default","running":true,'
+        '"session_dir":"/root/.config/herdr",'
+        '"socket_path":"/root/.config/herdr/herdr.sock"},'
+        '{"default":false,"name":"work","running":false}]}',
+      );
+      expect(sessions, const [
+        HerdrSessionInfo(name: 'default', isDefault: true, running: true),
+        HerdrSessionInfo(name: 'work'),
+      ]);
+      expect(sessions!.first.cliName, isEmpty);
+      expect(sessions.last.cliName, 'work');
+    });
+
+    test('anything else means the session list is unknown', () {
+      expect(RemoteSessionListing.parseHerdrSessions('usage: herdr'), isNull);
+      expect(
+        RemoteSessionListing.parseHerdrSessions('{"result":{"workspaces":[]}}'),
+        isNull,
+      );
+    });
+
+    test('lists a named session with --session', () {
+      expect(
+        RemoteSessionListing.herdrWorkspaceListFor('work'),
+        contains('exec herdr --session work workspace list'),
+      );
+      expect(
+        RemoteSessionListing.herdrWorkspaceListFor(''),
+        RemoteSessionListing.herdrWorkspaceListCommand,
+      );
+    });
+  });
 }

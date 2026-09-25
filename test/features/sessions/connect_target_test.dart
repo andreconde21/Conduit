@@ -111,6 +111,52 @@ void main() {
       );
       expect(ConnectTarget.fromSessionHostId('h#zellij:x'), isNull);
     });
+
+    test('a named Herdr session is part of the key and the commands', () {
+      const target = ConnectTarget.herdr(
+        workspaceId: 'w2',
+        label: 'work ‧ api',
+        session: 'work',
+      );
+      expect(target.key, 'herdr@work:w2');
+      expect(
+        target.startupCommand,
+        'herdr --session work workspace focus w2 >/dev/null 2>&1; '
+        'herdr --session work',
+      );
+      expect(
+        ConnectTarget.fromSessionHostId('h#herdr@work:w2'),
+        const ConnectTarget.herdr(workspaceId: 'w2', session: 'work'),
+      );
+      expect(
+        ConnectTarget.fromSessionHostId('h#herdr@work:w2:w2:t3'),
+        const ConnectTarget.herdr(
+          workspaceId: 'w2',
+          tabId: 'w2:t3',
+          session: 'work',
+        ),
+      );
+      expect(
+        ConnectTarget.fromSessionHostId('h#herdr@work'),
+        const ConnectTarget.herdr(workspaceId: '', session: 'work'),
+      );
+      expect(ConnectTarget.fromSessionHostId('h#herdr@:w2'), isNull);
+      expect(ConnectTarget.fromJson(target.toJson()), target);
+    });
+
+    test('a pane target focuses the tab, then the agent pane', () {
+      const target = ConnectTarget.herdr(
+        workspaceId: 'w1',
+        tabId: 'w1:t2',
+        paneId: 'w1:p5',
+      );
+      expect(target.key, 'herdr:w1:w1:t2');
+      expect(
+        target.startupCommand,
+        'herdr tab focus w1:t2 >/dev/null 2>&1; '
+        'herdr agent focus w1:p5 >/dev/null 2>&1; herdr',
+      );
+    });
   });
 
   group('ConnectPreferences', () {

@@ -854,6 +854,7 @@ class AgentAttentionController extends ChangeNotifier {
         id: '${host.id}:${agent.id}',
         title: needsInput ? 'Agent needs input' : 'Agent finished',
         body: _withMessage('${agent.name} on ${host.name}', agent),
+        open: openTargetFor(host.id, agent),
       );
     }
   }
@@ -890,6 +891,7 @@ class AgentAttentionController extends ChangeNotifier {
           body: _withMessage('${request.summary} (on ${host.name})', agent),
           hostId: host.id,
           requestId: request.id,
+          open: openTargetFor(host.id, agent),
         );
       }
     }
@@ -899,6 +901,18 @@ class AgentAttentionController extends ChangeNotifier {
         await notifier.cancel(id: permissionNotificationId(host.id, requestId));
       }
     }
+  }
+
+  /// Where tapping [agent]'s notification should land: the agent's Herdr
+  /// workspace, tab and pane when the provider reports them.
+  static AgentOpenTarget openTargetFor(String hostId, AgentInfo agent) {
+    return AgentOpenTarget(
+      hostId: hostId,
+      agentId: agent.id,
+      workspaceId: agent.workspace ?? '',
+      tabId: agent.tab ?? '',
+      paneId: agent.pane ?? '',
+    );
   }
 
   /// Longest agent message put into a notification body.

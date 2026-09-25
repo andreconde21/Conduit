@@ -351,11 +351,17 @@ class _ConnectPickerSheetState extends State<ConnectPickerSheet> {
                       children: [
                         for (final workspace in items) ...[
                           _TargetTile(
-                            title: workspace.label,
+                            key: ValueKey(
+                              'herdr-workspace-${workspace.session}:'
+                              '${workspace.id}',
+                            ),
+                            title: workspace.displayLabel,
                             subtitle: _herdrSubtitle(workspace),
+                            focused: workspace.focused,
                             active: widget.activeTargetKeys.contains(
                               ConnectTarget.herdr(
                                 workspaceId: workspace.id,
+                                session: workspace.session,
                               ).key,
                             ),
                             trailingLabel: _agentStatusLabel(
@@ -364,7 +370,8 @@ class _ConnectPickerSheetState extends State<ConnectPickerSheet> {
                             onTap: () => _pick(
                               ConnectTarget.herdr(
                                 workspaceId: workspace.id,
-                                label: workspace.label,
+                                label: workspace.displayLabel,
+                                session: workspace.session,
                               ),
                             ),
                           ),
@@ -380,6 +387,7 @@ class _ConnectPickerSheetState extends State<ConnectPickerSheet> {
                                   ConnectTarget.herdr(
                                     workspaceId: workspace.id,
                                     tabId: tab.id,
+                                    session: workspace.session,
                                   ).key,
                                 ),
                                 trailingLabel: _agentStatusLabel(
@@ -389,9 +397,11 @@ class _ConnectPickerSheetState extends State<ConnectPickerSheet> {
                                   ConnectTarget.herdr(
                                     workspaceId: workspace.id,
                                     label: tab.label.isEmpty
-                                        ? workspace.label
-                                        : '${workspace.label} / ${tab.label}',
+                                        ? workspace.displayLabel
+                                        : '${workspace.displayLabel} / '
+                                              '${tab.label}',
                                     tabId: tab.id,
+                                    session: workspace.session,
                                   ),
                                 ),
                               ),
@@ -405,10 +415,7 @@ class _ConnectPickerSheetState extends State<ConnectPickerSheet> {
   }
 
   static String _herdrSubtitle(HerdrWorkspaceInfo workspace) {
-    final tabs = workspace.tabCount == 1
-        ? '1 tab'
-        : '${workspace.tabCount} tabs';
-    return workspace.focused ? 'default · $tabs · focused' : 'default · $tabs';
+    return workspace.tabCount == 1 ? '1 tab' : '${workspace.tabCount} tabs';
   }
 
   static String? _agentStatusLabel(String status) => switch (status) {
@@ -488,13 +495,18 @@ class _TargetTile extends StatelessWidget {
     required this.onTap,
     this.subtitle,
     this.active = false,
+    this.focused = false,
     this.indented = false,
     this.trailingLabel,
+    super.key,
   });
 
   final String title;
   final String? subtitle;
   final bool active;
+
+  /// Herdr's focused workspace: marked with a dot before the title.
+  final bool focused;
   final bool indented;
   final String? trailingLabel;
   final VoidCallback onTap;
@@ -506,6 +518,21 @@ class _TargetTile extends StatelessWidget {
       contentPadding: EdgeInsets.only(left: indented ? 40 : 16, right: 16),
       title: Row(
         children: [
+          if (focused) ...[
+            Tooltip(
+              message: 'Focused in Herdr',
+              child: Container(
+                key: const ValueKey('herdr-focused-dot'),
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primary,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+          ],
           Flexible(
             child: Text(
               title,

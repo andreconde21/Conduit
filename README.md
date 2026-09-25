@@ -83,6 +83,17 @@ Dart implementation of the protocol, and the terminal is
   [Herdr](https://herdr.dev)'s JSON CLI while connected and see which coding
   agents are working, need input, or finished, with edge-triggered local
   notifications on Android and one-tap focus of an agent's pane.
+- Herdr navigation: in a Herdr session, swipe one finger for the next or
+  previous tab, two fingers left/right for the neighbouring pane, two fingers
+  up/down for the next or previous workspace, and pinch to zoom the focused
+  pane or restore it. For scrollback, rest two fingers for a moment and then
+  drag (or start Scrollback from the toolbar). Every mapping is a setting
+  under Appearance > Gestures. The Herdr navigator adds tab 1-9 buttons and
+  new tab, workspaces, jump, zoom, kill pane and detach. Notifications, the
+  home board and the agent sheet open an agent at its exact workspace, tab and
+  pane, and each app tab keeps its own Herdr workspace when you switch. Herdr
+  keys follow the machine's own `~/.config/herdr/config.toml` (read-only),
+  falling back to Herdr's defaults when it cannot be read.
 - Saved global and per-machine snippets from the key row, with hidden snippets
   for passwords or secrets and optional per-machine run-on-connect snippets.
 - Recent directories per machine (last 20): collected from the shell's OSC 7

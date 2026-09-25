@@ -9,8 +9,9 @@ enum ConnectTargetKind {
   /// if needed.
   tmux,
 
-  /// Attach to the persistent Herdr session, with one workspace (and
-  /// optionally one tab) focused first when a workspace id is given.
+  /// Attach to a persistent Herdr session (the default one, or a named one),
+  /// with one workspace (and optionally one tab and pane) focused first when
+  /// a workspace id is given.
   herdr,
 
   /// A plain shell that starts with `cd <directory>` (a recent directory
@@ -30,6 +31,8 @@ class ConnectTarget {
     this.name = '',
     this.label = '',
     this.tabId = '',
+    this.session = '',
+    this.paneId = '',
   });
 
   const ConnectTarget.shell() : this._(kind: ConnectTargetKind.shell);
@@ -44,11 +47,15 @@ class ConnectTarget {
     required String workspaceId,
     String label = '',
     String tabId = '',
+    String session = '',
+    String paneId = '',
   }) : this._(
          kind: ConnectTargetKind.herdr,
          name: workspaceId,
          label: label,
          tabId: tabId,
+         session: session,
+         paneId: paneId,
        );
 
   final ConnectTargetKind kind;
@@ -63,6 +70,18 @@ class ConnectTarget {
   /// Optional Herdr tab id to focus inside the workspace.
   final String tabId;
 
+  /// Named Herdr session (`herdr --session <name>`); empty for the default
+  /// session.
+  final String session;
+
+  /// Optional Herdr pane to focus once attached (an agent's pane, for deep
+  /// links). Not part of [key] or the saved form: it only steers this one
+  /// attach.
+  final String paneId;
+
+  /// Identity of the Herdr server this target attaches to on its host.
+  String get herdrServer => session;
+
   /// Separator between a saved host id and the target key in a session's
   /// derived host id.
   static const idSeparator = '#';
@@ -72,14 +91,17 @@ class ConnectTarget {
   String get key => switch (kind) {
     ConnectTargetKind.shell => 'shell',
     ConnectTargetKind.tmux => 'tmux:$name',
-    ConnectTargetKind.herdr =>
-      name.isEmpty
-          ? 'herdr'
-          : tabId.isEmpty
-          ? 'herdr:$name'
-          : 'herdr:$name:$tabId',
+    ConnectTargetKind.herdr => _herdrKey(),
     ConnectTargetKind.directory => 'dir:$name',
   };
+
+  String _herdrKey() {
+    final base = session.isEmpty ? 'herdr' : 'herdr@$session';
+    if (name.isEmpty) {
+      return base;
+    }
+    return tabId.isEmpty ? '$base:$name' : '$base:$name:$tabId';
+  }
 
   /// Short display name of the target: what the session tile and header show
   /// next to the host name.
@@ -109,16 +131,27 @@ class ConnectTarget {
   };
 
   String _herdrAttachCommand() {
-    if (name.isEmpty) {
-      return 'herdr';
-    }
+    final herdr = session.isEmpty
+        ? 'herdr'
+        : 'herdr --session ${shellQuote(session)}';
     // Focus over the socket API first (a no-op when the server is not up
-    // yet), then attach the TUI. Without `exec` a detach lands back in the
-    // shell, like the tmux path does.
-    final focus = tabId.isNotEmpty
-        ? 'herdr tab focus ${shellQuote(tabId)}'
-        : 'herdr workspace focus ${shellQuote(name)}';
-    return '$focus >/dev/null 2>&1; herdr';
+    // yet), then attach the TUI. Herdr keeps one focus per server, and a
+    // client that attaches shows whatever is focused (checked against
+    // Herdr 0.9.1 with two clients), so this is what steers the new client.
+    // Without `exec` a detach lands back in the shell, like the tmux path.
+    final focus = [
+      // `tab focus` switches the workspace too, so only one is needed.
+      if (tabId.isNotEmpty)
+        '$herdr tab focus ${shellQuote(tabId)}'
+      else if (name.isNotEmpty)
+        '$herdr workspace focus ${shellQuote(name)}',
+      if (paneId.isNotEmpty) '$herdr agent focus ${shellQuote(paneId)}',
+    ];
+    if (focus.isEmpty) {
+      return herdr;
+    }
+    return '${focus.map((command) => '$command >/dev/null 2>&1').join('; ')}'
+        '; $herdr';
   }
 
   /// The host a session should be opened with for this target.
@@ -146,6 +179,7 @@ class ConnectTarget {
     'name': name,
     'label': label,
     'tabId': tabId,
+    if (session.isNotEmpty) 'session': session,
   };
 
   static ConnectTarget? fromJson(Object? json) {
@@ -161,11 +195,15 @@ class ConnectTarget {
     final name = json['name'];
     final label = json['label'];
     final tabId = json['tabId'];
+    final session = json['session'];
     final target = ConnectTarget._(
       kind: kind,
       name: name is String ? name : '',
       label: label is String ? label : '',
       tabId: tabId is String ? tabId : '',
+      session: kind == ConnectTargetKind.herdr && session is String
+          ? session
+          : '',
     );
     if ((kind == ConnectTargetKind.tmux ||
             kind == ConnectTargetKind.directory) &&
@@ -204,18 +242,34 @@ class ConnectTarget {
       final path = key.substring('dir:'.length);
       return path.isEmpty ? null : ConnectTarget.directory(path);
     }
-    if (key == 'herdr') {
-      return const ConnectTarget.herdr(workspaceId: '');
-    }
-    if (key.startsWith('herdr:')) {
-      final rest = key.substring('herdr:'.length);
+    if (key == 'herdr' ||
+        key.startsWith('herdr:') ||
+        key.startsWith('herdr@')) {
+      var rest = key.substring('herdr'.length);
+      var session = '';
+      if (rest.startsWith('@')) {
+        final colon = rest.indexOf(':');
+        session = colon == -1 ? rest.substring(1) : rest.substring(1, colon);
+        rest = colon == -1 ? '' : rest.substring(colon);
+        if (session.isEmpty) {
+          return null;
+        }
+      }
+      if (rest.isEmpty) {
+        return ConnectTarget.herdr(workspaceId: '', session: session);
+      }
+      rest = rest.substring(1);
       final colon = rest.indexOf(':');
       final workspaceId = colon == -1 ? rest : rest.substring(0, colon);
       final tabId = colon == -1 ? '' : rest.substring(colon + 1);
       if (workspaceId.isEmpty) {
         return null;
       }
-      return ConnectTarget.herdr(workspaceId: workspaceId, tabId: tabId);
+      return ConnectTarget.herdr(
+        workspaceId: workspaceId,
+        tabId: tabId,
+        session: session,
+      );
     }
     return null;
   }
@@ -231,11 +285,13 @@ class ConnectTarget {
         other.kind == kind &&
         other.name == name &&
         other.label == label &&
-        other.tabId == tabId;
+        other.tabId == tabId &&
+        other.session == session &&
+        other.paneId == paneId;
   }
 
   @override
-  int get hashCode => Object.hash(kind, name, label, tabId);
+  int get hashCode => Object.hash(kind, name, label, tabId, session, paneId);
 
   @override
   String toString() => 'ConnectTarget($key)';

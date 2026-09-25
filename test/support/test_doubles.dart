@@ -497,6 +497,9 @@ class ScriptedAgentCommandRunner implements AgentCommandRunner {
 class RecordingAgentNotifier implements AgentAttentionNotifier {
   final List<(String, String, String)> shown = [];
 
+  /// Where each shown notification's tap leads, by id.
+  final Map<String, AgentOpenTarget?> openTargets = {};
+
   /// Permission notifications as (id, title, body, hostId, requestId).
   final List<(String, String, String, String, String)> permissionsShown = [];
   final List<String> cancelled = [];
@@ -509,8 +512,10 @@ class RecordingAgentNotifier implements AgentAttentionNotifier {
     required String id,
     required String title,
     required String body,
+    AgentOpenTarget? open,
   }) async {
     shown.add((id, title, body));
+    openTargets[id] = open;
     active.add(id);
   }
 
@@ -521,8 +526,10 @@ class RecordingAgentNotifier implements AgentAttentionNotifier {
     required String body,
     required String hostId,
     required String requestId,
+    AgentOpenTarget? open,
   }) async {
     permissionsShown.add((id, title, body, hostId, requestId));
+    openTargets[id] = open;
     active.add(id);
   }
 

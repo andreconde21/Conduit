@@ -132,6 +132,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     }
     widget.hostsController.addListener(_syncSelection);
     widget.workspaceController.addListener(_syncSelection);
+    flow?.terminalRequests.addListener(_handleTerminalRequest);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(widget.hostsController.load());
       unawaited(widget.localShellController.refresh());
@@ -165,6 +166,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     widget.hostsController.removeListener(_syncSelection);
     widget.workspaceController.removeListener(_syncSelection);
+    widget.connectFlow?.terminalRequests.removeListener(_handleTerminalRequest);
     widget.promptCoordinator.removeListener(_handlePromptChanged);
     widget.promptCoordinator.rejectAll();
     _previewTimer?.cancel();
@@ -573,6 +575,21 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     HomeBoardWorkspace workspace,
     HomeBoardPane? pane,
   ) async {
+    final flow = widget.connectFlow;
+    if (flow != null) {
+      // Lands on the exact workspace, tab and pane: reuses (and if needed
+      // reconnects) an open Herdr tab, or attaches a new one focused there.
+      await flow.openAgentLocation(
+        host,
+        workspaceId: workspace.id,
+        tabId: pane?.agent.tab ?? '',
+        paneId: pane?.agent.pane ?? '',
+        label: workspace.label,
+      );
+      if (!mounted) return;
+      await _openTerminalWorkspace();
+      return;
+    }
     final board = _board;
     final existing = _herdrSessionFor(host, workspace.id);
     if (existing != null) {
@@ -672,6 +689,13 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
         await widget.workspaceController.close(session);
       case null:
         break;
+    }
+  }
+
+  /// A deep link (notification, widget, agent sheet) opened a session.
+  void _handleTerminalRequest() {
+    if (mounted && widget.workspaceController.hasSessions) {
+      unawaited(_openTerminalWorkspace());
     }
   }
 

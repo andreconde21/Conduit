@@ -1,4 +1,8 @@
+import 'dart:io';
+
 import 'package:conduit/features/hosts/domain/saved_host.dart';
+import 'package:conduit/features/terminal/domain/herdr_keymap.dart';
+import 'package:conduit/features/terminal/domain/herdr_remote_control.dart';
 import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
 import 'package:conduit/features/terminal/presentation/gestures/terminal_gesture_layer.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
@@ -7,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../../support/test_doubles.dart';
+import '../herdr/fake_herdr_server.dart';
 
 /// Stands in for the terminal view: it owns the same single-finger gestures
 /// (tap, long press, vertical drag) that the real view competes with.
@@ -41,7 +46,14 @@ class _Harness {
     SavedHost? host,
     this.withSessionGrid = true,
     this.withAgentPanel = true,
+    this.target,
+    this.herdrControl,
+    this.scrollMode = false,
   }) : session = _RecordingSession(host: host);
+
+  final TerminalWindowSwitchTarget? target;
+  final HerdrRemoteControl? herdrControl;
+  final workspacesFocused = <String>[];
 
   final TerminalGesturePreferences preferences;
   final _RecordingSession session;
@@ -53,7 +65,7 @@ class _Harness {
   int agentPanelOpens = 0;
   int enterScrollMode = 0;
   int exitScrollMode = 0;
-  bool scrollMode = false;
+  bool scrollMode;
 
   Widget build() {
     return MaterialApp(
@@ -65,6 +77,9 @@ class _Harness {
             child: StatefulBuilder(
               builder: (context, setState) {
                 return TerminalGestureLayer(
+                  target: target,
+                  herdrControl: herdrControl,
+                  onHerdrWorkspaceFocused: workspacesFocused.add,
                   preferences: preferences,
                   session: session,
                   fontSize: 14,
@@ -132,12 +147,16 @@ Future<void> _twoFingerMove(
   required Offset secondTo,
   int steps = 6,
   bool lift = true,
+  Duration hold = Duration.zero,
 }) async {
   final first = await tester.createGesture(pointer: 11);
   final second = await tester.createGesture(pointer: 12);
   await first.down(firstFrom);
   await second.down(secondFrom);
   await tester.pump();
+  if (hold > Duration.zero) {
+    await tester.pump(hold);
+  }
   final firstStep = (firstTo - firstFrom) / steps.toDouble();
   final secondStep = (secondTo - secondFrom) / steps.toDouble();
   for (var i = 0; i < steps; i += 1) {
@@ -178,7 +197,9 @@ void main() {
 
     testWidgets('tmux target follows the host prefix key', (tester) async {
       final harness = _Harness(
-        host: buildHost('a').copyWith(tmuxPrefixKey: MultiplexerPrefixKey.controlA),
+        host: buildHost(
+          'a',
+        ).copyWith(tmuxPrefixKey: MultiplexerPrefixKey.controlA),
       );
       addTearDown(harness.session.dispose);
       await tester.pumpWidget(harness.build());
@@ -188,9 +209,7 @@ void main() {
       expect(harness.session.log, ['ctrl:keyA', 'text:n']);
     });
 
-    testWidgets('Herdr target follows the host prefix key too', (
-      tester,
-    ) async {
+    testWidgets('Herdr target follows the host prefix key too', (tester) async {
       final harness = _Harness(
         host: buildHost(
           'a',
@@ -608,6 +627,339 @@ void main() {
         const Offset(0, 30),
       );
       expect(opens, 1);
+    });
+  });
+
+  group('Herdr', () {
+    const herdrPreferences = TerminalGesturePreferences(
+      windowSwitchTarget: TerminalWindowSwitchTarget.herdr,
+    );
+
+    Future<void> twoFingerSwipe(WidgetTester tester, Offset by) {
+      return _twoFingerMove(
+        tester,
+        firstFrom: _center.translate(-30, 0),
+        firstTo: _center.translate(-30, 0) + by,
+        secondFrom: _center.translate(30, 0),
+        secondTo: _center.translate(30, 0) + by,
+      );
+    }
+
+    Future<void> pinch(WidgetTester tester, {required bool out}) {
+      return _twoFingerMove(
+        tester,
+        firstFrom: _center.translate(out ? -40 : -120, 0),
+        firstTo: _center.translate(out ? -120 : -40, 0),
+        secondFrom: _center.translate(out ? 40 : 120, 0),
+        secondTo: _center.translate(out ? 120 : 40, 0),
+      );
+    }
+
+    group('over the Herdr CLI', () {
+      late FakeHerdrServer server;
+      late HerdrRemoteControl control;
+
+      // Built inside the test body: futures created in setUp would live
+      // outside the widget test's fake-async zone and never run.
+      Future<_Harness> pump(
+        WidgetTester tester, {
+        TerminalGesturePreferences preferences = herdrPreferences,
+        TerminalWindowSwitchTarget? target,
+      }) async {
+        server = FakeHerdrServer();
+        control = HerdrRemoteControl(runnerFactory: server.runner);
+        final harness = _Harness(
+          preferences: preferences,
+          target: target,
+          herdrControl: control,
+        );
+        addTearDown(harness.session.dispose);
+        await tester.pumpWidget(harness.build());
+        return harness;
+      }
+
+      testWidgets('two-finger left and right focus the neighbouring pane', (
+        tester,
+      ) async {
+        final harness = await pump(tester);
+
+        await twoFingerSwipe(tester, const Offset(-120, 0));
+        await twoFingerSwipe(tester, const Offset(120, 4));
+        await tester.pump();
+
+        expect(server.herdrArgs, [
+          'pane focus --direction right',
+          'pane focus --direction left',
+        ]);
+        expect(harness.session.log, isEmpty);
+        expect(harness.competitor.verticalDrag, 0);
+        await control.close();
+      });
+
+      testWidgets('two-finger up and down switch workspaces', (tester) async {
+        final harness = await pump(tester);
+
+        await twoFingerSwipe(tester, const Offset(0, -120));
+        await tester.pump();
+        expect(server.focusedWorkspace, 'w2');
+        await twoFingerSwipe(tester, const Offset(0, 120));
+        await tester.pump();
+        expect(server.focusedWorkspace, 'w1');
+
+        expect(server.herdrArgs, [
+          'workspace list',
+          'workspace focus w2',
+          'workspace list',
+          'workspace focus w1',
+        ]);
+        expect(harness.workspacesFocused, ['w2', 'w1']);
+        expect(harness.session.log, isEmpty);
+        expect(harness.enterScrollMode, 0);
+        await control.close();
+      });
+
+      testWidgets('pinch out zooms the focused pane, pinch in restores', (
+        tester,
+      ) async {
+        final harness = await pump(tester);
+
+        await pinch(tester, out: true);
+        await pinch(tester, out: false);
+        await tester.pump();
+
+        expect(server.herdrArgs, ['pane zoom --on', 'pane zoom --off']);
+        expect(harness.fontSizes, isEmpty);
+        expect(harness.session.log, isEmpty);
+        await control.close();
+      });
+
+      testWidgets('a pinch with one finger anchored still zooms', (
+        tester,
+      ) async {
+        await pump(tester);
+
+        await _twoFingerMove(
+          tester,
+          firstFrom: _center.translate(-40, 0),
+          firstTo: _center.translate(-40, 0),
+          secondFrom: _center.translate(40, 0),
+          secondTo: _center.translate(140, 0),
+        );
+        await tester.pump();
+
+        expect(server.herdrArgs, ['pane zoom --on']);
+        await control.close();
+      });
+
+      testWidgets('a session opened on a Herdr target uses the Herdr map', (
+        tester,
+      ) async {
+        // The preference says tmux; the session knows better.
+        await pump(
+          tester,
+          preferences: TerminalGesturePreferences.defaults,
+          target: TerminalWindowSwitchTarget.herdr,
+        );
+
+        await twoFingerSwipe(tester, const Offset(-120, 0));
+        await tester.pump();
+
+        expect(server.herdrArgs, ['pane focus --direction right']);
+        await control.close();
+      });
+
+      testWidgets('each mapping follows its setting', (tester) async {
+        final harness = await pump(
+          tester,
+          preferences: herdrPreferences.copyWith(
+            herdrTwoFingerPanes: false,
+            herdrPinch: HerdrPinchAction.fontSize,
+            herdrTwoFingerVertical: HerdrVerticalSwipe.scrollback,
+          ),
+        );
+
+        await twoFingerSwipe(tester, const Offset(-120, 0));
+        await pinch(tester, out: true);
+        await twoFingerSwipe(tester, const Offset(0, 60));
+        await tester.pump();
+
+        expect(server.commands, isEmpty);
+        expect(harness.fontSizes.last, greaterThan(14));
+        // Vertical scrolls back straight away, like tmux.
+        expect(harness.enterScrollMode, 1);
+        expect(harness.session.log.take(2), ['ctrl:keyB', 'text:[']);
+        await control.close();
+      });
+    });
+
+    group('scrollback', () {
+      testWidgets('resting two fingers, then dragging, scrolls back', (
+        tester,
+      ) async {
+        final harness = _Harness(preferences: herdrPreferences);
+        addTearDown(harness.session.dispose);
+        await tester.pumpWidget(harness.build());
+
+        await _twoFingerMove(
+          tester,
+          firstFrom: _center.translate(-30, -100),
+          firstTo: _center.translate(-30, 40),
+          secondFrom: _center.translate(30, -100),
+          secondTo: _center.translate(30, 40),
+          hold:
+              TerminalGestureLayer.holdToScrollDelay +
+              const Duration(milliseconds: 50),
+        );
+
+        expect(harness.enterScrollMode, 1);
+        expect(harness.session.log.take(2), ['ctrl:keyB', 'text:[']);
+        expect(
+          harness.session.log.skip(2).where((e) => e == 'key:arrowUp').length,
+          inInclusiveRange(9, 10),
+        );
+      });
+
+      testWidgets('in scroll mode a plain two-finger drag scrolls', (
+        tester,
+      ) async {
+        final harness = _Harness(
+          preferences: herdrPreferences,
+          scrollMode: true,
+        );
+        addTearDown(harness.session.dispose);
+        await tester.pumpWidget(harness.build());
+
+        await twoFingerSwipe(tester, const Offset(0, 70));
+
+        // Already in copy mode: no prefix, no workspace switch.
+        expect(harness.session.log, List.filled(5, 'key:arrowUp'));
+        expect(harness.workspacesFocused, isEmpty);
+      });
+    });
+
+    group('without the CLI (security-key hosts)', () {
+      Future<_Harness> pump(WidgetTester tester) async {
+        final harness = _Harness(preferences: herdrPreferences);
+        addTearDown(harness.session.dispose);
+        await tester.pumpWidget(harness.build());
+        return harness;
+      }
+
+      testWidgets('two-finger swipes send Herdr\'s default pane keys', (
+        tester,
+      ) async {
+        final harness = await pump(tester);
+
+        await twoFingerSwipe(tester, const Offset(-120, 0));
+        await twoFingerSwipe(tester, const Offset(120, 0));
+
+        expect(harness.session.log, [
+          'ctrl:keyB',
+          'text:l',
+          'ctrl:keyB',
+          'text:h',
+        ]);
+      });
+
+      testWidgets('a workspace swipe opens the workspace navigator', (
+        tester,
+      ) async {
+        final harness = await pump(tester);
+
+        await twoFingerSwipe(tester, const Offset(0, -120));
+
+        expect(harness.session.log, ['ctrl:keyB', 'text:w']);
+        expect(harness.enterScrollMode, 0);
+      });
+
+      testWidgets('pinch toggles zoom only when it should flip', (
+        tester,
+      ) async {
+        final harness = await pump(tester);
+
+        await pinch(tester, out: true);
+        await pinch(tester, out: true);
+        await pinch(tester, out: false);
+
+        expect(harness.session.log, [
+          'ctrl:keyB',
+          'text:z',
+          'ctrl:keyB',
+          'text:z',
+        ]);
+        expect(harness.fontSizes, isEmpty);
+      });
+    });
+
+    testWidgets('tmux keeps two-finger horizontal swipes inert', (
+      tester,
+    ) async {
+      final harness = _Harness();
+      addTearDown(harness.session.dispose);
+      await tester.pumpWidget(harness.build());
+
+      await twoFingerSwipe(tester, const Offset(-120, 0));
+
+      expect(harness.session.log, isEmpty);
+    });
+  });
+
+  group('with the machine\'s Herdr keymap', () {
+    setUp(() {
+      HerdrKeymapCache.instance.put(
+        'gestures',
+        HerdrKeymap.parseConfig(
+          File(
+            'test/features/terminal/herdr/fixtures/'
+            'herdr_config_dev_central.toml',
+          ).readAsStringSync(),
+        ),
+      );
+    });
+    tearDown(HerdrKeymapCache.instance.clear);
+
+    Future<_Harness> pump(WidgetTester tester) async {
+      final harness = _Harness(
+        preferences: const TerminalGesturePreferences(
+          windowSwitchTarget: TerminalWindowSwitchTarget.herdr,
+        ),
+      );
+      addTearDown(harness.session.dispose);
+      await tester.pumpWidget(harness.build());
+      return harness;
+    }
+
+    testWidgets('tab swipes use its prefix', (tester) async {
+      final harness = await pump(tester);
+      await _swipe(tester, _center, const Offset(-120, 0));
+      expect(harness.session.log, ['ctrl:space', 'text:n']);
+    });
+
+    testWidgets('pane swipes without the CLI use its ctrl+alt+arrows, not '
+        'prefix+h (a split there)', (tester) async {
+      final harness = await pump(tester);
+      await _twoFingerMove(
+        tester,
+        firstFrom: _center.translate(-30, 0),
+        firstTo: _center.translate(-150, 0),
+        secondFrom: _center.translate(30, 0),
+        secondTo: _center.translate(-90, 0),
+      );
+      expect(harness.session.log, ['text:\x1b[1;7C']);
+    });
+
+    testWidgets('the workspace fallback opens its workspace picker', (
+      tester,
+    ) async {
+      final harness = await pump(tester);
+      await _twoFingerMove(
+        tester,
+        firstFrom: _center.translate(-30, 0),
+        firstTo: _center.translate(-30, -120),
+        secondFrom: _center.translate(30, 0),
+        secondTo: _center.translate(30, -120),
+      );
+      expect(harness.session.log, ['ctrl:space', 'text:f']);
     });
   });
 }

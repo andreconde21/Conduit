@@ -25,13 +25,71 @@ class RemoteSessionLister {
     }
   }
 
+  /// Lists Herdr workspaces. With one Herdr session running (the usual
+  /// case) its workspaces are listed as they are; with several named
+  /// sessions each workspace carries its session, shown as
+  /// "session ‧ workspace".
   Future<RemoteListing<HerdrWorkspaceInfo>> listHerdr() async {
+    final sessions = await _runningHerdrSessions();
+    if (sessions == null || sessions.length <= 1) {
+      return _listHerdrSession(sessions?.singleOrNull?.cliName ?? '');
+    }
+    final items = <HerdrWorkspaceInfo>[];
+    RemoteListing<HerdrWorkspaceInfo>? firstProblem;
+    for (final session in sessions) {
+      final listing = await _listHerdrSession(
+        session.cliName,
+        sessionLabel: session.name,
+      );
+      if (listing is RemoteListingAvailable<HerdrWorkspaceInfo>) {
+        items.addAll(listing.items);
+      } else {
+        firstProblem ??= listing;
+      }
+    }
+    if (items.isEmpty && firstProblem != null) {
+      return firstProblem;
+    }
+    return RemoteListingAvailable(items);
+  }
+
+  /// Running Herdr sessions, or null when `herdr session list` is not
+  /// available (older Herdr, not installed); the default session is then
+  /// listed alone.
+  Future<List<HerdrSessionInfo>?> _runningHerdrSessions() async {
     try {
       final result = await _runner.run(
-        RemoteSessionListing.herdrWorkspaceListCommand,
+        RemoteSessionListing.herdrSessionListCommand,
         timeout: _timeout,
       );
-      final listing = RemoteSessionListing.interpretHerdrWorkspaces(result);
+      if (result.exitCode != null && result.exitCode != 0) {
+        return null;
+      }
+      return RemoteSessionListing.parseHerdrSessions(
+        result.stdout,
+      )?.where((session) => session.running).toList();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<RemoteListing<HerdrWorkspaceInfo>> _listHerdrSession(
+    String session, {
+    String sessionLabel = '',
+  }) async {
+    try {
+      final result = await _runner.run(
+        RemoteSessionListing.herdrWorkspaceListFor(session),
+        timeout: _timeout,
+      );
+      var listing = RemoteSessionListing.interpretHerdrWorkspaces(result);
+      if (listing is RemoteListingAvailable<HerdrWorkspaceInfo> &&
+          (session.isNotEmpty || sessionLabel.isNotEmpty)) {
+        listing = RemoteListingAvailable([
+          for (final workspace in listing.items)
+            workspace.inSession(session, sessionLabel: sessionLabel),
+        ]);
+      }
       if (listing is! RemoteListingAvailable<HerdrWorkspaceInfo> ||
           listing.items.every((workspace) => workspace.tabCount <= 1)) {
         return listing;
@@ -39,7 +97,7 @@ class RemoteSessionLister {
       // Tab labels are a nicety: a failure here must not hide workspaces.
       try {
         final tabs = await _runner.run(
-          RemoteSessionListing.herdrTabListCommand,
+          RemoteSessionListing.herdrTabListFor(session),
           timeout: _timeout,
         );
         if (tabs.exitCode == 0) {
