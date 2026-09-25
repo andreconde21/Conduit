@@ -25,6 +25,7 @@ class TerminalSurface extends StatefulWidget {
     this.onLinkTap,
     this.onLinkLongPress,
     this.autoConnect = true,
+    this.onKeyEvent,
     this.dragScrollsRemote = true,
     this.onEnterScrollMode,
     super.key,
@@ -57,6 +58,10 @@ class TerminalSurface extends StatefulWidget {
   /// built. False for a background tab that waits to be shown (a session
   /// restored from the last app run); it connects when this turns true.
   final bool autoConnect;
+
+  /// Sees each hardware key before the terminal does; a result other than
+  /// ignored keeps the key from the session (app shortcuts like Ctrl+K).
+  final FocusOnKeyEventCallback? onKeyEvent;
 
   /// Whether a one-finger vertical drag scrolls the remote program when it
   /// is on the alternate screen or asked for mouse reports (see
@@ -457,6 +462,7 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
                   controller: _terminalController,
                   onTapUp: _handleTapUp,
                   focusNode: widget.focusNode,
+                  onKeyEvent: widget.onKeyEvent,
                   autofocus: widget.focusNode != null,
                   deleteDetection: true,
                   keyboardType: TextInputType.visiblePassword,
