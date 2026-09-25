@@ -88,19 +88,113 @@ class HomeBoardWorkspace {
   }
 }
 
+/// Whether tmux could be listed on the machine.
+enum HomeTmuxStatus {
+  /// Not listed yet (or the connection failed before tmux answered).
+  unknown,
+
+  /// `tmux list-sessions` answered; [HomeBoardState.tmuxSessions] holds
+  /// the sessions (empty when no server runs).
+  available,
+
+  /// tmux is not installed on the machine.
+  notInstalled,
+
+  /// tmux answered with an error.
+  failed,
+}
+
+/// One tmux window, from `tmux list-windows`.
+@immutable
+class TmuxWindowInfo {
+  const TmuxWindowInfo({
+    required this.index,
+    required this.name,
+    this.panes = 1,
+    this.active = false,
+  });
+
+  final int index;
+  final String name;
+  final int panes;
+  final bool active;
+
+  @override
+  bool operator ==(Object other) =>
+      other is TmuxWindowInfo &&
+      other.index == index &&
+      other.name == name &&
+      other.panes == panes &&
+      other.active == active;
+
+  @override
+  int get hashCode => Object.hash(index, name, panes, active);
+}
+
+/// tmux commands the home page runs besides the session listing.
+abstract final class HomeTmuxCommands {
+  /// Exact-match target for [session] (`=name`), so a session called
+  /// `web` never resolves to `web-old`.
+  static String _target(String session, [String window = '']) =>
+      ConnectTarget.shellQuote(
+        window.isEmpty ? '=$session' : '=$session:$window',
+      );
+
+  /// One tab-separated line per window: index, name, pane count, active.
+  static String listWindows(String session) =>
+      'tmux list-windows -t ${_target(session)} -F '
+      '"\$(printf \'#{window_index}\\t#{window_name}\\t#{window_panes}'
+      '\\t#{window_active}\')"';
+
+  /// Makes [index] the session's current window, so the next attach
+  /// shows it.
+  static String selectWindow(String session, int index) =>
+      'tmux select-window -t ${_target(session, '$index')}';
+
+  /// Parses [listWindows] output; lines that do not fit are skipped.
+  static List<TmuxWindowInfo> parseWindows(String raw) {
+    final windows = <TmuxWindowInfo>[];
+    for (final line in raw.split('\n')) {
+      final fields = line.split('\t');
+      if (fields.length < 2) continue;
+      final index = int.tryParse(fields[0].trim());
+      if (index == null) continue;
+      windows.add(
+        TmuxWindowInfo(
+          index: index,
+          name: fields[1].trim(),
+          panes: fields.length > 2 ? int.tryParse(fields[2].trim()) ?? 1 : 1,
+          active: fields.length > 3 && fields[3].trim() == '1',
+        ),
+      );
+    }
+    return windows;
+  }
+}
+
 /// Snapshot rendered by the home board.
 @immutable
 class HomeBoardState {
   const HomeBoardState({
     this.phase = HomeBoardPhase.idle,
     this.workspaces = const [],
+    this.tmux = HomeTmuxStatus.unknown,
+    this.tmuxSessions = const [],
     this.message,
     this.updatedAt,
     this.refreshing = false,
   });
 
+  /// Where listing stands: the connection, and Herdr's availability once
+  /// the machine answered ([HomeBoardPhase.notInstalled] and
+  /// [HomeBoardPhase.notRunning] speak about Herdr only; tmux has
+  /// [tmux]).
   final HomeBoardPhase phase;
   final List<HomeBoardWorkspace> workspaces;
+
+  /// Whether tmux answered, and its sessions.
+  final HomeTmuxStatus tmux;
+  final List<TmuxSessionInfo> tmuxSessions;
 
   /// Error or availability text for [HomeBoardPhase.failed],
   /// [HomeBoardPhase.notInstalled] and [HomeBoardPhase.notRunning].
@@ -120,9 +214,14 @@ class HomeBoardState {
         workspace.panes.where((pane) => pane.agent.state.needsAttention).length,
   );
 
+  /// Whether tmux sessions can be listed here (tmux answered).
+  bool get hasTmux => tmux == HomeTmuxStatus.available;
+
   HomeBoardState copyWith({
     HomeBoardPhase? phase,
     List<HomeBoardWorkspace>? workspaces,
+    HomeTmuxStatus? tmux,
+    List<TmuxSessionInfo>? tmuxSessions,
     String? message,
     bool clearMessage = false,
     DateTime? updatedAt,
@@ -131,6 +230,8 @@ class HomeBoardState {
     return HomeBoardState(
       phase: phase ?? this.phase,
       workspaces: workspaces ?? this.workspaces,
+      tmux: tmux ?? this.tmux,
+      tmuxSessions: tmuxSessions ?? this.tmuxSessions,
       message: clearMessage ? null : message ?? this.message,
       updatedAt: updatedAt ?? this.updatedAt,
       refreshing: refreshing ?? this.refreshing,
@@ -160,8 +261,8 @@ AgentAttentionState? herdrStatusToState(String raw) {
   };
 }
 
-/// Live board of one machine's Herdr workspaces and agent panes for the
-/// home page.
+/// Live board of one machine's tmux sessions, Herdr workspaces and agent
+/// panes for the home page.
 ///
 /// It polls over its own on-demand exec channel (so it works before any
 /// terminal session exists), only while [setVisible] says the home page is
@@ -339,6 +440,34 @@ class HomeBoardController extends ChangeNotifier {
     }
   }
 
+  /// Neither tmux nor Herdr is installed: polling stops until [refresh].
+  bool get _nothingToPoll =>
+      _state.phase == HomeBoardPhase.notInstalled &&
+      _state.tmux == HomeTmuxStatus.notInstalled;
+
+  /// Lists the windows of tmux [session] (for opening it at one).
+  Future<List<TmuxWindowInfo>> listTmuxWindows(String session) async {
+    final host = _host;
+    if (_disposed || host == null || host.isLocal) return const [];
+    try {
+      final runner = _runner ??= _runnerFactory(host);
+      final result = await runner.run(
+        HomeTmuxCommands.listWindows(session),
+        timeout: _timeout,
+      );
+      if (result.exitCode != null && result.exitCode != 0) return const [];
+      return HomeTmuxCommands.parseWindows(result.stdout);
+    } catch (_) {
+      return const [];
+    } finally {
+      if (!_visible && !_disposed) await _closeRunner();
+    }
+  }
+
+  /// Makes window [index] current in tmux [session] before attaching.
+  Future<void> selectTmuxWindow(String session, int index) =>
+      _runBestEffort(HomeTmuxCommands.selectWindow(session, index));
+
   HomeBoardPhase _initialPhase() {
     if (!_listable) return HomeBoardPhase.idle;
     if (_needsRequest) return HomeBoardPhase.awaitingRequest;
@@ -347,7 +476,7 @@ class HomeBoardController extends ChangeNotifier {
 
   void _start({bool force = false}) {
     if (!_visible || !_listable || _needsRequest) return;
-    if (!force && _state.phase == HomeBoardPhase.notInstalled) return;
+    if (!force && _nothingToPoll) return;
     if (_state.phase == HomeBoardPhase.awaitingRequest ||
         _state.phase == HomeBoardPhase.idle) {
       _state = _state.copyWith(phase: HomeBoardPhase.loading);
@@ -412,9 +541,9 @@ class HomeBoardController extends ChangeNotifier {
       _state = next;
       _failures = 0;
       _skipTicks = 0;
-      if (next.phase == HomeBoardPhase.notInstalled) {
-        // No point polling a machine without Herdr; pull-to-refresh or
-        // switching machines tries again.
+      if (_nothingToPoll) {
+        // No point polling a machine without tmux or Herdr; pull-to-refresh
+        // or switching machines tries again.
         _stopTimer();
       }
     } catch (error) {
@@ -427,6 +556,8 @@ class HomeBoardController extends ChangeNotifier {
       _state = HomeBoardState(
         phase: HomeBoardPhase.failed,
         workspaces: _state.workspaces,
+        tmux: _state.tmux,
+        tmuxSessions: _state.tmuxSessions,
         message: error is AppFailure ? error.toString() : '$error',
         updatedAt: _state.updatedAt,
       );
@@ -441,6 +572,30 @@ class HomeBoardController extends ChangeNotifier {
   }
 
   Future<HomeBoardState> _load(AgentCommandRunner runner) async {
+    final tmuxResult = await runner.run(
+      RemoteSessionListing.tmuxListCommand,
+      timeout: _timeout,
+    );
+    final (tmux, tmuxSessions) = switch (RemoteSessionListing.interpretTmux(
+      tmuxResult,
+    )) {
+      RemoteListingAvailable<TmuxSessionInfo>(:final items) => (
+        HomeTmuxStatus.available,
+        items,
+      ),
+      RemoteListingNotInstalled<TmuxSessionInfo>() => (
+        HomeTmuxStatus.notInstalled,
+        const <TmuxSessionInfo>[],
+      ),
+      RemoteListingNotRunning<TmuxSessionInfo>() => (
+        HomeTmuxStatus.available,
+        const <TmuxSessionInfo>[],
+      ),
+      RemoteListingFailed<TmuxSessionInfo>() => (
+        HomeTmuxStatus.failed,
+        const <TmuxSessionInfo>[],
+      ),
+    };
     final workspaceResult = await runner.run(
       RemoteSessionListing.herdrWorkspaceListCommand,
       timeout: _timeout,
@@ -452,16 +607,32 @@ class HomeBoardController extends ChangeNotifier {
       case RemoteListingNotInstalled<HerdrWorkspaceInfo>():
         return HomeBoardState(
           phase: HomeBoardPhase.notInstalled,
+          tmux: tmux,
+          tmuxSessions: tmuxSessions,
           message: 'Herdr is not installed on this machine.',
           updatedAt: DateTime.now(),
         );
       case RemoteListingNotRunning<HerdrWorkspaceInfo>(:final message):
         return HomeBoardState(
           phase: HomeBoardPhase.notRunning,
+          tmux: tmux,
+          tmuxSessions: tmuxSessions,
           message: message,
           updatedAt: DateTime.now(),
         );
       case RemoteListingFailed<HerdrWorkspaceInfo>(:final message):
+        if (tmux == HomeTmuxStatus.available) {
+          // tmux answered, so the machine is reachable: Herdr alone is
+          // broken. Keep the tmux side on screen.
+          return HomeBoardState(
+            phase: HomeBoardPhase.failed,
+            workspaces: _state.workspaces,
+            tmux: tmux,
+            tmuxSessions: tmuxSessions,
+            message: message,
+            updatedAt: DateTime.now(),
+          );
+        }
         throw AppFailure(message);
       case RemoteListingAvailable<HerdrWorkspaceInfo>(:final items):
         final tabs = await _loadTabs(runner);
@@ -469,6 +640,8 @@ class HomeBoardController extends ChangeNotifier {
         return HomeBoardState(
           phase: HomeBoardPhase.ready,
           workspaces: buildBoard(items, tabs, agents),
+          tmux: tmux,
+          tmuxSessions: tmuxSessions,
           updatedAt: DateTime.now(),
         );
     }
@@ -545,6 +718,106 @@ class HomeBoardController extends ChangeNotifier {
     _disposed = true;
     _stopTimer();
     unawaited(_closeRunner());
+    super.dispose();
+  }
+}
+
+/// A machine the home page lists, and whether the app reached it before
+/// (see [HomeBoardController.selectHost]).
+@immutable
+class HomeBoardEntry {
+  const HomeBoardEntry(this.host, {this.connectedBefore = false});
+
+  final SavedHost host;
+  final bool connectedBefore;
+}
+
+/// One [HomeBoardController] per machine the home page shows (the machine
+/// filter's selection), created and disposed as the selection changes.
+///
+/// Every board keeps its own rules (on-screen polling, one fetch at a time,
+/// failure backoff, hardware-key and never-connected machines waiting for a
+/// request); this set only fans visibility and refreshes out to them and
+/// forwards their changes.
+class HomeBoards extends ChangeNotifier {
+  HomeBoards({
+    required AgentCommandRunnerFactory runnerFactory,
+    AgentAttentionProvider provider = const HerdrAttentionProvider(),
+    Duration pollInterval = const Duration(seconds: 5),
+  }) : _create = (() => HomeBoardController(
+         runnerFactory: runnerFactory,
+         provider: provider,
+         pollInterval: pollInterval,
+       ));
+
+  final HomeBoardController Function() _create;
+  final Map<String, HomeBoardController> _boards = {};
+  bool _visible = false;
+  bool _disposed = false;
+
+  bool get visible => _visible;
+
+  /// Machine ids with a board, in selection order.
+  Iterable<String> get hostIds => _boards.keys;
+
+  /// The board of machine [hostId], if it is selected.
+  HomeBoardController? operator [](String hostId) => _boards[hostId];
+
+  /// Boards for exactly [entries] (local machines are skipped): new
+  /// machines start listing, dropped ones stop and close their channel.
+  void sync(List<HomeBoardEntry> entries) {
+    if (_disposed) return;
+    final wanted = {
+      for (final entry in entries)
+        if (!entry.host.isLocal) entry.host.id: entry,
+    };
+    var changed = false;
+    for (final id in List.of(_boards.keys)) {
+      if (!wanted.containsKey(id)) {
+        _boards.remove(id)!
+          ..removeListener(notifyListeners)
+          ..dispose();
+        changed = true;
+      }
+    }
+    for (final entry in wanted.values) {
+      var board = _boards[entry.host.id];
+      if (board == null) {
+        board = _create()..addListener(notifyListeners);
+        _boards[entry.host.id] = board;
+        changed = true;
+        board.setVisible(_visible);
+      }
+      board.selectHost(entry.host, connectedBefore: entry.connectedBefore);
+    }
+    if (changed) notifyListeners();
+  }
+
+  /// Starts or stops every board's polling.
+  void setVisible(bool visible) {
+    if (_disposed || visible == _visible) return;
+    _visible = visible;
+    for (final board in List.of(_boards.values)) {
+      board.setVisible(visible);
+    }
+  }
+
+  /// Fetches every board now.
+  Future<void> refresh() async {
+    await Future.wait([
+      for (final board in List.of(_boards.values)) board.refresh(),
+    ]);
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    for (final board in _boards.values) {
+      board
+        ..removeListener(notifyListeners)
+        ..dispose();
+    }
+    _boards.clear();
     super.dispose();
   }
 }

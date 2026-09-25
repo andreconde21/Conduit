@@ -1,3 +1,4 @@
+import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
@@ -146,7 +147,7 @@ class _SessionTabsState extends State<SessionTabs> {
             key: selected ? _activeKey : ValueKey(session),
             label: SessionTabs.labelFor(session, sessions),
             tooltip: '${session.title}\n${session.host.endpoint}',
-            leading: _StatusDot(status: session.status),
+            leading: _SessionLeading(session: session),
             selected: selected,
             palette: widget.palette,
             brightness: widget.brightness,
@@ -170,6 +171,40 @@ class _SessionTabsState extends State<SessionTabs> {
 }
 
 final Listenable _inertListenable = ChangeNotifier();
+
+/// A session tab's status dot, followed by the tmux or Herdr logo when the
+/// session runs in one.
+class _SessionLeading extends StatelessWidget {
+  const _SessionLeading({required this.session});
+
+  final TerminalSessionController session;
+
+  MultiplexerKind? get _multiplexer {
+    final kind = ConnectTarget.fromSessionHostId(session.host.id)?.kind;
+    return switch (kind) {
+      ConnectTargetKind.herdr => MultiplexerKind.herdr,
+      ConnectTargetKind.tmux => MultiplexerKind.tmux,
+      null when session.host.startTmuxOnConnect && !session.host.isLocal =>
+        MultiplexerKind.tmux,
+      _ => null,
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final multiplexer = _multiplexer;
+    final dot = _StatusDot(status: session.status);
+    if (multiplexer == null) return dot;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        dot,
+        const SizedBox(width: 5),
+        MultiplexerIcon(multiplexer, size: 13, semanticLabel: ''),
+      ],
+    );
+  }
+}
 
 class _Tab extends StatelessWidget {
   const _Tab({

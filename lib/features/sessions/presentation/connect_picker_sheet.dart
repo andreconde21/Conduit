@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
@@ -191,22 +192,44 @@ class _ConnectPickerSheetState extends State<ConnectPickerSheet> {
             children: [
               Expanded(
                 child: SegmentedButton<ConnectPickerTab>(
+                  key: const ValueKey('connect-picker-tabs'),
                   showSelectedIcon: false,
+                  style: const ButtonStyle(
+                    visualDensity: VisualDensity.compact,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    padding: WidgetStatePropertyAll(
+                      EdgeInsets.symmetric(horizontal: 4),
+                    ),
+                  ),
                   segments: const [
                     ButtonSegment(
                       value: ConnectPickerTab.tmux,
-                      icon: Icon(Icons.terminal_rounded, size: 18),
-                      label: Text('Tmux'),
+                      label: _TabLabel(
+                        icon: MultiplexerIcon(
+                          MultiplexerKind.tmux,
+                          size: 15,
+                          semanticLabel: '',
+                        ),
+                        label: 'Tmux',
+                      ),
                     ),
                     ButtonSegment(
                       value: ConnectPickerTab.herdr,
-                      icon: Icon(Icons.pets_rounded, size: 18),
-                      label: Text('Herdr'),
+                      label: _TabLabel(
+                        icon: MultiplexerIcon(
+                          MultiplexerKind.herdr,
+                          size: 15,
+                          semanticLabel: '',
+                        ),
+                        label: 'Herdr',
+                      ),
                     ),
                     ButtonSegment(
                       value: ConnectPickerTab.recent,
-                      icon: Icon(Icons.history_rounded, size: 18),
-                      label: Text('Recent'),
+                      label: _TabLabel(
+                        icon: Icon(Icons.history_rounded, size: 16),
+                        label: 'Recent',
+                      ),
                     ),
                   ],
                   selected: {_tab},
@@ -214,11 +237,19 @@ class _ConnectPickerSheetState extends State<ConnectPickerSheet> {
                       setState(() => _tab = selection.first),
                 ),
               ),
-              const SizedBox(width: 8),
-              FilledButton.tonalIcon(
+              const SizedBox(width: 6),
+              FilledButton.tonal(
+                key: const ValueKey('connect-picker-skip'),
+                style: FilledButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                ),
                 onPressed: () => _pick(const ConnectTarget.shell()),
-                icon: const Icon(Icons.skip_next_rounded, size: 18),
-                label: const Text('Skip'),
+                child: const _TabLabel(
+                  icon: Icon(Icons.skip_next_rounded, size: 16),
+                  label: 'Skip',
+                ),
               ),
             ],
           ),
@@ -486,6 +517,30 @@ class _ConnectPickerSheetState extends State<ConnectPickerSheet> {
     if (diff.inHours < 1) return '${diff.inMinutes}m ago';
     if (diff.inDays < 1) return '${diff.inHours}h ago';
     return '${diff.inDays}d ago';
+  }
+}
+
+/// Icon and label of a picker tab (or the Skip button) on one line: on a
+/// narrow phone or with large text the pair scales down instead of wrapping.
+class _TabLabel extends StatelessWidget {
+  const _TabLabel({required this.icon, required this.label});
+
+  final Widget icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          icon,
+          const SizedBox(width: 5),
+          Text(label, maxLines: 1, softWrap: false),
+        ],
+      ),
+    );
   }
 }
 

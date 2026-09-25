@@ -195,8 +195,9 @@ void main() {
           'README.md',
           'bin/conductore-hostd',
           'bin/conductore-hook',
+          'bin/conductore-statusline',
           'lib/cli.js',
-          'lib/hook.js',
+          'lib/spool.js',
         ]),
       );
       expect(bundle.files.keys.where((p) => p.startsWith('test/')), isEmpty);

@@ -1,3 +1,4 @@
+import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
@@ -105,6 +106,126 @@ void main() {
       expect(HomeSessionInfo.of(herdr).targetLabel, 'Old name');
       expect(HomeSessionInfo.of(session(() => buildHost('p'))).targetLabel, '');
     });
+
+    test('labels tmux sessions, including tmux-on-connect machines', () {
+      final target = session(
+        () => const ConnectTarget.tmux('build').apply(buildHost('t')),
+      );
+      final targetInfo = HomeSessionInfo.of(target, machineName: 'Box');
+      expect(targetInfo.multiplexer, MultiplexerKind.tmux);
+      expect(targetInfo.targetLabel, 'build');
+      expect(targetInfo.machineName, 'Box');
+      expect(HomeSessionInfo.tmuxSessionOf(target), 'build');
+
+      final onConnect = session(
+        () => buildHost(
+          't',
+        ).copyWith(startTmuxOnConnect: true, tmuxSessionName: 'main'),
+      );
+      final info = HomeSessionInfo.of(onConnect);
+      expect(info.multiplexer, MultiplexerKind.tmux);
+      expect(info.targetLabel, 'main');
+      expect(HomeSessionInfo.tmuxSessionOf(onConnect), 'main');
+
+      final plain = session(() => buildHost('p'));
+      expect(HomeSessionInfo.of(plain).multiplexer, isNull);
+      expect(HomeSessionInfo.tmuxSessionOf(plain), isNull);
+    });
+  });
+
+  group('HomeSessionRow', () {
+    testWidgets('shows status, transport, target, machine, agent and tail', (
+      tester,
+    ) async {
+      final tmux = session(
+        () => const ConnectTarget.tmux('build').apply(buildHost('t')),
+      );
+      tmux.terminal.write('first line\r\n\$ make deploy\r\n');
+      await tester.pumpWidget(
+        host(
+          HomeSessionRow(
+            session: tmux,
+            info: HomeSessionInfo.of(
+              tmux,
+              agentState: AgentAttentionState.working,
+              machineName: 'Build box',
+            ),
+            palette: palette,
+            brightness: Brightness.dark,
+            fontFamily: 'monospace',
+            onTap: () {},
+            onLongPress: () {},
+          ),
+          width: 360,
+          height: 90,
+        ),
+      );
+      expect(find.text('SSH'), findsOneWidget);
+      expect(find.text('build'), findsOneWidget);
+      expect(find.text('Build box'), findsOneWidget);
+      expect(find.text('Working'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('multiplexer-icon-tmux')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('home-row-dot')), findsOneWidget);
+      // Not connected yet: the tail says so instead of an empty line.
+      expect(find.text('Not connected'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    test('the tail is the last non-blank line on screen', () {
+      final plain = session(() => buildHost('p'));
+      plain.terminal.write('one\r\ntwo\r\n\r\n');
+      expect(HomeSessionRow.tailOf(plain), 'two');
+    });
+  });
+
+  group('DormantTmuxTile', () {
+    testWidgets('names the session, counts windows, marks attached', (
+      tester,
+    ) async {
+      var opened = 0;
+      await tester.pumpWidget(
+        host(
+          DormantTmuxTile(
+            session: const TmuxSessionInfo(
+              name: 'main',
+              attachedClients: 1,
+              windows: 3,
+            ),
+            palette: palette,
+            brightness: Brightness.dark,
+            onTap: () => opened += 1,
+          ),
+          height: 118,
+        ),
+      );
+      expect(find.text('main'), findsOneWidget);
+      expect(find.text('3 windows'), findsOneWidget);
+      expect(find.text('Attached elsewhere'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('multiplexer-icon-tmux')),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('main'));
+      expect(opened, 1);
+      expect(tester.takeException(), isNull);
+    });
+
+    test('details read windows and last activity', () {
+      final now = DateTime.utc(2026, 9, 25, 12);
+      expect(
+        tmuxDetails(
+          TmuxSessionInfo(
+            name: 'x',
+            lastActivity: now.subtract(const Duration(minutes: 5)),
+          ),
+          now: now,
+        ),
+        '1 window · active 5m ago',
+      );
+    });
   });
 
   group('HomeSessionTile', () {
@@ -140,8 +261,18 @@ void main() {
       expect(find.text('Mosh'), findsOneWidget);
       expect(find.text('Host a: DTech'), findsNWidgets(2));
       expect(find.text('DTech'), findsOneWidget);
-      expect(find.byIcon(herdrIcon), findsOneWidget);
-      expect(find.text('Needs input'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('multiplexer-icon-herdr')),
+        findsOneWidget,
+      );
+      // The agent state is a banner over the preview, not a small chip.
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('agent-state-banner')),
+          matching: find.text('Needs input'),
+        ),
+        findsOneWidget,
+      );
       final dot = tester.widget<Container>(
         find.byKey(const ValueKey('home-tile-dot')),
       );
@@ -267,7 +398,7 @@ void main() {
         HomeBoardNoticeAction.startHerdr,
       );
       final failed = of(HomeBoardPhase.failed, message: 'timed out')!;
-      expect(failed.title, 'Could not list Herdr workspaces');
+      expect(failed.title, 'Could not list workspaces');
       expect(failed.message, 'timed out');
       expect(failed.action, HomeBoardNoticeAction.retry);
       expect(
@@ -279,6 +410,42 @@ void main() {
       expect(
         of(HomeBoardPhase.ready, workspaces: [workspace('w1', 'A')]),
         isNull,
+      );
+    });
+
+    test('a tmux-only machine needs no Herdr notice', () {
+      const sessions = [TmuxSessionInfo(name: 'main')];
+      HomeBoardNotice? of(
+        HomeBoardPhase phase, {
+        HomeTmuxStatus tmux = HomeTmuxStatus.available,
+        List<TmuxSessionInfo> tmuxSessions = const [],
+      }) => HomeBoardNotice.of(
+        HomeBoardState(
+          phase: phase,
+          tmux: tmux,
+          tmuxSessions: tmuxSessions,
+          message: 'herdr broke',
+        ),
+      );
+
+      // Herdr missing but tmux there: nothing to explain.
+      expect(of(HomeBoardPhase.notInstalled), isNull);
+      expect(
+        of(
+          HomeBoardPhase.notInstalled,
+          tmux: HomeTmuxStatus.notInstalled,
+        )!.title,
+        'No tmux or Herdr here',
+      );
+      expect(of(HomeBoardPhase.notRunning, tmuxSessions: sessions), isNull);
+      expect(of(HomeBoardPhase.ready, tmuxSessions: sessions), isNull);
+      expect(
+        of(HomeBoardPhase.failed, tmuxSessions: sessions)!.title,
+        'Could not list Herdr workspaces',
+      );
+      expect(
+        of(HomeBoardPhase.failed)!.title,
+        'Could not list Herdr workspaces',
       );
     });
 

@@ -216,4 +216,171 @@ void main() {
     expect(timed.state.phase, HomeBoardPhase.ready);
     timed.setVisible(false);
   });
+
+  group('tmux', () {
+    test('lists tmux sessions next to Herdr workspaces', () async {
+      runner.tmuxSessions = TmuxFixtures.sessions;
+      board
+        ..setVisible(true)
+        ..selectHost(connected('a'));
+      await pumpEventQueue();
+
+      final state = board.state;
+      expect(state.phase, HomeBoardPhase.ready);
+      expect(state.hasTmux, isTrue);
+      expect(state.tmuxSessions.map((s) => s.name), ['main', 'build']);
+      expect(state.tmuxSessions.first.isAttached, isTrue);
+      expect(state.tmuxSessions.first.windows, 3);
+      expect(state.workspaces, hasLength(2));
+      expect(runner.commands.first, startsWith('tmux list-sessions'));
+    });
+
+    test('no tmux server is an empty list, not an error', () async {
+      runner
+        ..tmuxExitCode = 1
+        ..tmuxStderr = TmuxFixtures.noServer;
+      board
+        ..setVisible(true)
+        ..selectHost(connected('a'));
+      await pumpEventQueue();
+      expect(board.state.tmux, HomeTmuxStatus.available);
+      expect(board.state.tmuxSessions, isEmpty);
+      expect(board.state.phase, HomeBoardPhase.ready);
+    });
+
+    testWidgets('a tmux-only machine keeps polling; one with neither stops', (
+      tester,
+    ) async {
+      final tmuxOnly = HerdrFakeRunner.tmuxOnly();
+      final timed = HomeBoardController(runnerFactory: (_) => tmuxOnly);
+      addTearDown(timed.dispose);
+      timed
+        ..setVisible(true)
+        ..selectHost(connected('a'));
+      await tester.pump();
+      expect(timed.state.phase, HomeBoardPhase.notInstalled);
+      expect(timed.state.hasTmux, isTrue);
+      expect(timed.state.tmuxSessions.map((s) => s.name), ['main', 'build']);
+      int polls() => tmuxOnly.commands
+          .where((c) => c.startsWith('tmux list-sessions'))
+          .length;
+      final first = polls();
+      await tester.pump(const Duration(seconds: 16));
+      expect(polls(), greaterThan(first), reason: 'tmux keeps being listed');
+
+      // Neither tmux nor Herdr: nothing to poll for.
+      tmuxOnly
+        ..tmuxExitCode = 127
+        ..tmuxStderr = 'sh: 1: tmux: not found';
+      await tester.pump(const Duration(seconds: 6));
+      expect(timed.state.tmux, HomeTmuxStatus.notInstalled);
+      final stopped = polls();
+      await tester.pump(const Duration(minutes: 1));
+      expect(polls(), stopped);
+      timed.setVisible(false);
+    });
+
+    test('Herdr failing on a reachable machine keeps the tmux list', () async {
+      runner
+        ..tmuxSessions = TmuxFixtures.sessions
+        ..workspaceExitCode = 2
+        ..workspaceStderr = 'herdr: socket error';
+      board
+        ..setVisible(true)
+        ..selectHost(connected('a'));
+      await pumpEventQueue();
+      expect(board.state.phase, HomeBoardPhase.failed);
+      expect(board.state.message, 'herdr: socket error');
+      expect(board.state.tmuxSessions, hasLength(2));
+      // Not a connection failure: the channel stays open.
+      expect(runner.closeCount, 0);
+    });
+
+    test('lists windows and selects one before attaching', () async {
+      board
+        ..setVisible(true)
+        ..selectHost(connected('a'));
+      await pumpEventQueue();
+
+      final windows = await board.listTmuxWindows('my session');
+      expect(windows.map((w) => w.name), ['zsh', 'claude', 'logs']);
+      expect(windows[1].active, isTrue);
+      expect(windows[1].panes, 2);
+      expect(
+        runner.commands.last,
+        startsWith("tmux list-windows -t '=my session' -F"),
+      );
+
+      await board.selectTmuxWindow('my session', 2);
+      expect(runner.commands.last, "tmux select-window -t '=my session:2'");
+    });
+
+    test('parses tab-separated windows, skipping junk', () {
+      expect(
+        HomeTmuxCommands.parseWindows('0\tzsh\t1\t1\nbogus\n\n3\tvim\n'),
+        const [
+          TmuxWindowInfo(index: 0, name: 'zsh', active: true),
+          TmuxWindowInfo(index: 3, name: 'vim'),
+        ],
+      );
+    });
+  });
+
+  group('HomeBoards', () {
+    late HomeBoards boards;
+    late List<String> runnersFor;
+
+    setUp(() {
+      runnersFor = [];
+      boards = HomeBoards(
+        runnerFactory: (host) {
+          runnersFor.add(host.id);
+          return runner;
+        },
+        pollInterval: const Duration(days: 1),
+      );
+    });
+
+    tearDown(() => boards.dispose());
+
+    test('one board per selected remote machine, dropped ones stop', () async {
+      var notified = 0;
+      boards
+        ..addListener(() => notified += 1)
+        ..setVisible(true)
+        ..sync([
+          HomeBoardEntry(connected('a')),
+          HomeBoardEntry(connected('b')),
+          HomeBoardEntry(buildHost('local').copyWith(isLocal: true)),
+        ]);
+      await pumpEventQueue();
+      expect(boards.hostIds, ['a', 'b']);
+      expect(runnersFor, ['a', 'b']);
+      expect(boards['a']!.state.phase, HomeBoardPhase.ready);
+      expect(boards['b']!.visible, isTrue);
+      expect(notified, greaterThan(0));
+
+      final a = boards['a']!;
+      boards.sync([HomeBoardEntry(connected('b'))]);
+      expect(boards.hostIds, ['b']);
+      expect(boards['a'], isNull);
+      expect(a.state.phase, HomeBoardPhase.ready, reason: 'disposed as is');
+
+      boards.setVisible(false);
+      expect(boards['b']!.visible, isFalse);
+    });
+
+    test('a never-connected machine waits until marked as reached', () async {
+      boards
+        ..setVisible(true)
+        ..sync([HomeBoardEntry(buildHost('n'))]);
+      await pumpEventQueue();
+      expect(boards['n']!.state.phase, HomeBoardPhase.awaitingRequest);
+      expect(runnersFor, isEmpty);
+
+      boards.sync([HomeBoardEntry(buildHost('n'), connectedBefore: true)]);
+      await pumpEventQueue();
+      expect(boards['n']!.state.phase, HomeBoardPhase.ready);
+    });
+  });
 }

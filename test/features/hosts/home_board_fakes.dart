@@ -32,7 +32,28 @@ abstract final class HerdrFixtures {
       '{"error":{"code":"server_not_running","message":"no server"}}';
 }
 
-/// Answers `herdr` commands by what they ask for; records every command.
+/// Canned `tmux` output (tab-separated `list-sessions` / `list-windows`).
+abstract final class TmuxFixtures {
+  static const sessions =
+      'main\t1\t3\t1790229500\n'
+      'build\t0\t1\t1790229600\n';
+
+  static const windows =
+      '0\tzsh\t1\t0\n'
+      '1\tclaude\t2\t1\n'
+      '2\tlogs\t1\t0\n';
+
+  static const noServer = 'no server running on /tmp/tmux-1000/default';
+}
+
+/// Herdr answers of a machine without Herdr (`command not found`).
+abstract final class HerdrMissing {
+  static const stderr = 'sh: 1: herdr: not found';
+  static const exitCode = 127;
+}
+
+/// Answers `herdr` and `tmux` commands by what they ask for; records every
+/// command.
 class HerdrFakeRunner implements AgentCommandRunner {
   HerdrFakeRunner({
     this.workspaces = HerdrFixtures.workspaces,
@@ -40,14 +61,33 @@ class HerdrFakeRunner implements AgentCommandRunner {
     this.agents = HerdrFixtures.agents,
     this.workspaceExitCode = 0,
     this.workspaceStderr = '',
+    this.tmuxSessions = '',
+    this.tmuxExitCode = 0,
+    this.tmuxStderr = '',
+    this.tmuxWindows = TmuxFixtures.windows,
     this.error,
   });
+
+  /// A machine with tmux only: Herdr is not installed.
+  HerdrFakeRunner.tmuxOnly({this.tmuxSessions = TmuxFixtures.sessions})
+    : workspaces = '',
+      tabs = '',
+      agents = '',
+      workspaceExitCode = HerdrMissing.exitCode,
+      workspaceStderr = HerdrMissing.stderr,
+      tmuxExitCode = 0,
+      tmuxStderr = '',
+      tmuxWindows = TmuxFixtures.windows;
 
   String workspaces;
   String tabs;
   String agents;
   int workspaceExitCode;
   String workspaceStderr;
+  String tmuxSessions;
+  int tmuxExitCode;
+  String tmuxStderr;
+  String tmuxWindows;
 
   /// Thrown by every call when set (a dead connection).
   Object? error;
@@ -66,9 +106,27 @@ class HerdrFakeRunner implements AgentCommandRunner {
       // ignore: only_throw_errors
       throw failure;
     }
+    if (command.startsWith('tmux list-sessions')) {
+      return AgentCommandResult(
+        stdout: tmuxSessions,
+        stderr: tmuxStderr,
+        exitCode: tmuxExitCode,
+      );
+    }
+    if (command.startsWith('tmux list-windows')) {
+      return AgentCommandResult(stdout: tmuxWindows, stderr: '', exitCode: 0);
+    }
     if (command.contains('workspace list')) {
       return AgentCommandResult(
         stdout: workspaces,
+        stderr: workspaceStderr,
+        exitCode: workspaceExitCode,
+      );
+    }
+    if (workspaceExitCode == HerdrMissing.exitCode &&
+        command.contains('herdr')) {
+      return AgentCommandResult(
+        stdout: '',
         stderr: workspaceStderr,
         exitCode: workspaceExitCode,
       );

@@ -3,14 +3,18 @@
 // Claude Code statusline integration: context and rate-limit usage per session.
 //
 // Claude Code pipes a JSON document to the statusline command on stdin
-// (https://code.claude.com/docs/en/statusline). `conductore-hostd statusline`
-// turns it into a `usage` record on the session and prints a status line,
-// either its own or, with --chain, the output of the user's previous
-// statusline command fed the same stdin.
+// (https://code.claude.com/docs/en/statusline). bin/conductore-statusline
+// (sh) spools it for the daemon, which maps it into a `usage` record with
+// usageFrom(), and prints a status line: its own (the sh twin of
+// defaultLine()) or, with --chain, the output of the user's previous
+// statusline command fed the same stdin. `conductore-hostd statusline` is
+// the Node version from 0.3; install migrates it to the sh one.
 
 const path = require('path')
 
-const MARK = /(^|[/'" ])conductore-hostd'? statusline( |$)/
+// Ours: the sh client, or the Node command of 0.3.
+const MARK = /(^|[/'" ])(conductore-statusline|conductore-hostd'? statusline)'?( |$)/
+const LEGACY = /(^|[/'" ])conductore-hostd'? statusline( |$)/
 
 function num (v) {
   return typeof v === 'number' && Number.isFinite(v) ? v : null
@@ -74,8 +78,9 @@ function defaultLine (input) {
 
 const quote = s => `'${s.replace(/'/g, "'\\''")}'`
 
-function command (hostdBin, chain) {
-  return `${quote(hostdBin)} statusline` + (chain ? ` --chain ${quote(chain)}` : '')
+// slBin: path of bin/conductore-statusline.
+function command (slBin, chain) {
+  return quote(slBin) + (chain ? ` --chain ${quote(chain)}` : '')
 }
 
 function isOurs (statusLine) {
@@ -85,26 +90,26 @@ function isOurs (statusLine) {
 // The wrapped command of one of our statusLine entries, or null.
 function chainOf (statusLine) {
   if (!isOurs(statusLine)) return null
-  const m = /statusline --chain '((?:[^']|'\\'')*)'\s*$/.exec(statusLine.command)
+  const m = /statusline'? --chain '((?:[^']|'\\'')*)'\s*$/.exec(statusLine.command)
   return m ? m[1].replace(/'\\''/g, "'") : null
 }
 
 // Sets statusLine to ours: plain when unset, wrapping the user's command with
 // --chain otherwise (its other fields, e.g. padding, are kept). Idempotent.
 // Returns { settings, action: 'set' | 'wrapped' | 'updated' | 'unchanged' }.
-function merge (settings, hostdBin) {
+function merge (settings, slBin) {
   const out = JSON.parse(JSON.stringify(settings || {}))
   const current = out.statusLine
   let action
   if (!current || typeof current !== 'object' || typeof current.command !== 'string' || !current.command.trim()) {
-    out.statusLine = { type: 'command', command: command(hostdBin) }
+    out.statusLine = { type: 'command', command: command(slBin) }
     action = 'set'
   } else if (isOurs(current)) {
-    const next = command(hostdBin, chainOf(current))
+    const next = command(slBin, chainOf(current))
     action = next === current.command ? 'unchanged' : 'updated'
     out.statusLine = { ...current, command: next }
   } else {
-    out.statusLine = { ...current, type: 'command', command: command(hostdBin, current.command) }
+    out.statusLine = { ...current, type: 'command', command: command(slBin, current.command) }
     action = 'wrapped'
   }
   return { settings: out, action }
@@ -125,7 +130,8 @@ function describe (settings) {
   if (!sl) return { wired: false, detail: 'not set (usage is not reported)' }
   if (!isOurs(sl)) return { wired: false, detail: `another statusline is set: ${sl.command}; run install to wrap it` }
   const chain = chainOf(sl)
-  return { wired: true, detail: chain ? `wired, wrapping: ${chain}` : 'wired' }
+  const legacy = LEGACY.test(sl.command) ? ' (Node statusline from 0.3; run install to switch to the sh one)' : ''
+  return { wired: true, detail: (chain ? `wired, wrapping: ${chain}` : 'wired') + legacy }
 }
 
 module.exports = { usageFrom, defaultLine, command, isOurs, chainOf, merge, unmerge, describe, windowLabel }

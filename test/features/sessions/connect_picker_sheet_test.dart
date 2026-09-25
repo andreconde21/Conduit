@@ -4,6 +4,7 @@ import 'package:conduit/features/sessions/domain/connect_preferences.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/presentation/connect_picker_sheet.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../support/test_doubles.dart';
@@ -57,6 +58,65 @@ void main() {
     );
     await tester.pumpAndSettle();
     return (runner, picked);
+  }
+
+  for (final scale in [1.0, 1.3]) {
+    testWidgets('tab labels stay on one line at 360 dp, text scale $scale', (
+      tester,
+    ) async {
+      // A 360 dp wide phone (Galaxy M53 in its narrowest display setting).
+      tester.view.physicalSize = const Size(1080, 2340);
+      tester.view.devicePixelRatio = 3;
+      addTearDown(tester.view.reset);
+      final runner = ScriptedAgentCommandRunner([tmuxOutput, herdrOutput]);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MediaQuery.withClampedTextScaling(
+            minScaleFactor: scale,
+            maxScaleFactor: scale,
+            child: Scaffold(
+              body: ConnectPickerSheet(
+                host: buildHost('h'),
+                runner: runner,
+                onPicked: (_) {},
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+
+      final tabs = tester.getRect(
+        find.byKey(const ValueKey('connect-picker-tabs')),
+      );
+      for (final label in ['Tmux', 'Herdr', 'Recent', 'Skip']) {
+        final text = find.text(label);
+        expect(text, findsOneWidget, reason: label);
+        final paragraph = tester.renderObject<RenderParagraph>(text);
+        final lineHeight = paragraph.text.style!.fontSize! * scale * 1.6;
+        expect(
+          paragraph.size.height,
+          lessThan(lineHeight),
+          reason: '$label wraps onto a second line',
+        );
+        final rect = tester.getRect(text);
+        expect(rect.right, lessThanOrEqualTo(360), reason: label);
+        if (label != 'Skip') {
+          expect(rect.left, greaterThanOrEqualTo(tabs.left), reason: label);
+          expect(rect.right, lessThanOrEqualTo(tabs.right), reason: label);
+        }
+      }
+      // The official logos sit on the tabs.
+      expect(
+        find.byKey(const ValueKey('multiplexer-icon-tmux')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('multiplexer-icon-herdr')),
+        findsOneWidget,
+      );
+    });
   }
 
   testWidgets('lists tmux sessions with attached and active badges', (
