@@ -171,7 +171,7 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   /// A listenable for the pages: this controller and the machine list.
-  Listenable get changes => Listenable.merge([this, _hosts]);
+  late final Listenable changes = Listenable.merge([this, _hosts]);
 
   /// Completes once the saved setup has been read.
   Future<void> get loaded => _loaded.future;
