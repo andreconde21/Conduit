@@ -28,6 +28,7 @@ import 'package:conduit/features/live_preview/data/secure_live_preview_port_stor
 import 'package:conduit/features/live_preview/data/ssh_port_forwarder.dart';
 import 'package:conduit/features/live_preview/domain/dev_server_detection.dart';
 import 'package:conduit/features/live_preview/domain/live_preview_port_store.dart';
+import 'package:conduit/features/live_preview/domain/port_forward.dart';
 import 'package:conduit/features/live_preview/domain/preview_screenshot.dart';
 import 'package:conduit/features/live_preview/presentation/live_preview_controller.dart';
 import 'package:conduit/features/live_preview/presentation/live_preview_port_dialog.dart';
@@ -78,6 +79,7 @@ import 'package:conduit/features/terminal/presentation/widgets/recent_directorie
 import 'package:conduit/features/terminal/presentation/widgets/terminal_header.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_link_sheet.dart';
 import 'package:conduit/features/terminal/presentation/widgets/terminal_surface.dart';
+import 'package:conduit/features/this_computer/data/host_channels.dart';
 import 'package:conduit/features/voice/data/platform_speech_recognizer.dart';
 import 'package:conduit/features/voice/domain/speech_recognizer.dart';
 import 'package:conduit/features/voice/presentation/dictation_button.dart';
@@ -105,6 +107,7 @@ class TerminalPage extends StatefulWidget {
     this.previewWatcherFactory,
     this.promptImagePreparer,
     this.homeBoards,
+    this.hostChannels,
     super.key,
   });
 
@@ -145,6 +148,10 @@ class TerminalPage extends StatefulWidget {
   /// The home page's boards (tmux sessions and Herdr workspaces per
   /// machine), for the quick switcher's other workspaces.
   final HomeBoards? homeBoards;
+
+  /// Commands and port forwards per machine, SSH or This computer. Null
+  /// means SSH through [hostKeyVerifier].
+  final HostChannels? hostChannels;
 
   @override
   State<TerminalPage> createState() => _TerminalPageState();
@@ -359,7 +366,7 @@ class _TerminalPageState extends State<TerminalPage>
   /// the page can open extra connections to, without a hardware key (each
   /// poll would ask for a touch).
   bool _canWatchPreview(TerminalSessionController session) =>
-      (widget.hostKeyVerifier != null ||
+      (_hasSessionTools(session.host) ||
           widget.previewWatcherFactory != null) &&
       !session.host.isLocal &&
       session.host.authMethod != SshAuthMethod.hardwareKey;
@@ -405,7 +412,32 @@ class _TerminalPageState extends State<TerminalPage>
       final (runner, :owned) = attention.runnerFor(session.host);
       return owned ? runner : _BorrowedRunner(runner);
     }
-    return SshAgentCommandRunner(verifier!, session.host);
+    return _commandRunnerFor(session.host) ??
+        SshAgentCommandRunner(verifier!, session.host);
+  }
+
+  /// Whether the page can open side channels (git, preview) to [host].
+  bool _hasSessionTools(SavedHost host) =>
+      !host.isLocal &&
+      (widget.hostChannels != null ||
+          (widget.hostKeyVerifier != null && !host.isThisComputer));
+
+  /// A new command runner for [host] (the caller closes it), or null
+  /// when the page has no way to reach it.
+  AgentCommandRunner? _commandRunnerFor(SavedHost host) {
+    final channels = widget.hostChannels;
+    if (channels != null) return channels.runner(host);
+    final verifier = widget.hostKeyVerifier;
+    if (verifier == null || host.isThisComputer) return null;
+    return SshAgentCommandRunner(verifier, host);
+  }
+
+  PortForwarder? _portForwarderFor(SavedHost host) {
+    final channels = widget.hostChannels;
+    if (channels != null) return channels.portForwarder(host);
+    final verifier = widget.hostKeyVerifier;
+    if (verifier == null || host.isThisComputer) return null;
+    return SshPortForwarder(verifier, host);
   }
 
   /// The Live preview tab of [host], when one is open.
@@ -785,7 +817,7 @@ class _TerminalPageState extends State<TerminalPage>
   }
 
   int? _previewPortFor(TerminalSessionController session, String url) {
-    if (session.host.isLocal || widget.hostKeyVerifier == null) {
+    if (!_hasSessionTools(session.host)) {
       return null;
     }
     return loopbackPreviewPort(url);
@@ -1303,17 +1335,15 @@ class _TerminalPageState extends State<TerminalPage>
   }
 
   void _openGitDiff(TerminalSessionController session) {
-    final verifier = widget.hostKeyVerifier;
-    if (verifier == null) {
+    final host = session.host;
+    final runner = _commandRunnerFor(host);
+    if (runner == null) {
       return;
     }
-    final host = session.host;
     final tab = _fileTabs.add(
       DiffViewTab(
         host: host,
-        controller: DiffViewController(
-          SshGitDiffSource(SshAgentCommandRunner(verifier, host), host),
-        ),
+        controller: DiffViewController(SshGitDiffSource(runner, host)),
       ),
     );
     if (tab is DiffViewTab && tab.controller.phase == DiffViewPhase.idle) {
@@ -1328,11 +1358,10 @@ class _TerminalPageState extends State<TerminalPage>
     int? port,
     String? path,
   }) async {
-    final verifier = widget.hostKeyVerifier;
-    if (verifier == null) {
+    final host = session.host;
+    if (!_hasSessionTools(host)) {
       return;
     }
-    final host = session.host;
     final existing = _fileTabs.tabs
         .whereType<LivePreviewTab>()
         .where((tab) => tab.host.id == host.id)
@@ -1353,10 +1382,10 @@ class _TerminalPageState extends State<TerminalPage>
       return;
     }
     final controller = LivePreviewController(
-      SshPortForwarder(verifier, host),
+      _portForwarderFor(host)!,
       hostId: host.id,
       portStore: widget.livePreviewPortStore,
-      commandRunner: SshAgentCommandRunner(verifier, host),
+      commandRunner: _commandRunnerFor(host),
     );
     final int? chosenPort;
     if (port != null) {
@@ -1647,8 +1676,7 @@ class _TerminalPageState extends State<TerminalPage>
                                   .headerSwipeOpensSessions,
                               onOpenSessionTool:
                                   activeSession != null &&
-                                      widget.hostKeyVerifier != null &&
-                                      !activeSession.host.isLocal
+                                      _hasSessionTools(activeSession.host)
                                   ? (tool) =>
                                         _openSessionTool(activeSession, tool)
                                   : null,
@@ -1824,6 +1852,28 @@ class _TerminalPageState extends State<TerminalPage>
                                 top: 8,
                                 left: 8,
                                 child: _PasteStatusChip(text: status),
+                              ),
+                            if (activeFileTab == null &&
+                                activeSession != null &&
+                                activeSession.runsOnThisComputer &&
+                                activeSession.status ==
+                                    TerminalConnectionStatus.disconnected)
+                              Positioned(
+                                left: 16,
+                                right: 16,
+                                bottom: 16,
+                                child: Center(
+                                  child: _ShellExitedBar(
+                                    key: ValueKey(
+                                      'shell-exited-${activeSession.host.id}',
+                                    ),
+                                    exitCode: activeSession.exitCode,
+                                    onRestart: () async {
+                                      await activeSession.connect();
+                                      _focusNode.requestFocus();
+                                    },
+                                  ),
+                                ),
                               ),
                             if (activeFileTab == null &&
                                 activeSession != null &&
@@ -2337,6 +2387,55 @@ class _PasteStatusChip extends StatelessWidget {
                 fontSize: 12.5,
                 fontWeight: FontWeight.w700,
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Under a shell on "This computer" that ended: how it ended and a way to
+/// start it again.
+class _ShellExitedBar extends StatelessWidget {
+  const _ShellExitedBar({
+    required this.exitCode,
+    required this.onRestart,
+    super.key,
+  });
+
+  final int? exitCode;
+  final VoidCallback onRestart;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final code = exitCode;
+    return Material(
+      color: theme.colorScheme.surfaceContainerHigh,
+      elevation: 3,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 6, 6, 6),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.power_settings_new_rounded,
+              size: 18,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 10),
+            Text(
+              code == null ? 'Shell exited' : 'Exited (code $code)',
+              style: theme.textTheme.bodyMedium,
+            ),
+            const SizedBox(width: 12),
+            FilledButton.tonalIcon(
+              key: const ValueKey('shell-restart'),
+              onPressed: onRestart,
+              icon: const Icon(Icons.restart_alt_rounded, size: 18),
+              label: const Text('Restart'),
             ),
           ],
         ),
