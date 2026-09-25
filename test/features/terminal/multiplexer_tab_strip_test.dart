@@ -409,6 +409,34 @@ void main() {
       await finish(tester, flow);
     });
 
+    testWidgets('the compact label lists every 5 s, the open list every '
+        '2 s', (tester) async {
+      final tmux = FakeTmux(['zsh', 'claude']);
+      final (_, flow) = await pumpPage(
+        tester,
+        const ConnectTarget.tmux('work'),
+        runner: tmux,
+      );
+      int lists() =>
+          tmux.commands.where((c) => c.contains('list-windows')).length;
+      final start = lists();
+      await tester.pump(const Duration(milliseconds: 4500));
+      await run(tester, 1);
+      expect(lists(), start);
+      await tester.pump(const Duration(seconds: 1));
+      await run(tester, 1);
+      expect(lists(), start + 1);
+
+      await tester.tap(inline);
+      await tester.pumpAndSettle();
+      await run(tester, 1);
+      final open = lists();
+      await tester.pump(const Duration(milliseconds: 2100));
+      await run(tester, 1);
+      expect(lists(), greaterThan(open));
+      await finish(tester, flow);
+    });
+
     testWidgets('Ctrl+PageDown moves to the next window', (tester) async {
       final tmux = FakeTmux(['zsh', 'claude', 'logs']);
       final (_, flow) = await pumpPage(

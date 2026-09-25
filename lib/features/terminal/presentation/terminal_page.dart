@@ -1877,6 +1877,10 @@ class _TerminalPageState extends State<TerminalPage>
                             key: ValueKey('mux-tabs-${activeSession.host.id}'),
                             controller: muxTabs,
                             active: _muxLayout != MultiplexerTabsLayout.hidden,
+                            interval:
+                                _muxLayout == MultiplexerTabsLayout.compact
+                                ? MultiplexerTabsController.compactPollInterval
+                                : MultiplexerTabsController.listPollInterval,
                             child:
                                 !_fullscreen &&
                                     _muxLayout == MultiplexerTabsLayout.strip

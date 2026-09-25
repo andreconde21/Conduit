@@ -223,6 +223,9 @@ Future<void> showMultiplexerTabsSheet(
   VoidCallback? onDone,
 }) async {
   unawaited(controller.refresh());
+  // Livelier while the list is open; back to the caller's pace after.
+  final pace = controller.pollInterval;
+  controller.setPollInterval(MultiplexerTabsController.listPollInterval);
   final noun = multiplexerTabNoun(controller);
   await showModalBottomSheet<void>(
     context: context,
@@ -341,6 +344,7 @@ Future<void> showMultiplexerTabsSheet(
       ),
     ),
   );
+  controller.setPollInterval(pace);
   onDone?.call();
 }
 
