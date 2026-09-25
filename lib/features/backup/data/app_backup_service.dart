@@ -13,6 +13,7 @@ import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
 import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
+import 'package:conduit/features/voice/domain/voice_preferences.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:pinenacl/x25519.dart';
@@ -157,6 +158,7 @@ class AppBackupService {
       'restoreSessionsOnLaunch': _themeController.restoreSessionsOnLaunch,
       'terminalGestures': _themeController.terminalGestures.toJson(),
       'speechLanguage': _themeController.speechLanguage,
+      'voice': _themeController.voice.toJson(includeSessions: false),
     };
   }
 
@@ -258,6 +260,13 @@ class AppBackupService {
     final speechLanguage = json['speechLanguage'];
     if (speechLanguage is String) {
       await _themeController.setSpeechLanguage(speechLanguage);
+    }
+
+    final voice = json['voice'];
+    if (voice is Map) {
+      await _themeController.setVoice(
+        VoicePreferences.fromJson(voice, fallback: _themeController.voice),
+      );
     }
   }
 

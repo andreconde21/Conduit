@@ -122,7 +122,9 @@ void main() {
     expect(find.text('rm -rf build'), findsOneWidget);
     expect(find.text('Answer the approval above first'), findsOneWidget);
     await tester.tap(find.widgetWithText(FilledButton, 'Allow'));
-    await tester.pumpAndSettle();
+    // Not pumpAndSettle: Claude works again, so the typing dots animate.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
     expect(decided, [('req-1', PermissionVerdict.allow)]);
     expect(find.text('Allow Bash?'), findsNothing);
   });

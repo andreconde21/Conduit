@@ -6,6 +6,7 @@ import 'package:conduit/core/theme/terminal_pill_items.dart';
 import 'package:conduit/core/theme/theme_preferences_repository.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
 import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
+import 'package:conduit/features/voice/domain/voice_preferences.dart';
 import 'package:flutter/material.dart';
 
 class ThemeController extends ChangeNotifier {
@@ -41,6 +42,7 @@ class ThemeController extends ChangeNotifier {
   TerminalGesturePreferences _terminalGestures =
       TerminalGesturePreferences.defaults;
   String _speechLanguage = '';
+  VoicePreferences _voice = VoicePreferences.defaults;
 
   /// The stored light/dark choice. Omarchy themes are dark or light
   /// themselves, so the app follows [effectiveThemeMode]; this stays for
@@ -99,6 +101,9 @@ class ThemeController extends ChangeNotifier {
   /// BCP-47 tag dictation listens in; empty means the device locale.
   String get speechLanguage => _speechLanguage;
 
+  /// Read-aloud and continuous-dictation settings.
+  VoicePreferences get voice => _voice;
+
   Future<void> load() async {
     final preferences = await _repository.load();
     _themeMode = preferences.themeMode;
@@ -120,6 +125,7 @@ class ThemeController extends ChangeNotifier {
     _restoreSessionsOnLaunch = preferences.restoreSessionsOnLaunch;
     _terminalGestures = preferences.terminalGestures;
     _speechLanguage = preferences.speechLanguage;
+    _voice = preferences.voice;
     _omarchySyncHostId = preferences.omarchySyncHostId;
     _omarchySyncedTheme = preferences.omarchySyncedTheme;
     notifyListeners();
@@ -375,6 +381,15 @@ class ThemeController extends ChangeNotifier {
     await _save();
   }
 
+  Future<void> setVoice(VoicePreferences voice) async {
+    if (_voice == voice) {
+      return;
+    }
+    _voice = voice;
+    notifyListeners();
+    await _save();
+  }
+
   Future<void> _save() {
     return _repository.save(
       ThemePreferences(
@@ -395,6 +410,7 @@ class ThemeController extends ChangeNotifier {
         menuButtonsEnabled: _menuButtonsEnabled,
         terminalGestures: _terminalGestures,
         speechLanguage: _speechLanguage,
+        voice: _voice,
         remoteClipboardEnabled: _remoteClipboardEnabled,
         restoreSessionsOnLaunch: _restoreSessionsOnLaunch,
         omarchySyncHostId: _omarchySyncHostId,

@@ -125,12 +125,21 @@ class ChatAgentStatus {
     this.updatedAt,
     this.endedAt,
     this.pending = const [],
+    this.lastEvent,
+    this.lastToolName,
   });
 
   /// `working`, `waiting_input`, `needs_permission` or `ended`.
   final String state;
   final String? name;
   final String? lastMessage;
+
+  /// The last hook event seen (`UserPromptSubmit`, `PreToolUse`,
+  /// `PostToolUse`, `Stop`, ...), when the companion reports it.
+  final String? lastEvent;
+
+  /// The tool of the last `PreToolUse`/`PostToolUse`, when reported.
+  final String? lastToolName;
   final DateTime? startedAt;
   final DateTime? updatedAt;
   final DateTime? endedAt;
@@ -292,6 +301,8 @@ class TranscriptParser {
       updatedAt: _millis(raw['updatedAt']),
       endedAt: _millis(raw['endedAt']),
       pending: pending,
+      lastEvent: _string(raw['lastEvent']),
+      lastToolName: _string(raw['lastToolName']),
     );
   }
 

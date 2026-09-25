@@ -61,6 +61,7 @@ import 'package:conduit/features/terminal/presentation/recent_directory_tracker.
 import 'package:conduit/features/terminal/presentation/terminal_background_keepalive.dart';
 import 'package:conduit/features/terminal/presentation/terminal_page.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
+import 'package:conduit/features/voice/presentation/voice_settings_scope.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -208,28 +209,31 @@ void main() {
   loadSessionViews(sessionViews);
 
   runApp(
-    SessionViewScope(
-      controller: sessionViews,
-      child: CompanionSetupScope(
-        controller: companionSetup,
-        agentAttention: agentAttention,
-        child: ConduitApp(
-          themeController: themeController,
-          lockController: lockController,
-          hostsController: hostsController,
-          terminalRepository: terminalRepository,
-          workspaceController: workspaceController,
-          localShellController: localShellController,
-          hostKeyVerifier: hostKeyVerifier,
-          promptCoordinator: promptCoordinator,
-          sftpRepository: sftpRepository,
-          sftpBookmarksRepository: sftpBookmarksRepository,
+    VoiceSettingsScope(
+      settings: themeController,
+      child: SessionViewScope(
+        controller: sessionViews,
+        child: CompanionSetupScope(
+          controller: companionSetup,
           agentAttention: agentAttention,
-          backupService: backupService,
-          fileExport: fileExport,
-          connectFlow: connectFlow,
-          shareTarget: shareTarget,
-          sessionRestore: sessionRestore,
+          child: ConduitApp(
+            themeController: themeController,
+            lockController: lockController,
+            hostsController: hostsController,
+            terminalRepository: terminalRepository,
+            workspaceController: workspaceController,
+            localShellController: localShellController,
+            hostKeyVerifier: hostKeyVerifier,
+            promptCoordinator: promptCoordinator,
+            sftpRepository: sftpRepository,
+            sftpBookmarksRepository: sftpBookmarksRepository,
+            agentAttention: agentAttention,
+            backupService: backupService,
+            fileExport: fileExport,
+            connectFlow: connectFlow,
+            shareTarget: shareTarget,
+            sessionRestore: sessionRestore,
+          ),
         ),
       ),
     ),
