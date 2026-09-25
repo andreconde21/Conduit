@@ -5,6 +5,7 @@ import 'package:conduit/features/agent_attention/data/conductore_host_attention_
 import 'package:conduit/features/agent_attention/data/remote_tool_command.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 import 'package:conduit/features/chat_view/domain/chat_transcript.dart';
+import 'package:conduit/features/voice/domain/speech_summary.dart';
 
 /// Why the chat view cannot run on a host.
 enum ChatUnsupportedKind {
@@ -80,6 +81,18 @@ class ConductoreChatClient {
     );
   }
 
+  /// Longest summary asked for, in words.
+  static const summaryWords = 45;
+
+  /// How long the companion may take over a summary.
+  static const summaryTimeout = Duration(seconds: 20);
+
+  /// The answer travels on stdin (never in the command line).
+  static final summarizeCommand = ConductoreHostAttentionProvider.remoteCommand(
+    'summarize --max-words $summaryWords '
+    '--timeout-ms ${summaryTimeout.inMilliseconds}',
+  );
+
   static String interruptCommand(String sessionId) =>
       ConductoreHostAttentionProvider.remoteCommand(
         'interrupt ${shellQuoteArgument(sessionId)}',
@@ -127,6 +140,42 @@ class ConductoreChatClient {
       timeout: _timeout,
     );
     _check(result);
+  }
+
+  /// A short spoken summary of [text] by Claude on the machine. Never
+  /// throws: every failure (an older companion, a runner that cannot pass
+  /// stdin, a dropped connection) is a [SpeechSummaryFailed]. Completing
+  /// [cancel] stops the remote command.
+  Future<SpeechSummaryResult> summarize(
+    String text, {
+    Future<void>? cancel,
+  }) async {
+    final runner = _runner;
+    if (runner is! StdinAgentCommandRunner) {
+      return const SpeechSummaryFailed(SpeechSummaryFailed.unsupported);
+    }
+    try {
+      final result = await runner.runWithStdin(
+        summarizeCommand,
+        stdin: text,
+        // A little longer than the companion's own limit, so its timeout
+        // reply wins.
+        timeout: summaryTimeout + const Duration(seconds: 5),
+        cancel: cancel,
+      );
+      return SpeechSummaryResult.parse(
+        stdout: result.stdout,
+        stderr: result.stderr,
+        exitCode: result.exitCode,
+      );
+    } on AgentCommandCancelled {
+      rethrow;
+    } catch (error) {
+      return SpeechSummaryFailed(
+        SpeechSummaryFailed.unreachable,
+        message: error is AppFailure ? error.userMessage : '$error',
+      );
+    }
   }
 
   static void _check(AgentCommandResult result) {

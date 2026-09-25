@@ -8,6 +8,7 @@ import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/chat_view/data/conductore_chat_client.dart';
 import 'package:conduit/features/chat_view/domain/chat_items.dart';
+import 'package:conduit/features/chat_view/domain/chat_tool_activity.dart';
 import 'package:conduit/features/chat_view/domain/chat_working.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_controller.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_composer.dart';
@@ -147,7 +148,12 @@ class _ChatViewPageState extends State<ChatViewPage>
         tts: tts,
         preferences: () => _settings?.voice ?? VoicePreferences.defaults,
         dictationLanguage: () => _settings?.speechLanguage ?? '',
-      );
+        // On this chat's machine, through the chat's own connection.
+        summarize: (text, cancel) => _chat.summarize(text, cancel: cancel),
+        onNotice: (note) {
+          if (mounted) _tell(note, long: true);
+        },
+      )..addListener(_onSpeakerChanged);
       unawaited(_readAloud!.checkAvailability());
       _chat.addListener(_feedReadAloud);
       widget.dictation?.addListener(_syncDictation);
@@ -183,6 +189,17 @@ class _ChatViewPageState extends State<ChatViewPage>
   void didChangeDependencies() {
     super.didChangeDependencies();
     final readAloud = _readAloud;
+    // The chat on screen holds the speaker; a chat opened on top takes it
+    // (this one then finishes its sentence and keeps quiet), and it comes
+    // back when this route is on top again.
+    if (readAloud != null && (ModalRoute.of(context)?.isCurrent ?? true)) {
+      // After the frame: claiming notifies the other chat's listeners.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && (ModalRoute.of(context)?.isCurrent ?? true)) {
+          readAloud.claim();
+        }
+      });
+    }
     if (readAloud != null && !_readAloudPrimed) {
       _readAloudPrimed = true;
       final voice = _settings?.voice ?? VoicePreferences.defaults;
@@ -206,7 +223,16 @@ class _ChatViewPageState extends State<ChatViewPage>
 
   void _startTalk() {
     FocusManager.instance.primaryFocus?.unfocus();
+    _readAloud?.claim();
     _talk?.start();
+  }
+
+  /// Another chat took the speaker: a Talk loop here would listen and
+  /// answer for the wrong agent.
+  void _onSpeakerChanged() {
+    final readAloud = _readAloud;
+    if (readAloud == null || readAloud.current) return;
+    if (_talk?.active ?? false) _stopTalk();
   }
 
   /// Ends the Talk loop; anything said but not sent goes to the composer.
@@ -260,11 +286,31 @@ class _ChatViewPageState extends State<ChatViewPage>
     }
   }
 
-  void _tell(String message) => ScaffoldMessenger.maybeOf(context)
-    ?..hideCurrentSnackBar()
-    ..showSnackBar(
-      SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
-    );
+  void _tell(String message, {bool long = false}) =>
+      ScaffoldMessenger.maybeOf(context)
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(message),
+            duration: Duration(seconds: long ? 5 : 2),
+          ),
+        );
+
+  ToolActivity get _toolActivity =>
+      _settings?.voice.toolActivity ?? VoicePreferences.defaults.toolActivity;
+
+  ReadAloudLength get _readAloudLength =>
+      _settings?.voice.readAloudLength ??
+      VoicePreferences.defaults.readAloudLength;
+
+  void _setVoice(VoicePreferences Function(VoicePreferences voice) change) {
+    final settings = _settings;
+    if (settings == null) return;
+    unawaited(settings.setVoice(change(settings.voice)));
+  }
+
+  /// Tool groups the user opened (Tool activity: Collapsed).
+  final Set<String> _openGroups = {};
 
   /// The user is acting (sending, answering): stop talking over them.
   void _quiet() => _readAloud?.stop();
@@ -330,7 +376,9 @@ class _ChatViewPageState extends State<ChatViewPage>
     _talk
       ?..removeListener(_onTalkChanged)
       ..dispose();
-    _readAloud?.dispose();
+    _readAloud
+      ?..removeListener(_onSpeakerChanged)
+      ..dispose();
     _composerText.dispose();
     _clock?.cancel();
     _scroll.dispose();
@@ -519,7 +567,8 @@ class _ChatViewPageState extends State<ChatViewPage>
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return ListenableBuilder(
-      listenable: _chat,
+      // Settings too: Tool activity and the read-aloud length show here.
+      listenable: Listenable.merge([_chat, ?_settings]),
       builder: (context, _) {
         final activity = _chat.activity;
         final working = _working;
@@ -581,6 +630,14 @@ class _ChatViewPageState extends State<ChatViewPage>
                   controller: readAloud,
                   onPressed: _toggleReadAloud,
                 ),
+              _ChatMenu(
+                readAloudLength: _readAloud == null ? null : _readAloudLength,
+                toolActivity: _toolActivity,
+                onReadAloudLength: (length) =>
+                    _setVoice((v) => v.copyWith(readAloudLength: length)),
+                onToolActivity: (mode) =>
+                    _setVoice((v) => v.copyWith(toolActivity: mode)),
+              ),
               // Narrow phones: the icon alone keeps room for the title.
               if (MediaQuery.sizeOf(context).width < 400)
                 IconButton(
@@ -759,8 +816,29 @@ class _ChatViewPageState extends State<ChatViewPage>
           busy: _chat.isDeciding(request.id),
           onDecide: (verdict) => _decide(request, verdict),
         ),
-      for (var i = shownCount - 1; i >= 0; i--)
-        _row(items[i], isLast: i == items.length - 1, waiting: waiting),
+      for (final entry in ChatToolActivity.arrange(
+        items.sublist(0, shownCount),
+        _toolActivity,
+      ).reversed)
+        switch (entry) {
+          ChatItemEntry(:final item) => _row(
+            item,
+            isLast: identical(item, items.last),
+            waiting: waiting,
+          ),
+          final ChatToolGroup group => ChatToolGroupRow(
+            key: ValueKey(group.id),
+            group: group,
+            expanded: _openGroups.contains(group.id),
+            onToggle: () => setState(() {
+              if (!_openGroups.remove(group.id)) _openGroups.add(group.id);
+            }),
+            children: [
+              for (final item in group.items)
+                _row(item, isLast: false, waiting: waiting),
+            ],
+          ),
+        },
       if (_chat.hasOlder)
         Padding(
           padding: const EdgeInsets.all(12),
@@ -908,6 +986,26 @@ class _ReadAloudToggle extends StatelessWidget {
           );
         }
         final on = controller.enabled;
+        if (controller.summarizing) {
+          // Waiting for Claude's summary: a quiet ring, nothing spoken.
+          return IconButton(
+            key: const ValueKey('chat-read-aloud'),
+            tooltip: 'Summarizing…',
+            onPressed: onPressed,
+            style: IconButton.styleFrom(
+              backgroundColor: colors.primaryContainer,
+              foregroundColor: colors.onPrimaryContainer,
+            ),
+            icon: const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(
+                key: ValueKey('chat-summarizing'),
+                strokeWidth: 2,
+              ),
+            ),
+          );
+        }
         return IconButton(
           key: const ValueKey('chat-read-aloud'),
           tooltip: on ? 'Stop reading replies aloud' : 'Read replies aloud',
@@ -927,6 +1025,66 @@ class _ReadAloudToggle extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// The header menu: quick switches for the read-aloud length and Tool
+/// activity (the same settings as Settings › Chat & Voice).
+class _ChatMenu extends StatelessWidget {
+  const _ChatMenu({
+    required this.readAloudLength,
+    required this.toolActivity,
+    required this.onReadAloudLength,
+    required this.onToolActivity,
+  });
+
+  /// Null hides the read-aloud choices (no speech on this device).
+  final ReadAloudLength? readAloudLength;
+  final ToolActivity toolActivity;
+  final ValueChanged<ReadAloudLength> onReadAloudLength;
+  final ValueChanged<ToolActivity> onToolActivity;
+
+  @override
+  Widget build(BuildContext context) {
+    final length = readAloudLength;
+    return PopupMenuButton<Object>(
+      key: const ValueKey('chat-menu'),
+      tooltip: 'Chat options',
+      onSelected: (value) => switch (value) {
+        final ReadAloudLength length => onReadAloudLength(length),
+        final ToolActivity mode => onToolActivity(mode),
+        _ => null,
+      },
+      itemBuilder: (context) => [
+        if (length != null) ...[
+          const PopupMenuItem<Object>(
+            enabled: false,
+            height: 32,
+            child: Text('Read aloud'),
+          ),
+          for (final option in ReadAloudLength.values)
+            CheckedPopupMenuItem<Object>(
+              key: ValueKey('chat-menu-length-${option.name}'),
+              value: option,
+              checked: option == length,
+              child: Text(option.label),
+            ),
+          const PopupMenuDivider(),
+        ],
+        const PopupMenuItem<Object>(
+          enabled: false,
+          height: 32,
+          child: Text('Tool activity'),
+        ),
+        for (final option in ToolActivity.values)
+          CheckedPopupMenuItem<Object>(
+            key: ValueKey('chat-menu-tools-${option.name}'),
+            value: option,
+            checked: option == toolActivity,
+            child: Text(option.label),
+          ),
+      ],
     );
   }
 }

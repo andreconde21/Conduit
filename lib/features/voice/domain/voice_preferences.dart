@@ -1,6 +1,40 @@
 import 'dart:convert';
 
-/// Read-aloud and continuous-dictation settings (Settings → Speech).
+/// How much of Claude's final answer is read aloud.
+enum ReadAloudLength {
+  /// The first two or three sentences, then "More on screen."
+  brief('Brief'),
+
+  /// The whole answer.
+  full('Full'),
+
+  /// A short summary written by Claude on the machine (the companion's
+  /// `summarize`), falling back to [brief].
+  summary('Claude summary');
+
+  const ReadAloudLength(this.label);
+
+  final String label;
+}
+
+/// How Chat View shows tool calls and shell commands.
+enum ToolActivity {
+  /// Every tool call as its own card.
+  all('Show all'),
+
+  /// Consecutive tool calls fold into one row that expands on tap.
+  collapsed('Collapsed'),
+
+  /// No tool rows (approvals, questions and errors always show).
+  hidden('Hidden');
+
+  const ToolActivity(this.label);
+
+  final String label;
+}
+
+/// Read-aloud and continuous-dictation settings (Settings → Speech), and
+/// how Chat View shows tool activity.
 ///
 /// Stored as one JSON value next to the other app preferences, so adding a
 /// field never needs a new storage key. Unknown or malformed fields fall
@@ -18,6 +52,8 @@ class VoicePreferences {
     this.muteRestartBeeps = false,
     this.readAloudSessions = const {},
     this.talkSendSilenceSeconds = defaultTalkSendSeconds,
+    this.readAloudLength = ReadAloudLength.brief,
+    this.toolActivity = ToolActivity.collapsed,
   });
 
   static const defaults = VoicePreferences();
@@ -78,6 +114,12 @@ class VoicePreferences {
   /// Talk mode sends what was said after this long a pause.
   final int talkSendSilenceSeconds;
 
+  /// How much of each final answer is read aloud.
+  final ReadAloudLength readAloudLength;
+
+  /// How Chat View shows tool calls.
+  final ToolActivity toolActivity;
+
   Duration get dictationSilence => Duration(seconds: dictationSilenceSeconds);
   Duration get dictationMaxSession => Duration(minutes: dictationMaxMinutes);
 
@@ -113,6 +155,8 @@ class VoicePreferences {
     bool? muteRestartBeeps,
     Map<String, bool>? readAloudSessions,
     int? talkSendSilenceSeconds,
+    ReadAloudLength? readAloudLength,
+    ToolActivity? toolActivity,
   }) {
     return VoicePreferences(
       readAloudByDefault: readAloudByDefault ?? this.readAloudByDefault,
@@ -137,6 +181,8 @@ class VoicePreferences {
             minTalkSendSeconds,
             maxTalkSendSeconds,
           ),
+      readAloudLength: readAloudLength ?? this.readAloudLength,
+      toolActivity: toolActivity ?? this.toolActivity,
     );
   }
 
@@ -153,6 +199,8 @@ class VoicePreferences {
     'dictationMaxMinutes': dictationMaxMinutes,
     'muteRestartBeeps': muteRestartBeeps,
     'talkSendSilenceSeconds': talkSendSilenceSeconds,
+    'readAloudLength': readAloudLength.name,
+    'toolActivity': toolActivity.name,
     if (includeSessions) 'readAloudSessions': readAloudSessions,
   };
 
@@ -178,6 +226,14 @@ class VoicePreferences {
     int integer(String key, int current) {
       final value = raw[key];
       return value is num ? value.round() : current;
+    }
+
+    T named<T extends Enum>(String key, List<T> values, T current) {
+      final value = raw[key];
+      for (final candidate in values) {
+        if (candidate.name == value) return candidate;
+      }
+      return current;
     }
 
     final rawSessions = raw['readAloudSessions'];
@@ -206,6 +262,16 @@ class VoicePreferences {
       talkSendSilenceSeconds: integer(
         'talkSendSilenceSeconds',
         fallback.talkSendSilenceSeconds,
+      ),
+      readAloudLength: named(
+        'readAloudLength',
+        ReadAloudLength.values,
+        fallback.readAloudLength,
+      ),
+      toolActivity: named(
+        'toolActivity',
+        ToolActivity.values,
+        fallback.toolActivity,
       ),
       readAloudSessions: rawSessions is Map
           ? {

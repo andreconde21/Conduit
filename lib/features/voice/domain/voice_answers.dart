@@ -134,4 +134,21 @@ abstract final class VoiceAnswers {
     }
     return null;
   }
+
+  static const _more = [
+    'more',
+    'read more',
+    'continue',
+    'go on',
+    'keep going',
+    'keep reading',
+    'mais',
+    'continua',
+    'continuar',
+  ];
+
+  /// Whether [spoken] asks to hear the rest of a brief reply ("more",
+  /// "read more", "continue"). Only the whole phrase counts: "continue
+  /// with the tests" is a prompt.
+  static bool isMore(String spoken) => _more.contains(_normalize(spoken));
 }

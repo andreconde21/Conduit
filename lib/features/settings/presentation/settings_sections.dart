@@ -27,6 +27,7 @@ import 'package:conduit/features/terminal/presentation/widgets/desktop_shortcuts
 import 'package:conduit/features/terminal/presentation/widgets/pill_configurator_sheet.dart';
 import 'package:conduit/features/this_computer/domain/local_shell_launch.dart';
 import 'package:conduit/features/usage/presentation/usage_widgets.dart';
+import 'package:conduit/features/voice/domain/voice_preferences.dart';
 import 'package:conduit/features/voice/presentation/speech_settings_controls.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -284,6 +285,26 @@ class SettingsSectionBody extends StatelessWidget {
           'agent gets it right away. Off: the text is only inserted.',
       value: theme.composeSubmitEnter,
       onChanged: theme.setComposeSubmitEnter,
+    ),
+    _gap,
+    SettingsSegmentCard<ToolActivity>(
+      key: const ValueKey('chat-tool-activity'),
+      icon: Icons.handyman_outlined,
+      title: 'Tool activity',
+      description: switch (theme.voice.toolActivity) {
+        ToolActivity.all => 'Chat mode shows every tool call as its own card.',
+        ToolActivity.collapsed =>
+          'Tool calls in a row fold into one line, like "Ran 4 commands, '
+              'edited 2 files". Tap it to see them.',
+        ToolActivity.hidden =>
+          'Tool calls are not shown. Approvals, questions and errors always '
+              'are.',
+      },
+      values: ToolActivity.values,
+      label: (mode) => mode.label,
+      selected: theme.voice.toolActivity,
+      onChanged: (mode) =>
+          theme.setVoice(theme.voice.copyWith(toolActivity: mode)),
     ),
     _gap,
     if (PlatformFeatures.dictation || PlatformFeatures.textToSpeech) ...[

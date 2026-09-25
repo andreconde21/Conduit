@@ -83,6 +83,12 @@ void main() {
     expect(find.text('Fix the **tests**'), findsOneWidget);
     expect(find.textContaining('Running them now.'), findsOneWidget);
     expect(find.text('Thought'), findsOneWidget);
+    // Tool activity is Collapsed by default: the run is one row that
+    // opens on tap.
+    expect(find.text('Ran 1 command, edited 1 file'), findsOneWidget);
+    expect(find.text('flutter test'), findsNothing);
+    await tester.tap(find.text('Ran 1 command, edited 1 file'));
+    await tester.pump();
     // Bash failure flagged with its exit code and output tail.
     expect(find.text('flutter test'), findsOneWidget);
     expect(find.text('exit 1'), findsOneWidget);

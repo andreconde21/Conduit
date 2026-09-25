@@ -224,6 +224,50 @@ class _SpeechSettingsControlsState extends State<SpeechSettingsControls> {
                   onChanged: (value) =>
                       _update((v) => v.copyWith(readAloudByDefault: value)),
                 ),
+                Padding(
+                  key: const ValueKey('speech-read-aloud-length'),
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'How much to read',
+                        style: theme.textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(switch (voice.readAloudLength) {
+                        ReadAloudLength.brief =>
+                          'The first two or three sentences, then "More on '
+                              'screen". In Talk, say "more" for the rest.',
+                        ReadAloudLength.full =>
+                          'The whole answer. Code blocks and tables become a '
+                              'short cue.',
+                        ReadAloudLength.summary =>
+                          'A short summary written by Claude on the machine '
+                              '(companion 0.7.0 or later), else the brief '
+                              'version.',
+                      }, style: muted),
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
+                        child: SegmentedButton<ReadAloudLength>(
+                          segments: [
+                            for (final length in ReadAloudLength.values)
+                              ButtonSegment(
+                                value: length,
+                                label: Text(length.label),
+                              ),
+                          ],
+                          selected: {voice.readAloudLength},
+                          onSelectionChanged: (selection) => _update(
+                            (v) =>
+                                v.copyWith(readAloudLength: selection.single),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
                 ListTile(
                   key: const ValueKey('speech-tts-language'),
                   leading: const Icon(Icons.translate_rounded),

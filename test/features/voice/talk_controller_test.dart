@@ -305,8 +305,75 @@ void main() {
     await settle(tester);
     tts.done();
     await settle(tester, const Duration(milliseconds: 500));
-    expect(tts.spoken, ['Bye.']);
+    expect(tts.spoken, ['Bye.', 'That session ended.']);
+    expect(talk.phase, TalkPhase.speaking);
+    final starts = mic.starts.length;
+    tts.done();
+    await settle(tester, const Duration(milliseconds: 500));
     expect(talk.phase, TalkPhase.off);
+    expect(mic.starts, hasLength(starts), reason: 'no listening to it');
+    expect(readAloud.conversation, isFalse);
+  });
+
+  testWidgets('a session that ends while listening says so and stops', (
+    tester,
+  ) async {
+    await setUpTalk(tester);
+    talk.start();
+    await settle(tester);
+    expect(talk.phase, TalkPhase.listening);
+    final thread = [prompt('u0', 'hi'), reply('a0', 'Hello.')];
+    poll(thread, const [], 'ended');
+    await settle(tester);
+    expect(dictation.isActive, isFalse);
+    expect(tts.spoken, ['That session ended.']);
+    tts.done();
+    await settle(tester, const Duration(milliseconds: 500));
+    expect(talk.phase, TalkPhase.off);
+    // Later polls of the dead session do nothing.
+    poll(thread, const [], 'ended');
+    await settle(tester, const Duration(seconds: 30));
+    expect(tts.spoken, hasLength(1));
+    expect(talk.phase, TalkPhase.off);
+  });
+
+  testWidgets('"more" reads the rest of a brief reply instead of sending', (
+    tester,
+  ) async {
+    await setUpTalk(tester);
+    talk.start();
+    await settle(tester);
+    mic.say('explain the plan');
+    await settle(tester, const Duration(seconds: 5));
+    expect(sent, ['explain the plan']);
+    final working = [
+      prompt('u0', 'hi'),
+      reply('a0', 'Hello.'),
+      prompt('u1', 'explain the plan'),
+    ];
+    poll(working, const [], 'working');
+    await settle(tester);
+    poll([...working, reply('a1', 'One. Two. Three. Four is the last part.')]);
+    await settle(tester);
+    expect(tts.spoken, ['One. Two. Three. More on screen.']);
+    tts.done();
+    await settle(tester, const Duration(milliseconds: 500));
+    expect(talk.phase, TalkPhase.listening);
+
+    mic.say('read more');
+    await settle(tester, const Duration(seconds: 3));
+    expect(tts.spoken.last, 'Four is the last part.');
+    expect(talk.phase, TalkPhase.speaking);
+    tts.done();
+    await settle(tester, const Duration(milliseconds: 500));
+    expect(talk.phase, TalkPhase.listening);
+    expect(sent, ['explain the plan'], reason: '"more" is not a prompt');
+
+    // Nothing more to read: "continue" goes to Claude.
+    mic.say('continue');
+    await settle(tester, const Duration(seconds: 5));
+    expect(sent, ['explain the plan', 'continue']);
+    talk.stop();
   });
 
   testWidgets('no microphone permission stops the loop', (tester) async {

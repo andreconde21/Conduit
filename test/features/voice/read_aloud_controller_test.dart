@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/chat_view/domain/chat_items.dart';
+import 'package:conduit/features/voice/domain/speech_summary.dart';
 import 'package:conduit/features/voice/domain/text_to_speech.dart';
 import 'package:conduit/features/voice/domain/voice_preferences.dart';
 import 'package:conduit/features/voice/presentation/read_aloud_controller.dart';
@@ -81,13 +84,42 @@ void main() {
     expect(tts.pitch, 0.8);
   });
 
-  test('long answers are capped', () async {
+  test('brief (the default) reads the first sentences; more reads the '
+      'rest', () async {
     controller.observe([prompt('u1')], const [], 'working');
     final long = List.filled(60, 'This sentence is filler.').join(' ');
     controller.observe([prompt('u1'), reply('a', long)], const [], 'ended');
     await pumpEventQueue();
-    expect(tts.spoken.single, endsWith('…the rest is on screen.'));
-    expect(tts.spoken.single.length, lessThan(700));
+    expect(
+      tts.spoken.single,
+      'This sentence is filler. This sentence is filler. '
+      'This sentence is filler. More on screen.',
+    );
+    expect(controller.hasMore, isTrue);
+    tts.done();
+    await pumpEventQueue();
+    expect(controller.more(), isTrue);
+    await pumpEventQueue();
+    expect(tts.spoken, hasLength(2));
+    expect(tts.spoken.last, startsWith('This sentence is filler.'));
+    expect(tts.spoken.last.length, lessThanOrEqualTo(240));
+    expect(controller.hasMore, isFalse);
+    expect(controller.more(), isFalse);
+  });
+
+  test('full reads the whole answer in sentence-sized utterances', () async {
+    prefs = prefs.copyWith(readAloudLength: ReadAloudLength.full);
+    controller.observe([prompt('u1')], const [], 'working');
+    final long = List.filled(30, 'This sentence is filler.').join(' ');
+    controller.observe([prompt('u1'), reply('a', long)], const [], 'ended');
+    await pumpEventQueue();
+    for (var i = 0; i < 10 && controller.busy; i++) {
+      tts.done();
+      await pumpEventQueue();
+    }
+    expect(tts.spoken.join(' '), long);
+    expect(tts.spoken.every((u) => u.length <= 240), isTrue);
+    expect(controller.hasMore, isFalse);
   });
 
   test('announces approvals once and open questions', () async {
@@ -316,7 +348,8 @@ void main() {
       preferences: () => prefs,
       enabled: true,
     );
-    final long = List.filled(24, 'This sentence is filler.').join(' ');
+    prefs = prefs.copyWith(readAloudLength: ReadAloudLength.full);
+    final long = List.filled(9, 'This sentence is filler.').join(' ');
     c.observe([prompt('u1')], const [], 'working');
     c.observe([prompt('u1')], const [request], 'needs_permission');
     await tester.pump();
@@ -337,11 +370,228 @@ void main() {
     // and speaks slowly.
     await tester.pump(const Duration(seconds: 9));
     tts.emit(TtsStarted(tts.ids.last));
-    await tester.pump(const Duration(seconds: 75));
+    await tester.pump(const Duration(seconds: 50));
     expect(tts.spoken, hasLength(2), reason: 'still speaking: never cut');
     tts.done();
     await tester.pump();
     expect(tts.spoken, hasLength(3));
     c.dispose();
+  });
+
+  group('Claude summary', () {
+    late List<(String, Future<void>)> asked;
+    late Completer<SpeechSummaryResult> answer;
+    late List<String> notes;
+    late ReadAloudController summarizing;
+    var cancelled = 0;
+
+    setUp(() {
+      prefs = prefs.copyWith(readAloudLength: ReadAloudLength.summary);
+      asked = [];
+      notes = [];
+      cancelled = 0;
+      answer = Completer();
+      summarizing = ReadAloudController(
+        tts: tts,
+        preferences: () => prefs,
+        enabled: true,
+        summarize: (text, cancel) {
+          asked.add((text, cancel));
+          unawaited(cancel.then((_) => cancelled += 1));
+          return answer.future;
+        },
+        onNotice: notes.add,
+      );
+      summarizing.observe([prompt('u1')], const [], 'working');
+    });
+
+    tearDown(() => summarizing.dispose());
+
+    final long = List.filled(8, 'This sentence is filler.').join(' ');
+    final thread = [prompt('u1'), reply('a', long)];
+
+    test('speaks nothing while fetching, then the summary; more reads the '
+        'whole answer', () async {
+      summarizing.observe(thread, const [], 'waiting_input');
+      await pumpEventQueue();
+      expect(asked.single.$1, long);
+      expect(summarizing.summarizing, isTrue);
+      expect(summarizing.busy, isTrue, reason: 'Talk waits for it');
+      expect(tts.spoken, isEmpty);
+
+      answer.complete(const SpeechSummary('Fillers, eight of them.'));
+      await pumpEventQueue();
+      expect(summarizing.summarizing, isFalse);
+      expect(tts.spoken, ['Fillers, eight of them.']);
+      expect(notes, isEmpty);
+      tts.done();
+      await pumpEventQueue();
+      expect(summarizing.more(), isTrue);
+      await pumpEventQueue();
+      expect(tts.spoken.last, startsWith('This sentence is filler.'));
+    });
+
+    test(
+      'a failure reads the brief version with a note, once per reason',
+      () async {
+        answer.complete(
+          const SpeechSummaryFailed(SpeechSummaryFailed.outdated),
+        );
+        summarizing.observe(thread, const [], 'waiting_input');
+        await pumpEventQueue();
+        expect(tts.spoken.single, endsWith('More on screen.'));
+        expect(notes.single, contains('0.7.0'));
+
+        tts.done();
+        final next = [...thread, prompt('u2'), reply('b', long)];
+        summarizing.observe(next, const [], 'working');
+        summarizing.observe(next, const [], 'waiting_input');
+        await pumpEventQueue();
+        expect(tts.spoken, hasLength(2));
+        expect(notes, hasLength(1), reason: 'the note shows once');
+      },
+    );
+
+    test('a throwing summarizer falls back too', () async {
+      answer.completeError(StateError('runner closed'));
+      summarizing.observe(thread, const [], 'waiting_input');
+      await pumpEventQueue();
+      expect(tts.spoken.single, endsWith('More on screen.'));
+      expect(notes.single, contains('summary failed'));
+    });
+
+    test('the user acting cancels it and nothing is read', () async {
+      summarizing.observe(thread, const [], 'waiting_input');
+      await pumpEventQueue();
+      summarizing.stop();
+      await pumpEventQueue();
+      expect(cancelled, 1);
+      expect(summarizing.busy, isFalse);
+      answer.complete(const SpeechSummary('Too late.'));
+      await pumpEventQueue();
+      expect(tts.spoken, isEmpty);
+    });
+
+    test('the session ending mid-summary cancels it', () async {
+      summarizing.observe(thread, const [], 'waiting_input');
+      await pumpEventQueue();
+      summarizing.observe(thread, const [], 'ended');
+      await pumpEventQueue();
+      expect(cancelled, 1);
+      answer.complete(const SpeechSummary('Too late.'));
+      await pumpEventQueue();
+      expect(tts.spoken, isEmpty);
+      expect(summarizing.busy, isFalse);
+    });
+
+    test('without a summarizer it reads the brief version', () async {
+      final plain = ReadAloudController(
+        tts: tts,
+        preferences: () => prefs,
+        enabled: true,
+        onNotice: notes.add,
+      );
+      addTearDown(plain.dispose);
+      plain.observe([prompt('u1')], const [], 'working');
+      plain.observe(thread, const [], 'waiting_input');
+      await pumpEventQueue();
+      expect(tts.spoken.single, endsWith('More on screen.'));
+      expect(notes.single, contains('companion'));
+    });
+  });
+
+  group('speech belongs to its chat', () {
+    test('switching chats lets the utterance playing finish and drops the '
+        'rest of the old chat', () async {
+      final other = ReadAloudController(
+        tts: tts,
+        preferences: () => prefs,
+        enabled: true,
+      );
+      addTearDown(other.dispose);
+      controller.claim();
+      other.observe([prompt('x1')], const [], 'working');
+      controller.observe([prompt('u1')], const [], 'working');
+      controller.observe([prompt('u1')], const [request], 'needs_permission');
+      controller.observe(
+        [prompt('u1'), reply('a', 'Old chat answer.')],
+        const [],
+        'waiting_input',
+      );
+      await pumpEventQueue();
+      expect(tts.spoken, ['Claude needs your approval to run npm test.']);
+      expect(controller.queued, 1);
+
+      other.claim();
+      expect(tts.stops, 0, reason: 'the sentence playing finishes');
+      expect(controller.current, isFalse);
+      expect(controller.busy, isFalse);
+      other.observe(
+        [prompt('x1'), reply('b', 'New chat answer.')],
+        const [],
+        'waiting_input',
+      );
+      await pumpEventQueue();
+      expect(tts.spoken.last, 'New chat answer.');
+      // The old chat keeps quiet: its news is not read on top.
+      controller.observe(
+        [prompt('u1'), reply('a', 'Old chat answer.'), reply('c', 'More.')],
+        const [],
+        'waiting_input',
+      );
+      tts.emit(TtsDone(tts.ids.first));
+      await pumpEventQueue();
+      expect(tts.spoken, [
+        'Claude needs your approval to run npm test.',
+        'New chat answer.',
+      ]);
+      // Stopping the quiet chat does not cut the new one.
+      controller.stop();
+      expect(tts.stops, 0);
+
+      // Back to the old chat: it reads new items again.
+      controller.claim();
+      expect(other.current, isFalse);
+      controller.observe(
+        [prompt('u1'), reply('c', 'More.'), prompt('u2'), reply('d', 'Back.')],
+        const [],
+        'waiting_input',
+      );
+      await pumpEventQueue();
+      expect(tts.spoken.last, 'Back.');
+    });
+
+    test('the session ending mid-reply finishes the utterance and drops the '
+        'rest', () async {
+      prefs = prefs.copyWith(readAloudLength: ReadAloudLength.full);
+      controller.observe([prompt('u1')], const [], 'working');
+      final long = List.filled(30, 'This sentence is filler.').join(' ');
+      final thread = [prompt('u1'), reply('a', long)];
+      controller.observe(thread, const [], 'waiting_input');
+      await pumpEventQueue();
+      expect(tts.spoken, hasLength(1));
+      expect(controller.queued, greaterThan(0));
+
+      controller.observe(thread, const [], 'ended');
+      expect(tts.stops, 0, reason: 'not cut mid-sentence');
+      expect(controller.busy, isFalse);
+      tts.done();
+      await pumpEventQueue();
+      expect(tts.spoken, hasLength(1));
+    });
+
+    test('a reconnect that reloads the thread does not re-read', () async {
+      controller.observe([prompt('u1')], const [], 'working');
+      final thread = [prompt('u1'), reply('a', 'Heard once.')];
+      controller.observe(thread, const [], 'waiting_input');
+      await pumpEventQueue();
+      tts.done();
+      // The connection drops and the whole window comes back.
+      controller.observe(const []);
+      controller.observe([prompt('u0'), ...thread], const [], 'working');
+      controller.observe([prompt('u0'), ...thread], const [], 'waiting_input');
+      await pumpEventQueue();
+      expect(tts.spoken, ['Heard once.']);
+    });
   });
 }

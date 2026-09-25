@@ -41,10 +41,8 @@ class LocalAgentCommandRunner implements StdinAgentCommandRunner {
   }
 
   @override
-  Future<AgentCommandResult> run(
-    String command, {
-    required Duration timeout,
-  }) => _run(command, timeout: timeout);
+  Future<AgentCommandResult> run(String command, {required Duration timeout}) =>
+      _run(command, timeout: timeout);
 
   @override
   Future<AgentCommandResult> runWithStdin(

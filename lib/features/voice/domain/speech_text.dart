@@ -165,20 +165,55 @@ abstract final class SpeechText {
     return chunks;
   }
 
-  /// Longest final answer spoken before "the rest is on screen".
-  static const maxAnswer = 600;
+  /// Brief mode: at most this many sentences...
+  static const briefSentences = 3;
 
-  /// Cuts [speech] at a sentence end near [max] characters and says the
-  /// rest is on screen.
-  static String cap(String speech, {int max = maxAnswer}) {
-    final text = speech.trim();
-    if (text.length <= max) return text;
-    final window = text.substring(0, max);
-    var cut = window.lastIndexOf(RegExp(r'[.!?](\s|$)'));
-    if (cut < max ~/ 2) cut = window.lastIndexOf(' ');
-    if (cut <= 0) cut = max - 1;
-    final head = text.substring(0, cut + 1).trimRight();
-    return '$head …the rest is on screen.';
+  /// ...and about this many characters.
+  static const briefChars = 250;
+
+  /// Ends a brief reading that left something out.
+  static const moreOnScreen = 'More on screen.';
+
+  static final _sentenceBreak = RegExp(r'(?<=[.!?…])\s+(?=[^a-z])');
+
+  /// [speech] (plain, see [fromMarkdown]) split into sentences. A full
+  /// stop before a lowercase word ("e.g. this") does not end one.
+  static List<String> sentences(String speech) => [
+    for (final part in speech.trim().split(_sentenceBreak))
+      if (part.trim().isNotEmpty) part.trim(),
+  ];
+
+  /// The first two or three sentences of [speech], up to about
+  /// [maxChars]; when something was left out, the spoken text ends with
+  /// [moreOnScreen] and [rest] holds the remainder (Talk reads it on
+  /// "more").
+  static ({String spoken, String? rest}) brief(
+    String speech, {
+    int maxSentences = briefSentences,
+    int maxChars = briefChars,
+  }) {
+    final all = sentences(speech);
+    if (all.isEmpty) return (spoken: '', rest: null);
+    final head = <String>[];
+    var length = 0;
+    for (final sentence in all) {
+      if (head.length == maxSentences) break;
+      if (head.isNotEmpty && length + 1 + sentence.length > maxChars) break;
+      head.add(sentence);
+      length += (head.length > 1 ? 1 : 0) + sentence.length;
+    }
+    var spoken = head.join(' ');
+    final restParts = all.skip(head.length).toList();
+    if (spoken.length > maxChars) {
+      // One very long first sentence: cut it between words.
+      var cut = spoken.lastIndexOf(' ', maxChars);
+      if (cut <= 0) cut = maxChars;
+      restParts.insert(0, spoken.substring(cut).trim());
+      spoken = '${spoken.substring(0, cut).trimRight()}…';
+    }
+    final rest = restParts.join(' ').trim();
+    if (rest.isEmpty) return (spoken: spoken, rest: null);
+    return (spoken: '$spoken $moreOnScreen', rest: rest);
   }
 
   /// The final answer of the latest turn: the assistant text after the
