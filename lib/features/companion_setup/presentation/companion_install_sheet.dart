@@ -1,3 +1,4 @@
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/features/companion_setup/data/companion_installer.dart';
 import 'package:flutter/material.dart';
@@ -40,7 +41,8 @@ Future<bool> showCompanionInstallConfirmation(
   required String version,
   bool update = false,
 }) async {
-  final confirmed = await showModalBottomSheet<bool>(
+  final confirmed = await showAdaptiveModal<bool>(
+    kind: AdaptiveModalKind.dialog,
     context: context,
     isScrollControlled: true,
     useSafeArea: true,

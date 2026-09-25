@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
@@ -112,7 +113,8 @@ class _SessionGridPageState extends State<SessionGridPage>
   }
 
   Future<void> _showActions(TerminalSessionController session) async {
-    final action = await showModalBottomSheet<_TileAction>(
+    final action = await showAdaptiveModal<_TileAction>(
+      kind: AdaptiveModalKind.menu,
       context: context,
       useSafeArea: true,
       builder: (context) => SafeArea(

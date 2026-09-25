@@ -66,6 +66,7 @@ import 'package:conduit/features/terminal/domain/recent_directories.dart';
 import 'package:conduit/features/terminal/domain/security_key_interaction.dart';
 import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
 import 'package:conduit/features/terminal/domain/terminal_link_detector.dart';
+import 'package:conduit/features/terminal/presentation/desktop_shortcuts.dart';
 import 'package:conduit/features/terminal/presentation/gestures/terminal_gesture_layer.dart';
 import 'package:conduit/features/terminal/presentation/herdr_shortcuts.dart';
 import 'package:conduit/features/terminal/presentation/multiplexer_tabs_controller.dart';
@@ -75,6 +76,7 @@ import 'package:conduit/features/terminal/presentation/terminal_file_tabs_contro
 import 'package:conduit/features/terminal/presentation/terminal_keyboard_bar.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
+import 'package:conduit/features/terminal/presentation/widgets/desktop_shortcuts_sheet.dart';
 import 'package:conduit/features/terminal/presentation/widgets/empty_terminal_state.dart';
 import 'package:conduit/features/terminal/presentation/widgets/floating_toolbar.dart';
 import 'package:conduit/features/terminal/presentation/widgets/image_crop_page.dart';
@@ -212,6 +214,14 @@ class _TerminalPageState extends State<TerminalPage>
   /// "Uploading image…" while a pasted image goes to the host.
   String? _pasteStatus;
 
+  /// Desktop keyboard shortcuts (zoom, sessions, fullscreen, help); a no-op
+  /// on phones. See desktop_shortcuts.dart.
+  late final _desktopShortcuts = DesktopShortcutHandler(
+    onShortcut: _handleDesktopShortcut,
+    isActive: () => mounted && (_route?.isCurrent ?? true),
+  );
+  ModalRoute<Object?>? _route;
+
   @override
   void initState() {
     super.initState();
@@ -247,11 +257,13 @@ class _TerminalPageState extends State<TerminalPage>
       _focusedSession = widget.workspace.activeSession;
       _focusNode.requestFocus();
     });
+    _desktopShortcuts.attach();
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _route = ModalRoute.of(context);
     final shareTarget = ShareTargetScope.maybeOf(context);
     if (shareTarget == _shareTarget) {
       return;
@@ -295,6 +307,7 @@ class _TerminalPageState extends State<TerminalPage>
 
   @override
   void dispose() {
+    _desktopShortcuts.detach();
     unawaited(WakelockPlus.disable());
     _setSystemUiFullscreen(false);
     _shareTarget?.removeListener(_consumeSharedDraft);
@@ -631,7 +644,8 @@ class _TerminalPageState extends State<TerminalPage>
     TerminalSessionController session,
     KeyEvent event,
   ) {
-    if (isQuickSwitcherShortcut(event)) return KeyEventResult.handled;
+    // Switcher and desktop shortcuts never reach the session.
+    if (_keepFromSession(event)) return KeyEventResult.handled;
     final key = event.logicalKey;
     if (key != LogicalKeyboardKey.pageUp &&
         key != LogicalKeyboardKey.pageDown) {
@@ -903,6 +917,135 @@ class _TerminalPageState extends State<TerminalPage>
   void _showTerminal() {
     _fileTabs.activate(null);
     _focusNode.requestFocus();
+  }
+
+  /// Runs a desktop keyboard shortcut. False lets the key through when
+  /// there is nothing to act on.
+  bool _handleDesktopShortcut(DesktopShortcutMatch match) {
+    final workspace = widget.workspace;
+    final sessions = workspace.sessions;
+    final active = workspace.activeSession;
+    final themeController = widget.themeController;
+    switch (match.action) {
+      case DesktopAction.zoomIn:
+      case DesktopAction.zoomOut:
+        final step = match.action == DesktopAction.zoomIn
+            ? desktopZoomStep
+            : -desktopZoomStep;
+        unawaited(
+          themeController.setTerminalFontSize(
+            clampTerminalFontSize(themeController.terminalFontSize + step),
+          ),
+        );
+      case DesktopAction.zoomReset:
+        unawaited(themeController.setTerminalFontSize(terminalFontSizeDefault));
+      case DesktopAction.newSession:
+        final connectFlow = widget.connectFlow;
+        if (connectFlow == null) return false;
+        unawaited(_newSessionOnMachine(connectFlow, active));
+      case DesktopAction.closeSession:
+        if (active == null) return false;
+        unawaited(_closeSessionFromKeyboard(active));
+      case DesktopAction.nextSession:
+      case DesktopAction.previousSession:
+        if (active == null || sessions.length < 2) return false;
+        final direction = match.action == DesktopAction.nextSession ? 1 : -1;
+        final index = (sessions.indexOf(active) + direction) % sessions.length;
+        workspace.activate(sessions[index]);
+        _showTerminal();
+      case DesktopAction.goToSession:
+        if (match.index >= sessions.length) return false;
+        workspace.activate(sessions[match.index]);
+        _showTerminal();
+      case DesktopAction.toggleFullscreen:
+        _toggleFullscreen();
+      case DesktopAction.showShortcuts:
+        unawaited(_showDesktopShortcuts());
+    }
+    return true;
+  }
+
+  /// App shortcuts the terminal must not forward to the shell: the quick
+  /// switcher, and on desktop the zoom / session / help keys (run by
+  /// [_desktopShortcuts], which sees the key after the terminal does).
+  bool _keepFromSession(KeyEvent event) =>
+      isQuickSwitcherShortcut(event) || matchDesktopShortcut(event) != null;
+
+  Future<void> _showDesktopShortcuts() async {
+    await showDesktopShortcutsSheet(context);
+    if (mounted) _focusNode.requestFocus();
+  }
+
+  /// Ctrl+Shift+T: the connect picker for the active session's machine
+  /// (tmux, Herdr or a shell there), else the machine chooser.
+  Future<void> _newSessionOnMachine(
+    SessionConnectFlow connectFlow,
+    TerminalSessionController? active,
+  ) async {
+    final hostId = active == null ? null : baseHostId(active.host.id);
+    final host = connectFlow.hostsController.hosts
+        .where((host) => host.id == hostId && !host.isLocal)
+        .firstOrNull;
+    if (host == null) {
+      await connectFlow.pickHostAndConnect(context);
+    } else {
+      await connectFlow.connect(context, host, forcePicker: true);
+    }
+    if (!mounted) return;
+    _showTerminal();
+  }
+
+  /// Whether closing [session] ends what runs in it: a connected plain
+  /// shell (or local shell) does; a tmux or Herdr session only detaches.
+  bool _closeEndsProcesses(TerminalSessionController session) {
+    if (!session.isConnected) return false;
+    final kind = widget.workspace.targetOf(session).kind;
+    if (kind == ConnectTargetKind.tmux || kind == ConnectTargetKind.herdr) {
+      return false;
+    }
+    return !session.host.startTmuxOnConnect;
+  }
+
+  /// Ctrl+Shift+W: closes the active session, after a confirmation when it
+  /// would end running programs.
+  Future<void> _closeSessionFromKeyboard(
+    TerminalSessionController session,
+  ) async {
+    if (_closeEndsProcesses(session)) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          key: const ValueKey('close-session-confirm'),
+          title: Text('Close ${session.title}?'),
+          content: const Text(
+            'This session is not in tmux or Herdr: closing it ends the shell '
+            'and anything still running in it.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              autofocus: true,
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) {
+        if (mounted) _focusNode.requestFocus();
+        return;
+      }
+    }
+    await widget.workspace.close(session);
+    if (!mounted) return;
+    if (!widget.workspace.hasSessions && _fileTabs.tabs.isEmpty) {
+      Navigator.of(context).pop();
+      return;
+    }
+    _showTerminal();
   }
 
   void _handlePathTap(TerminalSessionController session, String path) {
@@ -1816,6 +1959,9 @@ class _TerminalPageState extends State<TerminalPage>
                               onNewSession: connectFlow == null
                                   ? null
                                   : () => _openNewSession(connectFlow),
+                              onShowShortcuts: PlatformFeatures.isDesktop
+                                  ? () => unawaited(_showDesktopShortcuts())
+                                  : null,
                               onOpenChatView:
                                   attention == null ||
                                       activeSession == null ||

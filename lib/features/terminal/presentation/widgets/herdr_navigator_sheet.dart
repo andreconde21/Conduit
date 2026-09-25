@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_palette.dart';
@@ -66,7 +67,8 @@ Future<HerdrNavigatorPick?> showHerdrNavigatorSheet({
   String? paneListUnavailableReason,
   bool showCdTo = false,
 }) {
-  return showModalBottomSheet<HerdrNavigatorPick>(
+  return showAdaptiveModal<HerdrNavigatorPick>(
+    kind: AdaptiveModalKind.sidePanel,
     context: context,
     isScrollControlled: true,
     useSafeArea: true,

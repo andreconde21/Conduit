@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:conduit/core/app_failure.dart';
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/features/agent_attention/data/conductore_host_attention_provider.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
@@ -496,7 +497,8 @@ Future<AgentInfo?> pickChatAgent(
   if (agents.length == 1 && !alwaysAsk) {
     return agents.single;
   }
-  return showModalBottomSheet<AgentInfo>(
+  return showAdaptiveModal<AgentInfo>(
+    kind: AdaptiveModalKind.dialog,
     context: context,
     useSafeArea: true,
     builder: (context) => SafeArea(

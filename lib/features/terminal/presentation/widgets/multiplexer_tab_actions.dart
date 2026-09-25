@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/app_theme.dart';
@@ -63,8 +64,9 @@ Future<void> showMultiplexerTabActions(
   final noun = multiplexerTabNoun(controller);
   final index = controller.tabs.indexWhere((other) => other.id == tab.id);
   final last = controller.tabs.length - 1;
-  final action = await showModalBottomSheet<_TabAction>(
+  final action = await showAdaptiveModal<_TabAction>(
     context: context,
+    kind: AdaptiveModalKind.menu,
     useSafeArea: true,
     builder: (context) => SafeArea(
       child: Column(
@@ -224,8 +226,9 @@ Future<void> showMultiplexerTabsSheet(
 }) async {
   unawaited(controller.refresh());
   final noun = multiplexerTabNoun(controller);
-  await showModalBottomSheet<void>(
+  await showAdaptiveModal<void>(
     context: context,
+    kind: AdaptiveModalKind.menu,
     useSafeArea: true,
     isScrollControlled: true,
     sheetAnimationStyle: MediaQuery.maybeDisableAnimationsOf(context) ?? false

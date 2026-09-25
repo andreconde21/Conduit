@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/desktop_layout.dart';
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
@@ -886,7 +887,8 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     SavedHost host,
     HomeBoardWorkspace workspace,
   ) async {
-    final pane = await showModalBottomSheet<HomeBoardPane>(
+    final pane = await showAdaptiveModal<HomeBoardPane>(
+      kind: AdaptiveModalKind.dialog,
       context: context,
       useSafeArea: true,
       isScrollControlled: true,
@@ -939,7 +941,8 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     final windows = board == null
         ? Future.value(const <TmuxWindowInfo>[])
         : board.listTmuxWindows(session.name);
-    final picked = await showModalBottomSheet<TmuxWindowInfo>(
+    final picked = await showAdaptiveModal<TmuxWindowInfo>(
+      kind: AdaptiveModalKind.dialog,
       context: context,
       useSafeArea: true,
       isScrollControlled: true,
@@ -1166,7 +1169,8 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
       await _openForm();
       return;
     }
-    final host = await showModalBottomSheet<SavedHost>(
+    final host = await showAdaptiveModal<SavedHost>(
+      kind: AdaptiveModalKind.dialog,
       context: context,
       useSafeArea: true,
       isScrollControlled: true,
@@ -1312,7 +1316,8 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     final views = session.host.isLocal
         ? null
         : SessionViewScope.maybeOf(context);
-    final action = await showModalBottomSheet<_SessionAction>(
+    final action = await showAdaptiveModal<_SessionAction>(
+      kind: AdaptiveModalKind.menu,
       context: context,
       useSafeArea: true,
       builder: (context) => SafeArea(

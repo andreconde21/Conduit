@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
@@ -26,7 +27,8 @@ Future<AddedHardwareKey?> showAddHardwareKeySheet({
   required Set<String> existingFingerprints,
   required Set<String> existingStubs,
 }) {
-  return showModalBottomSheet<AddedHardwareKey>(
+  return showAdaptiveModal<AddedHardwareKey>(
+    kind: AdaptiveModalKind.dialog,
     context: context,
     isScrollControlled: true,
     useSafeArea: true,

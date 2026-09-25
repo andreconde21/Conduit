@@ -1,5 +1,6 @@
 import 'package:conduit/core/diagnostics/app_error_log.dart';
 import 'package:conduit/core/platform_features.dart';
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_palette.dart';
@@ -24,7 +25,8 @@ Future<void> showThemeSheet({
   required ThemeController controller,
   AppBackupService? backupService,
 }) {
-  return showModalBottomSheet<void>(
+  return showAdaptiveModal<void>(
+    kind: AdaptiveModalKind.dialog,
     context: context,
     isScrollControlled: true,
     builder: (context) => AnnotatedRegion<SystemUiOverlayStyle>(
@@ -592,7 +594,8 @@ Future<void> _showKeyboardRowsEditor(
   BuildContext context,
   ThemeController controller,
 ) {
-  return showModalBottomSheet<void>(
+  return showAdaptiveModal<void>(
+    kind: AdaptiveModalKind.dialog,
     context: context,
     isScrollControlled: true,
     builder: (context) => _KeyboardRowsEditor(controller: controller),
@@ -778,7 +781,8 @@ class _KeyboardRowsEditorState extends State<_KeyboardRowsEditor> {
   }
 
   Future<void> _editRowKeys(int index) async {
-    await showModalBottomSheet<void>(
+    await showAdaptiveModal<void>(
+      kind: AdaptiveModalKind.dialog,
       context: context,
       isScrollControlled: true,
       builder: (context) => _KeyboardActionsEditor(

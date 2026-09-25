@@ -1,3 +1,4 @@
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
@@ -247,7 +248,9 @@ Future<MachineSheetResult?> showMachineSheet({
   LocalShellController? localShellController,
   Set<String> activeLocalInstanceIds = const {},
 }) {
-  return showModalBottomSheet<MachineSheetResult>(
+  return showAdaptiveModal<MachineSheetResult>(
+    kind: AdaptiveModalKind.dialog,
+    desktopFill: true,
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
@@ -255,9 +258,9 @@ Future<MachineSheetResult?> showMachineSheet({
       value: AppTheme.systemUiOverlayStyle(Theme.of(context).brightness),
       child: DraggableScrollableSheet(
         expand: false,
-        initialChildSize: 0.65,
-        minChildSize: 0.3,
-        maxChildSize: 0.92,
+        initialChildSize: adaptiveSheetFraction(context, 0.65),
+        minChildSize: adaptiveSheetFraction(context, 0.3),
+        maxChildSize: adaptiveSheetFraction(context, 0.92),
         builder: (context, scrollController) => MachineSheet(
           hostsController: hostsController,
           filter: filter,

@@ -1,3 +1,4 @@
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/features/terminal/domain/recent_directories.dart';
 import 'package:flutter/material.dart';
 
@@ -39,7 +40,8 @@ Future<RecentDirectoryPick?> showRecentDirectoriesSheet({
   required List<RecentDirectoryAction> actions,
   String? currentDirectory,
 }) {
-  return showModalBottomSheet<RecentDirectoryPick>(
+  return showAdaptiveModal<RecentDirectoryPick>(
+    kind: AdaptiveModalKind.dialog,
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
