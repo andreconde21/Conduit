@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:conduit/core/presentation/adaptive_modal.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/core/theme/app_theme.dart';
@@ -63,7 +64,8 @@ Future<void> showMultiplexerTabActions(
   final noun = multiplexerTabNoun(controller);
   final index = controller.tabs.indexWhere((other) => other.id == tab.id);
   final last = controller.tabs.length - 1;
-  final action = await showModalBottomSheet<_TabAction>(
+  final action = await showAdaptiveModal<_TabAction>(
+    kind: AdaptiveModalKind.menu,
     context: context,
     useSafeArea: true,
     builder: (context) => SafeArea(
@@ -224,7 +226,11 @@ Future<void> showMultiplexerTabsSheet(
 }) async {
   unawaited(controller.refresh());
   final noun = multiplexerTabNoun(controller);
-  await showModalBottomSheet<void>(
+  // On desktop a popover at the session tab's label (the click that
+  // opened it), like a tab overflow list.
+  await showAdaptiveModal<void>(
+    kind: AdaptiveModalKind.menu,
+    desktopMaxWidth: 360,
     context: context,
     useSafeArea: true,
     isScrollControlled: true,
