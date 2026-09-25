@@ -364,7 +364,9 @@ void main() {
         ...fakes.healthyResponses(),
         'conductore-hostd status': fakes.ok(liveHerdrStatusJson()),
       });
-      final host = ConnectTarget.herdr(workspaceId: 'w4').apply(buildHost('h'));
+      final host = const ConnectTarget.herdr(
+        workspaceId: 'w4',
+      ).apply(buildHost('h'));
       final workspace = TerminalWorkspaceController(
         ImmediateTerminalRepository(TrackableTerminalSession()),
       );
@@ -395,7 +397,9 @@ void main() {
     testWidgets('a machine without the companion gets the composer and a '
         'note why', (tester) async {
       final runner = fakes.MatchingRunner({'conductore-hostd': fakes.notFound});
-      final host = ConnectTarget.herdr(workspaceId: 'w4').apply(buildHost('h'));
+      final host = const ConnectTarget.herdr(
+        workspaceId: 'w4',
+      ).apply(buildHost('h'));
       final workspace = TerminalWorkspaceController(
         ImmediateTerminalRepository(TrackableTerminalSession()),
       );
