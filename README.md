@@ -1,33 +1,52 @@
 # Conductore
 
-Drive Claude Code, Herdr and tmux sessions on your own machines from your phone, over SSH or Mosh, with no relay server and no account.
+Drive Claude Code, Herdr and tmux sessions on your own machines from your phone or desktop, over SSH or Mosh, with no relay server and no account.
 
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 ![Flutter](https://img.shields.io/badge/Flutter-3.44.1-02569B?logo=flutter)
 [![Latest release](https://img.shields.io/github/v/release/andreconde21/conductore-mobile?include_prereleases&label=release)](../../releases)
 
-Conductore is an Android app (iOS is not built yet). It is a fork of
+Conductore runs on Android, iOS, Linux, Windows and macOS from one Flutter
+code base. Preview 12 is the first release on all five. It is a fork of
 [Conduit](https://github.com/gwitko/Conduit) by gwitko.
 
 <table>
   <tr>
-    <td align="center"><img src="docs/screenshots/01-home.png" width="260" alt="Home screen with live session previews"><br><sub>Home: live sessions and other workspaces</sub></td>
-    <td align="center"><img src="docs/screenshots/03-chat-view.png" width="260" alt="Chat View of a Claude Code session"><br><sub>Chat View with an approval</sub></td>
-    <td align="center"><img src="docs/screenshots/02-terminal.png" width="260" alt="Terminal on a Herdr session running Claude Code"><br><sub>Terminal on a Herdr session</sub></td>
+    <td align="center"><img src="docs/screenshots/01-home.png" width="200" alt="Home screen with live session previews"><br><sub>Home: live sessions and other workspaces</sub></td>
+    <td align="center"><img src="docs/screenshots/10-chat-working.png" width="200" alt="Chat View with a table, an agent card and the working indicator"><br><sub>Chat View while Claude works</sub></td>
+    <td align="center"><img src="docs/screenshots/09-quick-switcher.png" width="200" alt="Quick switcher with a waiting agent and open sessions"><br><sub>Quick switcher</sub></td>
+    <td align="center"><img src="docs/screenshots/02-terminal.png" width="200" alt="Terminal on a Herdr session running Claude Code"><br><sub>Terminal on a Herdr session</sub></td>
   </tr>
 </table>
 
-More in [Screenshots](#screenshots).
+<p align="center"><img src="docs/screenshots/15-desktop-terminal.png" width="820" alt="Conductore on a Linux desktop, 1280x800, Everforest theme"><br><sub>The Linux desktop build, keyboard first</sub></p>
+
+More in [Screenshots](#screenshots). Jump to [Install](#install).
 
 ## Why
 
 - **Your machines, your keys.** Hosts, keys and trusted fingerprints stay on
-  the phone. No account, no cloud sync, no subscription.
-- **No relay.** The phone connects straight to your machines over SSH or Mosh,
+  your devices. No account, no cloud, no subscription.
+- **No relay.** The app connects straight to your machines over SSH or Mosh,
   usually through Tailscale. Nothing sits in the middle and nothing on the host
-  listens on a new port.
+  listens on a new port. Device sync goes through one of your own machines.
 - **Agents first.** The app is built around watching and steering coding agents
   (Claude Code) inside Herdr and tmux, not around a generic terminal.
+
+## New in preview 12
+
+- **Desktop builds** for Linux, Windows and macOS, next to the Android and
+  iOS apps.
+- **Quick switcher** for sessions, workspaces and agents that need you.
+- **Voice**: read replies aloud, hands-free Talk mode, continuous dictation.
+- **Chat View**: working indicator, real tables, agent cards, and a thread
+  that holds still while you read.
+- **Device sync** through your own machine, set up with a QR code.
+- **Live preview** finds dev servers by itself and sends screenshots to
+  Claude.
+- **Session restore**, **image paste** and **drag scrolling** in full-screen
+  programs.
+- Host companion **0.5.0**.
 
 ## Features
 
@@ -35,6 +54,14 @@ More in [Screenshots](#screenshots).
 
 - **Chat View** for Claude Code sessions: read the conversation as chat and
   reply from a composer, instead of reading the raw TUI.
+  - A live working indicator says what Claude is doing and for how long.
+  - Markdown tables render as tables, scrollable and full screen.
+  - Messages from other agents, task notices, shell and slash commands each
+    get their own card.
+  - Scrolled up, the thread stays still. New messages wait behind a pill.
+- **Voice** (Android): read Claude's final answer aloud, and hands-free
+  **Talk mode** that listens, sends after a pause, reads the answer and
+  answers approvals by voice. Dictation keeps listening across pauses.
 - **Inbox** of every agent across your machines, with permission requests you
   answer with Allow, Deny or Always, and a Usage tab (context and plan limits).
 - **Notifications with actions**: approve or deny a permission prompt, or jump
@@ -45,14 +72,22 @@ More in [Screenshots](#screenshots).
 
 Most of this needs the [host companion](#host-companion) on the machine.
 
-### Herdr and tmux
+### Sessions, Herdr and tmux
 
-Both are first-class: everything below works for Herdr and for tmux.
+Both multiplexers are first-class: everything below works for Herdr and for
+tmux.
 
 - **Home screen built around your servers**: pick one, several or all machines;
   your open sessions show as live previews (grid, large tiles or a list) with
   Mosh/SSH badges and each agent's state, and **Other workspaces** lists the
   Herdr workspaces and tmux sessions you have not opened yet.
+- **Quick switcher**: agents waiting on you, open sessions with live
+  thumbnails, other workspaces and recents, with search. Swipe the top row
+  or press Ctrl+Shift+K (Cmd+K on macOS).
+- **Chat View or Terminal by default**: choose how Claude sessions open, per
+  session or for all.
+- **Session restore**: open sessions come back after an app restart and
+  reconnect by themselves ([docs/session-restore.md](docs/session-restore.md)).
 - **Navigators** for Herdr and tmux: every pane with its agent and state, tap to
   switch, one-tap **Split right / Split down / New tab / New workspace** (tmux:
   new window), windows or tabs 1-9, zoom, kill pane and detach. Long-press the
@@ -72,12 +107,17 @@ Both are first-class: everything below works for Herdr and for tmux.
 
 - **Compact pill toolbar** with modifiers, arrows, function keys, snippets and
   your own key combos. Its layout is configurable.
+- **Drag scrolling in full-screen programs**: a one-finger drag scrolls Herdr,
+  tmux, vim, htop and Claude Code's full-screen view like a mouse wheel
+  ([docs/terminal-drag-scrolling.md](docs/terminal-drag-scrolling.md)).
 - **Chat mode composer**: a line or multiline prompt editor with per-session
   drafts, voice dictation, and images from the gallery, camera or clipboard.
   Images are uploaded over SFTP and their path is inserted into the prompt.
+- **Image paste** (Android): paste a clipboard image into the terminal, Chat
+  View or chat mode. It is uploaded and its path typed for you.
 - **Menu buttons** for common Claude Code prompts and commands.
 - **OSC 52 clipboard**: text copied by vim, Neovim, Claude Code or tmux on the
-  host lands on the phone clipboard. The host can never read the phone
+  host lands on the device clipboard. The host can never read your
   clipboard.
 - **Tappable links and paths**, with an in-app preview for localhost links.
 - **Recent directories** per machine, from OSC 7, tmux and the companion, to
@@ -86,27 +126,44 @@ Both are first-class: everything below works for Herdr and for tmux.
   downloads.
 - **Git diff view** of a repository's working tree.
 - **Live preview** of a dev server running on the host.
+  - A **Preview ready** chip appears when a new dev server starts, found by
+    the companion, `ss` or the terminal output.
+  - Phone, Tablet and Desktop viewport widths, remembered per port.
+  - **Screenshot to Claude** with a quick annotation (Android and macOS).
 - **Share to agent**: share text, links or images from any Android app into a
   session.
 - Touch mode indicator: taps select text, click, or scroll history.
 
-### Connectivity
+### Connectivity and sync
 
 - SSH with password, OpenSSH private keys (import, or generate `ed25519` on
-  the phone) and server-driven auth.
+  the device) and server-driven auth.
 - Mosh through [dart_mosh](https://github.com/gwitko/dart_mosh), a clean-room
   Dart implementation that survives Wi-Fi drops and network changes.
 - Hardware security keys (`ed25519-sk`, `ecdsa-sk`) over USB or NFC, several
-  per host.
+  per host (phones only).
 - Optional per-host SSH agent forwarding.
 - Host key trust you review and manage yourself.
 - Works over Tailscale like any other network: point a host at its tailnet
   name or IP.
-- Device sync through one of your own machines, end-to-end encrypted, no
-  cloud: saved machines, snippets, settings and the session list; add a
-  device with a QR code and six words ([docs/sync.md](docs/sync.md)).
+- **Device sync through one of your own machines**, end-to-end encrypted, no
+  cloud: saved machines, snippets, settings, connect preferences and the
+  session list. Add a device by scanning a QR code and typing six words
+  (desktops paste the code). Passwords and keys sync only if you turn that
+  on ([docs/sync.md](docs/sync.md)).
 - Encrypted backups of settings, machines and trusted keys (same format as
   sync), and an optional device-auth app lock.
+
+### Desktop
+
+- The same app on Linux, Windows and macOS, with the terminal **keyboard
+  first**: keys go straight to the shell, Alt is Meta, mouse selection and
+  wheel scrollback. The on-screen keys are one toggle away.
+- Ctrl+Shift+C and Ctrl+Shift+V to copy and paste (Cmd on macOS).
+- Omarchy theme sync works the same way, so the app follows the theme of
+  your Omarchy PC.
+- What each platform supports, and why, is in
+  [docs/desktop.md](docs/desktop.md).
 
 ### Look
 
@@ -127,50 +184,118 @@ Both are first-class: everything below works for Herdr and for tmux.
 ## Screenshots
 
 Rendered from the app's own widgets with demo data by
-`tools/render-screenshots.sh` (Everforest theme, a 1080x2400 phone).
+`tools/render-screenshots.sh`: Everforest theme, a 1080x2400 phone, and a
+1280x800 desktop window.
 
 <table>
   <tr>
-    <td align="center"><img src="docs/screenshots/04-agents-inbox.png" width="260" alt="Agents inbox"><br><sub>Inbox: approvals on top, then working and done agents by machine</sub></td>
-    <td align="center"><img src="docs/screenshots/05-herdr-navigator.png" width="260" alt="Herdr navigator sheet"><br><sub>Herdr navigator: split, new tab or workspace, and every pane with its agent state</sub></td>
-    <td align="center"><img src="docs/screenshots/06-menu-buttons.png" width="260" alt="Menu buttons over a Claude Code permission prompt"><br><sub>Menu buttons answer a Claude Code prompt in one tap</sub></td>
+    <td align="center"><img src="docs/screenshots/11-talk-mode.png" width="200" alt="Talk mode sending a spoken reply"><br><sub>Talk mode: a spoken reply, sent after a pause</sub></td>
+    <td align="center"><img src="docs/screenshots/03-chat-view.png" width="200" alt="Chat View with an approval"><br><sub>Chat View with an approval</sub></td>
+    <td align="center"><img src="docs/screenshots/04-agents-inbox.png" width="200" alt="Agents inbox"><br><sub>Inbox: approvals, then working and done agents</sub></td>
+    <td align="center"><img src="docs/screenshots/14-live-preview-ready.png" width="200" alt="Preview ready chip over a Vite dev server"><br><sub>Live preview finds a new dev server</sub></td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/screenshots/07-appearance.png" width="260" alt="Appearance sheet with Omarchy themes"><br><sub>Appearance: the Omarchy themes</sub></td>
-    <td align="center"><img src="docs/screenshots/08-agent-hooks.png" width="260" alt="Agent hooks screen showing Active"><br><sub>Agent hooks: companion status and doctor checks</sub></td>
+    <td align="center"><img src="docs/screenshots/12-sync.png" width="200" alt="Sync settings with three devices"><br><sub>Sync: what to sync and your devices</sub></td>
+    <td align="center"><img src="docs/screenshots/13-sync-add-device.png" width="200" alt="Add a device with a QR code and six words"><br><sub>Add a device: QR code and six words</sub></td>
+    <td align="center"><img src="docs/screenshots/05-herdr-navigator.png" width="200" alt="Herdr navigator sheet"><br><sub>Herdr navigator: splits, tabs, every pane</sub></td>
+    <td align="center"><img src="docs/screenshots/06-menu-buttons.png" width="200" alt="Menu buttons over a Claude Code permission prompt"><br><sub>Menu buttons answer a prompt in one tap</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/07-appearance.png" width="200" alt="Appearance sheet with Omarchy themes"><br><sub>Appearance: the Omarchy themes</sub></td>
+    <td align="center"><img src="docs/screenshots/08-agent-hooks.png" width="200" alt="Agent hooks screen showing Active"><br><sub>Agent hooks: companion status and checks</sub></td>
+    <td></td>
     <td></td>
   </tr>
 </table>
 
+<p align="center"><img src="docs/screenshots/16-desktop-home.png" width="820" alt="Home screen on a 1280x800 desktop window"><br><sub>Home on the desktop, centred</sub></p>
+
 ## Install
 
-Android only for now, arm64 devices.
+Builds are previews. Get them from
+[Releases](../../releases/tag/v0.1.0-conductore.12) or, for the Outsmartis
+team, from the store test channels. Each release lists `SHA256SUMS` files
+next to the downloads.
 
-1. Download the `arm64-v8a` APK and its `SHA256SUMS` file from
-   [Releases](../../releases). Current builds are prereleases.
-2. Check the checksum:
+### Android
+
+- **APK from Releases.** Download the APK for your device, usually
+  `conductore-v<version>-arm64-v8a.apk` (`armeabi-v7a` for older 32-bit
+  phones, `x86_64` for emulators), and `SHA256SUMS-v<version>.txt`. Check
+  it, then open the APK on the phone and allow installing from that source.
+
+  ```sh
+  sha256sum -c SHA256SUMS-v*.txt --ignore-missing
+  ```
+
+  Every release is signed with the same key, so a new APK installs over the
+  previous one and keeps your machines and settings.
+- **Google Play internal testing**, for team testers: accept the testing
+  invite, then install Conductore from Play. Play updates it.
+
+### iOS
+
+**TestFlight**, for team testers on the internal group: install TestFlight,
+accept the invite and install Conductore. New builds arrive in TestFlight
+automatically. There is no public iOS build yet.
+
+### Linux (x64)
+
+1. Download `conductore-v<version>-linux-x64.tar.gz` and
+   `SHA256SUMS-desktop-v<version>.txt`, and check it as above.
+2. Install the runtime dependencies. Saved hosts and keys live in the Secret
+   Service, so a keyring daemon has to be running.
 
    ```sh
-   sha256sum -c SHA256SUMS-*.txt --ignore-missing
+   # Arch / Omarchy
+   sudo pacman -S --needed gtk3 libsecret gnome-keyring
+   # Debian / Ubuntu
+   sudo apt install libgtk-3-0 libsecret-1-0 gnome-keyring
    ```
 
-3. Open the APK on the phone and allow installing from that source.
+3. Unpack and run:
 
-Every release is signed with the same key, so a new APK installs over the
-previous one and keeps your machines and settings.
+   ```sh
+   tar -xzf conductore-v<version>-linux-x64.tar.gz
+   cd conductore && ./conductore
+   ```
+
+For a launcher entry, see [docs/desktop.md](docs/desktop.md#linux).
+
+### Windows (x64)
+
+Unzip `conductore-v<version>-windows-x64.zip` and run
+`conductore\conductore.exe`. Keep the folder together. The app is not
+signed, so SmartScreen warns the first time: click **More info**, then
+**Run anyway**. Windows 10 or 11.
+
+### macOS
+
+Unzip `conductore-v<version>-macos.zip` and move `Conductore.app` to
+Applications. The app is not notarised, so the first time
+**right-click (or Control-click) it, choose Open, then Open**. On macOS 15
+and later, use **System Settings, Privacy & Security, Open Anyway** if
+there is no Open button. macOS may ask once to let Conductore use your login
+keychain, where it keeps hosts and keys. Apple silicon and Intel, macOS
+10.15 or later.
 
 ## Host companion
 
 The companion is a small Node.js daemon plus a Claude Code hook client that
 runs on the machine where your agents run. It turns Claude Code hook events
 into a live view of every agent (working, waiting for input, waiting for
-permission, ended) and lets the phone answer permission prompts. The phone
+permission, ended) and lets the app answer permission prompts. The app
 talks to it only through SSH exec commands. It opens no ports and needs no
 relay.
 
+Preview 12 bundles **companion 0.5.0**. Its new `ports` command reports
+dev servers that start listening, which drives the Preview ready chip. The
+app offers the update on the Agent hooks screen. Older companions keep
+working; Live preview then falls back to `ss` and the terminal output.
+
 It is built to stay out of the way. Claude Code hooks and the status line are
 small POSIX `sh` scripts that hand each event to a background daemon and exit;
-only the daemon and the commands the phone runs use Node.js. Measured on a
+only the daemon and the commands the app runs use Node.js. Measured on a
 Linux server with companion 0.4.0:
 
 | | Cost |
@@ -179,6 +304,7 @@ Linux server with companion 0.4.0:
 | Per status line refresh | about 3 ms and 1.9 MB |
 | Daemon when idle | no CPU, no wakeups; about 7 MB private memory |
 | Disk | under 200 KB, no dependencies |
+
 It is light: no npm dependencies, not a service, and it exits by itself after
 24 hours without a request.
 
@@ -219,13 +345,18 @@ Details, the command reference and the JSON contract are in
 
 ## Building from source
 
-Requirements: Flutter 3.44.1 and JDK 17.
+Requirements: Flutter 3.44.1, plus JDK 17 for Android, Xcode for iOS and
+macOS, Visual Studio with C++ for Windows, and the GTK and libsecret
+development packages for Linux (see [docs/desktop.md](docs/desktop.md)).
 
 ```sh
 flutter pub get
 flutter run
 flutter test --concurrency=2
 ```
+
+Desktop builds: `flutter build linux`, `flutter build windows` or
+`flutter build macos`, each with `--release`.
 
 Release APKs are built with the script below. It builds from a clean tree and
 refuses an APK whose compiled app code is stale. Pass the previous release APK
@@ -238,7 +369,8 @@ tools/build-release.sh [previous-release.apk]
 Release builds do not include the local Arch Linux shell's native binaries.
 
 Tagged releases (`v*`) are built by GitHub Actions and go to Google Play
-internal testing, TestFlight and a GitHub prerelease; see
+internal testing, TestFlight and a GitHub prerelease with the APKs and the
+Linux, Windows and macOS bundles; see
 [docs/release-pipeline.md](docs/release-pipeline.md). The privacy policy is
 [docs/privacy-policy.md](docs/privacy-policy.md).
 
