@@ -325,7 +325,7 @@ class HostAdvancedSection extends StatelessWidget {
     required this.onAgentMonitorChanged,
     required this.onSnippetsChanged,
     required this.onConnectSnippetChanged,
-    this.onCheckCompanion,
+    this.companionSetup,
     super.key,
   });
 
@@ -363,9 +363,9 @@ class HostAdvancedSection extends StatelessWidget {
   final ValueChanged<List<TerminalSnippet>> onSnippetsChanged;
   final ValueChanged<String> onConnectSnippetChanged;
 
-  /// Runs the Conductore companion's `doctor` on this machine and shows
-  /// the result; null hides the button (e.g. no SSH stack in tests).
-  final VoidCallback? onCheckCompanion;
+  /// The "Agent hooks: status ›" row opening the companion setup screen;
+  /// null hides it.
+  final Widget? companionSetup;
 
   @override
   Widget build(BuildContext context) {
@@ -559,16 +559,9 @@ class HostAdvancedSection extends StatelessWidget {
               }
             },
           ),
-          if (onCheckCompanion != null) ...[
-            const SizedBox(height: 8),
-            Align(
-              alignment: AlignmentDirectional.centerStart,
-              child: OutlinedButton.icon(
-                onPressed: onCheckCompanion,
-                icon: const Icon(Icons.health_and_safety_outlined, size: 18),
-                label: const Text('Set up companion'),
-              ),
-            ),
+          if (companionSetup != null) ...[
+            const SizedBox(height: 4),
+            companionSetup!,
           ],
         ],
         const SizedBox(height: 16),

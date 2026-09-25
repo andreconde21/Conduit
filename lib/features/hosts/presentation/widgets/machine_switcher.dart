@@ -14,6 +14,7 @@ enum MachineMenuChoice {
   connectTo,
   files,
   edit,
+  agentHooks,
   duplicate,
   copyAddress,
   delete,
@@ -26,7 +27,7 @@ enum MachineMenuChoice {
     MachineMenuChoice.duplicate => HostAction.duplicate,
     MachineMenuChoice.copyAddress => HostAction.copyAddress,
     MachineMenuChoice.delete => HostAction.delete,
-    MachineMenuChoice.add => null,
+    MachineMenuChoice.agentHooks || MachineMenuChoice.add => null,
   };
 }
 
@@ -174,6 +175,10 @@ class MachineSwitcher extends StatelessWidget {
                   PopupMenuItem(
                     value: MachineMenuChoice.edit,
                     child: _MenuRow(Icons.edit_outlined, 'Edit'),
+                  ),
+                  PopupMenuItem(
+                    value: MachineMenuChoice.agentHooks,
+                    child: _MenuRow(Icons.webhook_rounded, 'Agent hooks'),
                   ),
                   PopupMenuItem(
                     value: MachineMenuChoice.duplicate,
