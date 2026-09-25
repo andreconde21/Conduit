@@ -1,5 +1,11 @@
 # Changelog — host companion
 
+## 0.6.0 (2026-09-25)
+
+- feat: `usage [--days 7] [--since <iso>]`: usage at a glance, computed on the host from local files. Claude's 5-hour and 7-day limits (newest statusline reports, remembered after the sessions end), context per live session, and tokens with an estimated cost per local day, project and model from the Claude Code transcripts (`~/.claude/projects/**/*.jsonl`, each message counted once); Codex CLI tokens and rate limits from `~/.codex/sessions` when present (`codex.present: false` otherwise). Costs come from one dated price table (`lib/pricing.js`) and are labelled an estimate (API-equivalent on subscription plans).
+- perf: the scan is incremental (per-file offsets and daily sums in `~/.conductore/usage-cache.json`, last 31 days), capped per call (`--max-bytes` 256 MB, `--max-ms` 2500, then `scan.partial: true`), runs at nice 10 and never involves the daemon's event path. On a machine with 1,137 transcripts (2 GB in 31 days) the first fill takes five calls of 0.5–0.9 s; later calls take ~60 ms.
+- The phone's other commands are unchanged; older phones never call `usage`.
+
 ## 0.5.0 (2026-09-25)
 
 - feat: `ports [--since <seq>]` lists the TCP ports the user's own processes listen on (dev servers), with process, `label` (vite, next, …), cwd and the `seq` at which each first appeared, for the phone's "Preview ready" chip. Computed on request from `ss -ltnpH` (else `lsof`, else `/proc/net/tcp`), reused for 2 s, remembered in `~/.conductore/ports.json`; system ports and daemons are left out. No daemon change; older phones never call it.

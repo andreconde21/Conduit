@@ -103,7 +103,7 @@ void main() {
 
     final json = jsonDecode(snapshot.encode()) as Map<String, Object?>;
     expect(json, {
-      'version': 1,
+      'version': 2,
       'monitoring': true,
       'attentionCount': 1,
       'updatedAt': now.millisecondsSinceEpoch,
@@ -115,7 +115,34 @@ void main() {
           'label': 'Needs input',
         },
       ],
+      'limits': <Object?>[],
     });
+  });
+
+  test('carries the limit rings with their warning level', () {
+    final resets = DateTime.utc(2026, 9, 25, 15);
+    final snapshot = AgentStatusSnapshot.build(
+      hosts: const [],
+      monitoring: true,
+      now: now,
+      limits: [
+        AgentStatusLimit(label: '5h', usedPct: 83, resetsAt: resets),
+        const AgentStatusLimit(label: '7d', usedPct: 12),
+      ],
+    );
+    final json = jsonDecode(snapshot.encode()) as Map<String, Object?>;
+    expect(json['limits'], [
+      {
+        'label': '5h',
+        'usedPct': 83,
+        'level': 'warning',
+        'resetsAt': resets.millisecondsSinceEpoch,
+      },
+      {'label': '7d', 'usedPct': 12, 'level': 'normal'},
+    ]);
+    expect(AgentStatusSnapshot.decode(snapshot.encode()), snapshot);
+    expect(const AgentStatusLimit(label: '5h', usedPct: 95).level, 'critical');
+    expect(const AgentStatusLimit(label: '5h', usedPct: 79).level, 'normal');
   });
 
   test('round-trips through JSON', () {

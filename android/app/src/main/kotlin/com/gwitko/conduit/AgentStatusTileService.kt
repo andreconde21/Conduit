@@ -9,7 +9,8 @@ import java.lang.ref.WeakReference
 
 /**
  * Quick-settings tile: active while at least one agent needs input, with
- * the attention count in the subtitle. Tapping opens the app on the agent
+ * the attention count in the subtitle, else Claude's 5-hour and weekly
+ * limits ("5h 42% · wk 18%", and as rings in the icon). Tapping opens the app on the agent
  * attention sheet.
  *
  * The tile reads the stored snapshot whenever it becomes visible; while it
@@ -47,14 +48,34 @@ class AgentStatusTileService : TileService() {
         val snapshot = AgentStatusStore.load(this)
         val live = snapshot != null && snapshot.monitoring
         val count = snapshot?.attentionCount ?: 0
+        val now = System.currentTimeMillis()
+        val fiveHour = snapshot?.limit("5h")
+        val week = snapshot?.limit("7d")
         tile.label = getString(R.string.agent_tile_label)
-        tile.icon = Icon.createWithResource(this, R.drawable.ic_agent_tile)
+        // With Claude's limits known, the icon is their rings (outer: 5 h,
+        // inner: week); the system tints it like any tile icon.
+        tile.icon = if (fiveHour != null || week != null) {
+            LimitRingsIcon.create(fiveHour?.percentAt(now), week?.percentAt(now))
+        } else {
+            Icon.createWithResource(this, R.drawable.ic_agent_tile)
+        }
         tile.state = if (live && count > 0) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
+        val limits = if (fiveHour != null || week != null) {
+            getString(
+                R.string.agent_tile_limits,
+                fiveHour?.let { "${it.percentAt(now)}%" } ?: "–",
+                week?.let { "${it.percentAt(now)}%" } ?: "–",
+            )
+        } else {
+            null
+        }
+        // Agents needing input come first; otherwise the limits.
         val subtitle = when {
+            live && count == 1 -> getString(R.string.agent_tile_one_needs_input)
+            live && count > 1 -> getString(R.string.agent_tile_needs_input, count)
+            limits != null -> limits
             !live -> getString(R.string.agent_tile_not_monitoring)
-            count == 0 -> getString(R.string.agent_widget_all_clear)
-            count == 1 -> getString(R.string.agent_tile_one_needs_input)
-            else -> getString(R.string.agent_tile_needs_input, count)
+            else -> getString(R.string.agent_widget_all_clear)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             tile.subtitle = subtitle

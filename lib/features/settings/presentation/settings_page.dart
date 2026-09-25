@@ -1,5 +1,7 @@
 import 'package:conduit/core/presentation/conduit_brand.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
+import 'package:conduit/core/telemetry/telemetry.dart';
+import 'package:conduit/core/telemetry/telemetry_events.dart';
 import 'package:conduit/features/session_navigation/presentation/session_view_controller.dart';
 import 'package:conduit/features/settings/presentation/settings_catalog.dart';
 import 'package:conduit/features/settings/presentation/settings_sections.dart';
@@ -33,7 +35,7 @@ Future<void> showSettings(
 }
 
 /// Settings: a searchable list of sections (Appearance, Terminal, Input,
-/// Chat & Voice, Agents, Sync & Backup, Security, About). On a phone a
+/// Chat & Voice, Agents, Sync & Backup, Security, Privacy, About). On a phone a
 /// section opens as its own page; from [settingsTwoPaneMinWidth] the list
 /// stays on the left and the section shows beside it.
 class SettingsPage extends StatefulWidget {
@@ -56,6 +58,7 @@ class _SettingsPageState extends State<SettingsPage> {
   void initState() {
     super.initState();
     _search.addListener(() => setState(() {}));
+    Telemetry.instance.screen(TelemetryScreen.settings);
   }
 
   @override

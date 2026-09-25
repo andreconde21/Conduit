@@ -45,6 +45,73 @@ class AgentStatusWidgetProvider : AppWidgetProvider() {
         /** Below this height (dp) only the count and the top agent fit. */
         private const val COMPACT_MAX_HEIGHT_DP = 100
 
+        /** Below this width (dp) only the 5-hour ring fits beside the title. */
+        private const val NARROW_MAX_WIDTH_DP = 180
+
+        /** A limit ring: its frame, label, one bar per colour level and the percentage. */
+        private class Ring(
+            val label: String,
+            val frame: Int,
+            val caption: Int,
+            val normal: Int,
+            val warning: Int,
+            val critical: Int,
+            val text: Int,
+        )
+
+        private val rings = listOf(
+            Ring(
+                "5h",
+                R.id.widget_ring_5h,
+                R.id.widget_ring_5h_label,
+                R.id.widget_ring_5h_normal,
+                R.id.widget_ring_5h_warning,
+                R.id.widget_ring_5h_critical,
+                R.id.widget_ring_5h_text,
+            ),
+            Ring(
+                "7d",
+                R.id.widget_ring_7d,
+                R.id.widget_ring_7d_label,
+                R.id.widget_ring_7d_normal,
+                R.id.widget_ring_7d_warning,
+                R.id.widget_ring_7d_critical,
+                R.id.widget_ring_7d_text,
+            ),
+        )
+
+        /**
+         * Claude's 5-hour and weekly limits as rings in the header, coloured by
+         * level (accent, warning from 80 %, urgent from 95 %). Hidden when the
+         * app has no limits to show.
+         */
+        private fun bindRings(context: Context, views: RemoteViews, snapshot: AgentStatusSnapshot?, narrow: Boolean) {
+            val now = System.currentTimeMillis()
+            for (ring in rings) {
+                val limit = snapshot?.limit(ring.label)
+                val shown = limit != null && !(narrow && ring.label != "5h")
+                val visibility = if (shown) View.VISIBLE else View.GONE
+                views.setViewVisibility(ring.frame, visibility)
+                views.setViewVisibility(ring.caption, visibility)
+                if (!shown || limit == null) continue
+                val percent = limit.percentAt(now)
+                val level = limit.levelAt(now)
+                for ((id, name) in listOf(ring.normal to "normal", ring.warning to "warning", ring.critical to "critical")) {
+                    val active = name == level
+                    views.setViewVisibility(id, if (active) View.VISIBLE else View.GONE)
+                    if (active) views.setProgressBar(id, 100, percent, false)
+                }
+                views.setTextViewText(ring.text, percent.toString())
+                val caption = context.getString(
+                    if (ring.label == "5h") R.string.agent_widget_limit_5h else R.string.agent_widget_limit_7d,
+                )
+                views.setContentDescription(
+                    ring.frame,
+                    context.getString(R.string.agent_widget_limit_description, caption, percent),
+                )
+            }
+        }
+
         fun updateAll(context: Context) {
             val manager = AppWidgetManager.getInstance(context) ?: return
             val ids = manager.getAppWidgetIds(ComponentName(context, AgentStatusWidgetProvider::class.java))
@@ -61,6 +128,8 @@ class AgentStatusWidgetProvider : AppWidgetProvider() {
 
             val minHeight = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0) ?: 0
             val compact = minHeight in 1 until COMPACT_MAX_HEIGHT_DP
+            val minWidth = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0) ?: 0
+            bindRings(context, views, snapshot, narrow = minWidth in 1 until NARROW_MAX_WIDTH_DP)
 
             if (snapshot == null || !snapshot.monitoring) {
                 views.setTextViewText(R.id.widget_count, "")

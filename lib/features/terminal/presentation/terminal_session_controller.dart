@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:conduit/core/app_failure.dart';
+import 'package:conduit/core/telemetry/telemetry.dart';
+import 'package:conduit/core/telemetry/telemetry_events.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
@@ -300,21 +302,45 @@ class TerminalSessionController extends ChangeNotifier {
 
       _status = TerminalConnectionStatus.connected;
       notifyListeners();
+      _reportConnect();
       _runStartupCommandIfConfigured(session);
       _runConnectSnippetIfConfigured(session);
     } on AppFailure catch (failure) {
       if (_disposed || generation != _connectionGeneration) {
         return;
       }
+      _reportConnect(failure);
       _fail(failure.toString());
     } catch (error) {
       if (_disposed || generation != _connectionGeneration) {
         return;
       }
+      _reportConnect(error);
       _fail('Connection failed: $error');
     } finally {
       await securityKeySubscription?.cancel();
     }
+  }
+
+  /// Anonymous usage count of this attempt: transport, multiplexer and,
+  /// on failure, only its coarse class.
+  void _reportConnect([Object? error]) {
+    final command = (startupCommand ?? '').toLowerCase();
+    Telemetry.instance.track(
+      TelemetryEvent.sessionConnect(
+        transport: host.isLocal || host.isThisComputer
+            ? TelemetryTransport.local
+            : host.useMosh
+            ? TelemetryTransport.mosh
+            : TelemetryTransport.ssh,
+        multiplexer: command.contains('herdr')
+            ? TelemetryMultiplexer.herdr
+            : command.contains('tmux') || host.startTmuxOnConnect
+            ? TelemetryMultiplexer.tmux
+            : TelemetryMultiplexer.none,
+        failure: error == null ? null : classifyConnectFailure(error),
+      ),
+    );
   }
 
   Future<void> disconnect() async {

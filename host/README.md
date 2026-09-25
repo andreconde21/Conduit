@@ -12,7 +12,7 @@ relay, nothing listening on the network.
                                                           ▼
                                                    conductore-hostd (Node daemon)
                                                           ▲ unix socket
-    phone ──ssh user@host "conductore-hostd status|events|decide|transcript|send|ports"
+    phone ──ssh user@host "conductore-hostd status|events|decide|transcript|send|ports|usage"
 
 Built to cost nothing while agents work: a hook event is one `cat` and one
 `ln` (about 2.5 ms and 2 MB, no Node start), and the daemon sleeps until a
@@ -65,6 +65,7 @@ starts it when the spool is not empty. `conductore-hostd stop` stops it;
 | `~/.conductore/spawn.at` | time of the last start attempt |
 | `~/.conductore/state.json` | atomic snapshot of the state, read by `status` when the daemon is down |
 | `~/.conductore/ports.json` | listening ports and the seq each first appeared at (`ports`) |
+| `~/.conductore/usage-cache.json` | `usage`: per-transcript offsets and daily token sums, last 31 days (about 1.3 MB for 1,100 transcripts) |
 | `~/.conductore/hostd.log` | log, rotated once at 1 MB to `hostd.log.1` |
 | `~/.conductore/always-rules.json` | record of every rule added through an "always" decision |
 
@@ -342,6 +343,76 @@ it first appeared; a port that closes is dropped, and when it opens again
   language servers) unless the command line is a known dev server.
 * `source`: `ss`, `lsof`, `proc` (no process details) or `none`.
 
+### `conductore-hostd usage [--days 7] [--since <iso>] [--max-bytes N] [--max-ms N]`
+
+Usage at a glance, computed on this machine from local files (no network,
+no Anthropic or OpenAI API): the account's rate limits, each live
+session's context, and tokens with an estimated cost per local day,
+project and model.
+
+```json
+{"version":"0.6.0","schema":1,"machine":"devbox","generatedAt":1790340104253,
+ "timeZone":"Europe/Lisbon","today":"2026-09-25","from":"2026-09-19",
+ "claude":{"present":true,
+   "limits":[{"label":"5h","usedPct":42,"resetsAt":1790348400000,"expired":false},
+             {"label":"7d","usedPct":18,"resetsAt":1790697600000,"expired":false}],
+   "sessions":[{"sessionId":"…","name":"api","project":"api","state":"working",
+                "contextUsedPct":41,"contextTokens":82000,"windowLabel":"200k"}],
+   "today":{"input":1200,"output":98000,"cacheWrite":350000,"cacheRead":9100000,
+            "tokens":9549200,"messages":212,"costUsd":8.93},
+   "range":{…same fields, from `from` to `today`…},
+   "rows":[{"date":"2026-09-25","project":"api","model":"claude-opus-5",
+            "input":1200,"output":98000,"cacheWrite":350000,"cacheRead":9100000,
+            "messages":212,"costUsd":8.93}]},
+ "codex":{"present":false},
+ "pricing":{"estimate":true,"asOf":"2026-09-25","note":"Estimate at public API list prices. …",
+            "sources":{"claude":"…","codex":"…"},"unpriced":[]},
+ "scan":{"ms":61,"files":1137,"filesRead":0,"bytesRead":0,"partial":false,
+         "pendingFiles":0,"busy":false,"cacheBytes":1311180}}
+```
+
+* `claude.limits`: the 5-hour and 7-day windows (and `spend` when set)
+  from the newest statusline reports (see Usage below), remembered in the
+  cache after the sessions end. `expired: true` once `resetsAt` has passed:
+  the window reset and its use is unknown until the next report (show 0).
+* `claude.sessions`: context use of the sessions the daemon knows (read
+  from the daemon when it runs, else its snapshot; the daemon is never
+  started for this).
+* Tokens come from the transcripts under `~/.claude/projects/**/*.jsonl`
+  (`$CLAUDE_CONFIG_DIR/projects`), subagents included: each assistant
+  entry's `message.usage` and `message.model`. `input` excludes cache
+  reads and writes; `tokens` is the sum of the four. A message is counted
+  once per message id and request id (streaming writes one line per
+  content block, a resumed session copies earlier entries); the largest
+  `output_tokens` wins. `<synthetic>` entries are skipped. `speed: "fast"`
+  rows are fast mode.
+* `project`: the repository the entry's cwd is in (the main checkout's
+  name for a linked worktree), `~` for the home directory, else the cwd's
+  name. `rows` hold one line per day, project, model and speed; the phone
+  groups them by machine, project, model or day.
+* `costUsd`: an **estimate** at public API list prices from
+  `lib/pricing.js` (one dated table, applied when answering, so an update
+  also reprices history). On a subscription plan it is the API-equivalent
+  cost, not a bill. A model missing from the table has `costUsd: null` and
+  is listed in `pricing.unpriced`.
+* `codex`: `{"present":false}` without `~/.codex/sessions` (`$CODEX_HOME`).
+  Otherwise the same shape, from the `token_count` events of the Codex CLI
+  session logs (running totals turned into per-day deltas, `input` without
+  the cached part, `cacheRead` = cached input) and `limits` from the newest
+  event's `rate_limits` (primary 5h, secondary 7d). Read only.
+* `--days` (1–31, default 7) or `--since <iso>` (day granularity) set
+  `from`. Only the last 31 days are kept.
+* Cost: incremental. The cache holds, per file, the byte offset read so
+  far; only files whose size or mtime changed are opened, from there, and
+  only lines containing `"usage"` and `"assistant"` (Codex: `token_count`,
+  `turn_context`, `session_meta`) are parsed. One call reads at most
+  `--max-bytes` (256 MB) or `--max-ms` (2500 ms), newest files first, then
+  answers with `scan.partial: true`; the next call goes on (the phone
+  polls again sooner). A first scan of 2 GB of transcripts takes about five
+  calls; afterwards a call takes ~60 ms. It runs at nice 10, never touches
+  the daemon's event path, and a second concurrent call answers from the
+  cache with `scan.busy: true` instead of scanning too.
+
 ### `conductore-hostd statusline [--chain '<cmd>']`
 
 Not for the phone: the Node statusline of 0.3, kept so a not yet migrated
@@ -351,12 +422,12 @@ instead. See Usage.
 ### Others
 
 * `install` / `uninstall`: `{"ok":true,"settings":"…/settings.json","hook":"…/conductore-hook","statusline":"…/conductore-statusline","events":[…],"statusLine":"set|wrapped|updated|unchanged"}` / `{"ok":true,"removed":[…],"statusLineRestored":true,"daemonStopped":true}`
-* `doctor`: `{"ok":true,"user":"andre","checks":[{"name":"hooks registered","ok":true,"detail":"9 events"},{"name":"statusline (usage)","ok":true,"detail":"wired, wrapping: ~/bin/my-line"},{"name":"hook latency","ok":true,"detail":"3.1 ms per event (median of 5, no-op event)"},{"name":"daemon memory","ok":true,"detail":"45.9 MB RSS, 180 ms CPU in 3600 s, version 0.5.0"}, …]}`
+* `doctor`: `{"ok":true,"user":"andre","checks":[{"name":"hooks registered","ok":true,"detail":"9 events"},{"name":"statusline (usage)","ok":true,"detail":"wired, wrapping: ~/bin/my-line"},{"name":"hook latency","ok":true,"detail":"3.1 ms per event (median of 5, no-op event)"},{"name":"daemon memory","ok":true,"detail":"45.9 MB RSS, 180 ms CPU in 3600 s, version 0.6.0"}, …]}`
   (a missing statusline, daemon or latency does not make `ok` false; the
   latency is measured around the spawn from Node, so it includes a little
   process start-up; with no daemon running, it starts one)
 * `stop`: `{"ok":true,"running":true,"stopped":true}` or `{"ok":true,"running":false}`
-* `version`: `{"version":"0.5.0","protocol":1,"node":"22.23.1"}`
+* `version`: `{"version":"0.6.0","protocol":1,"node":"22.23.1"}`
 * `daemon [--detach]`: runs the daemon (what the clients start;
   `--detach` starts it in its own session with the flags from Footprint).
 

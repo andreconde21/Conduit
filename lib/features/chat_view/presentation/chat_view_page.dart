@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/core/platform_features.dart';
+import 'package:conduit/core/telemetry/telemetry.dart';
+import 'package:conduit/core/telemetry/telemetry_events.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/chat_view/data/conductore_chat_client.dart';
@@ -132,6 +134,9 @@ class _ChatViewPageState extends State<ChatViewPage>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _scroll.addListener(_onScroll);
+    Telemetry.instance
+      ..screen(TelemetryScreen.chat)
+      ..track(const TelemetryEvent.chatModeOpened());
     _chat.setVisible(true);
     _chat.addListener(_stickToBottom);
     final tts =

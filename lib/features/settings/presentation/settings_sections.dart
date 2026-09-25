@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/presentation/theme_sheet.dart';
+import 'package:conduit/core/telemetry/telemetry.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/domain/agent_inbox.dart';
@@ -14,6 +15,7 @@ import 'package:conduit/features/home_widget/presentation/quick_settings_tile_co
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/session_navigation/presentation/session_view_widgets.dart';
+import 'package:conduit/features/settings/presentation/privacy_settings.dart';
 import 'package:conduit/features/settings/presentation/settings_catalog.dart';
 import 'package:conduit/features/settings/presentation/settings_services.dart';
 import 'package:conduit/features/snippets/presentation/snippet_editor.dart';
@@ -24,6 +26,7 @@ import 'package:conduit/features/terminal/presentation/trusted_keys_page.dart';
 import 'package:conduit/features/terminal/presentation/widgets/desktop_shortcuts_sheet.dart';
 import 'package:conduit/features/terminal/presentation/widgets/pill_configurator_sheet.dart';
 import 'package:conduit/features/this_computer/domain/local_shell_launch.dart';
+import 'package:conduit/features/usage/presentation/usage_widgets.dart';
 import 'package:conduit/features/voice/presentation/speech_settings_controls.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -63,6 +66,9 @@ class SettingsSectionBody extends StatelessWidget {
       SettingsSection.agents => _agents(context),
       SettingsSection.syncBackup => _syncBackup(context),
       SettingsSection.security => _security(context),
+      SettingsSection.privacy => [
+        PrivacySettingsControls(telemetry: Telemetry.instance),
+      ],
       SettingsSection.about => const [AboutControls()],
     };
   }
@@ -333,6 +339,23 @@ class SettingsSectionBody extends StatelessWidget {
             );
           },
         ),
+      if (PlatformFeatures.agentNotifications)
+        if (UsageScope.maybeOf(context) case final usage?) ...[
+          _gap,
+          ListenableBuilder(
+            listenable: usage,
+            builder: (context, _) => SettingsSwitchCard(
+              key: const ValueKey('settings-usage-alert'),
+              icon: Icons.notifications_active_outlined,
+              title: 'Alert near the 5-hour limit',
+              subtitle:
+                  'Notify when 80% of the Claude 5-hour window is used, once '
+                  'per window, with the time it resets. This device only.',
+              value: usage.preferences.alertEnabled,
+              onChanged: usage.setAlertEnabled,
+            ),
+          ),
+        ],
       if (attention != null) ...[
         _gap,
         const SettingsHeading('Usage'),

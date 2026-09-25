@@ -7,6 +7,8 @@ import 'package:conduit/core/presentation/desktop_layout.dart';
 import 'package:conduit/core/presentation/multiplexer_icon.dart';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/secure_storage.dart';
+import 'package:conduit/core/telemetry/telemetry.dart';
+import 'package:conduit/core/telemetry/telemetry_events.dart';
 import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
@@ -47,6 +49,7 @@ import 'package:conduit/features/sessions/presentation/session_connect_flow.dart
 import 'package:conduit/features/sessions/presentation/session_grid_page.dart'
     show summarizeAgentState;
 import 'package:conduit/features/sessions/presentation/session_restore_controller.dart';
+import 'package:conduit/features/settings/presentation/privacy_notice.dart';
 import 'package:conduit/features/settings/presentation/settings_page.dart';
 import 'package:conduit/features/settings/presentation/settings_services.dart';
 import 'package:conduit/features/sftp/domain/file_export.dart';
@@ -64,6 +67,7 @@ import 'package:conduit/features/terminal/presentation/terminal_session_controll
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:conduit/features/this_computer/data/host_channels.dart';
 import 'package:conduit/features/this_computer/domain/local_shell_launch.dart';
+import 'package:conduit/features/usage/presentation/usage_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
@@ -241,6 +245,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     final flow = widget.connectFlow;
+    Telemetry.instance.screen(TelemetryScreen.home);
     if (widget.homeBoards == null && flow != null) {
       _ownedBoards = HomeBoards(
         runnerFactory: flow.runnerFactory,
@@ -526,6 +531,13 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
                           machine: _machineChip(),
                         ),
                       ),
+                      // Limit rings and today's tokens (companion usage).
+                      if (UsageScope.maybeOf(context) case final usage?)
+                        SliverToBoxAdapter(
+                          child: UsageHomeBar(controller: usage),
+                        ),
+                      // Once, after the update that added crash reports.
+                      const SliverToBoxAdapter(child: PrivacyNotice()),
                       ..._buildMain(context),
                       const SliverToBoxAdapter(
                         child: SizedBox(key: ValueKey('home-end'), height: 24),

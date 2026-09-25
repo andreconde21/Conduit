@@ -5,11 +5,15 @@ import 'package:conduit/core/theme/theme_controller.dart';
 import 'package:conduit/features/settings/presentation/settings_catalog.dart';
 import 'package:conduit/features/settings/presentation/settings_page.dart';
 import 'package:conduit/features/settings/presentation/settings_services.dart';
+import 'package:conduit/features/usage/data/usage_preferences.dart';
+import 'package:conduit/features/usage/presentation/usage_controller.dart';
+import 'package:conduit/features/usage/presentation/usage_widgets.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../support/test_doubles.dart';
+import '../usage/usage_fakes.dart';
 
 /// The settings that used to live in the Appearance sheet, each on its
 /// Settings section page now.
@@ -50,6 +54,41 @@ void main() {
     );
     await tester.pumpAndSettle();
   }
+
+  testWidgets('Agents: the 5-hour alert is a per-device switch (Android)', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final store = MemoryUsagePreferencesStore();
+    final usage = UsageController(
+      source: FakeUsageSource(const [], {}),
+      preferences: store,
+      observeLifecycle: false,
+    );
+    addTearDown(usage.dispose);
+    await tester.pumpWidget(
+      UsageScope(
+        controller: usage,
+        child: MaterialApp(
+          home: SettingsSectionPage(
+            section: SettingsSection.agents,
+            services: SettingsServices(theme: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final toggle = find.byKey(const ValueKey('settings-usage-alert'));
+    expect(toggle, findsOneWidget);
+    expect(find.text('Alert near the 5-hour limit'), findsOneWidget);
+    await tester.tap(
+      find.descendant(of: toggle, matching: find.byType(Switch)),
+    );
+    await tester.pumpAndSettle();
+    expect(store.value.alertEnabled, isTrue);
+    debugDefaultTargetPlatformOverride = null;
+  });
 
   testWidgets('Appearance toggles local shell visibility', (tester) async {
     await openSection(tester, SettingsSection.appearance);

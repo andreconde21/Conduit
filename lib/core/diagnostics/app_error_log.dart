@@ -36,6 +36,10 @@ class AppErrorLog extends ChangeNotifier {
   final int capacity;
   final _entries = Queue<AppErrorEntry>();
 
+  /// Also hands every recorded error to this (crash reporting); what it
+  /// throws is ignored, so the log keeps working.
+  void Function(Object error, StackTrace? stack)? onRecord;
+
   /// Oldest first.
   List<AppErrorEntry> get entries => List.unmodifiable(_entries);
 
@@ -54,6 +58,7 @@ class AppErrorLog extends ChangeNotifier {
       buffer.write(' (${details.library})');
     }
     _appendStack(buffer, details.stack);
+    _forward(details.exception, details.stack);
     return _add(details.exceptionAsString(), buffer.toString());
   }
 
@@ -61,7 +66,16 @@ class AppErrorLog extends ChangeNotifier {
   AppErrorEntry recordError(Object error, StackTrace? stack) {
     final buffer = StringBuffer('Uncaught: $error');
     _appendStack(buffer, stack);
+    _forward(error, stack);
     return _add('$error', buffer.toString());
+  }
+
+  void _forward(Object error, StackTrace? stack) {
+    try {
+      onRecord?.call(error, stack);
+    } on Object {
+      // Reporting is best effort.
+    }
   }
 
   static void _appendStack(StringBuffer buffer, StackTrace? stack) {
