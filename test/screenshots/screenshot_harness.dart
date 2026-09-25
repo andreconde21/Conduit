@@ -19,6 +19,10 @@ const shotNavigationBar = 48.0;
 
 const shotPalette = AppPalette.everforest;
 
+/// A desktop window at the size the Linux, Windows and macOS builds open
+/// with, at 1 px/dp and without phone system bars.
+const desktopWindowSize = Size(1280, 800);
+
 /// Loads the fonts the app ships (JetBrains Mono Nerd Font, Atkynson Mono)
 /// plus Roboto and the Material icons from the Flutter SDK, so text is
 /// drawn with real glyphs instead of the test font's boxes.
@@ -82,11 +86,25 @@ void usePhoneView(WidgetTester tester) {
   addTearDown(tester.view.reset);
 }
 
+/// Sizes the test view like a desktop window: 1280x800, no insets.
+void useDesktopView(WidgetTester tester) {
+  tester.view.physicalSize = desktopWindowSize;
+  tester.view.devicePixelRatio = 1;
+  tester.view.padding = FakeViewPadding.zero;
+  tester.view.viewPadding = FakeViewPadding.zero;
+  addTearDown(tester.view.reset);
+}
+
 const shotKey = ValueKey('screenshot');
 
 /// The app's MaterialApp shell (theme, navigation bar background) with a
-/// fake Android status bar and three-button navigation bar on top.
-Widget shotApp({required Widget home, AppPalette palette = shotPalette}) {
+/// fake Android status bar and three-button navigation bar on top, unless
+/// [systemBars] is false (desktop windows).
+Widget shotApp({
+  required Widget home,
+  AppPalette palette = shotPalette,
+  bool systemBars = true,
+}) {
   return RepaintBoundary(
     key: shotKey,
     child: MaterialApp(
@@ -97,6 +115,7 @@ Widget shotApp({required Widget home, AppPalette palette = shotPalette}) {
           ? ThemeMode.dark
           : ThemeMode.light,
       builder: (context, child) {
+        if (!systemBars) return child ?? const SizedBox.shrink();
         return Stack(
           children: [
             child ?? const SizedBox.shrink(),
@@ -193,14 +212,18 @@ Future<void> pushPage(WidgetTester tester, Widget page) async {
   await tester.pump(const Duration(milliseconds: 400));
 }
 
-/// Writes the current frame, at the phone's physical resolution, to
-/// `docs/screenshots/<name>.png`.
-Future<void> saveShot(WidgetTester tester, String name) async {
+/// Writes the current frame, at the phone's physical resolution (or
+/// [pixelRatio]), to `docs/screenshots/<name>.png`.
+Future<void> saveShot(
+  WidgetTester tester,
+  String name, {
+  double pixelRatio = shotPixelRatio,
+}) async {
   final boundary = tester.renderObject<RenderRepaintBoundary>(
     find.byKey(shotKey),
   );
   await tester.runAsync(() async {
-    final image = await boundary.toImage(pixelRatio: shotPixelRatio);
+    final image = await boundary.toImage(pixelRatio: pixelRatio);
     final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
     image.dispose();
     File('docs/screenshots/$name.png')
