@@ -191,6 +191,42 @@ void main() {
     await tester.pump();
   });
 
+  testWidgets('the screen waking (a notification, unlocking) does not cut '
+      'the voice', (tester) async {
+    await settings.setVoice(settings.voice.copyWith(readAloudByDefault: true));
+    final chat = await pumpPage(tester, [
+      ok(page(history)),
+      ok(
+        page([
+          assistantLine('a2', [text('A long answer.')]),
+        ], offset: 200),
+      ),
+      ok(page([], offset: 200)),
+    ]);
+    await chat.refresh();
+    await tester.pump();
+    expect(tts.spoken, ['A long answer.']);
+
+    // Screen off with the chat on top: it keeps reading.
+    tts.interactive = false;
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+
+    // The agent-attention notification for the new message wakes the
+    // screen and the activity starts again: Flutter passes through
+    // `hidden` on the way up, with the screen already on.
+    tts.interactive = true;
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(tts.stops, 0, reason: 'coming back is not leaving');
+    expect(find.byTooltip('Stop reading replies aloud'), findsOneWidget);
+  });
+
   testWidgets('Talk: speak, auto-send, stay quiet, hear the answer, touch '
       'to stop', (tester) async {
     await settings.setVoice(settings.voice.copyWith(talkSendSilenceSeconds: 2));

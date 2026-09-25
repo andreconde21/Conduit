@@ -258,8 +258,13 @@ class _ChatViewPageState extends State<ChatViewPage>
     return _chat.send(text, enter: enter);
   }
 
+  /// The last lifecycle state seen, to tell leaving from coming back.
+  AppLifecycleState? _lifecycle;
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    final previous = _lifecycle;
+    _lifecycle = state;
     final readAloud = _readAloud;
     final talking = _talk?.active ?? false;
     if (state == AppLifecycleState.resumed ||
@@ -274,10 +279,22 @@ class _ChatViewPageState extends State<ChatViewPage>
     if (state == AppLifecycleState.inactive) {
       return;
     }
+    // Only going down (inactive → hidden) can mean the user left. Coming
+    // back up from paused passes through hidden too, with the screen
+    // already on (a notification woke it, the user unlocked): that is not
+    // leaving.
+    if (previous != AppLifecycleState.inactive) {
+      return;
+    }
     final onTop = ModalRoute.of(context)?.isCurrent ?? true;
     unawaited(
       readAloud.screenOn().then((screenOn) {
         if (!mounted) return;
+        // Back on screen before the answer came.
+        if (_lifecycle == AppLifecycleState.resumed ||
+            _lifecycle == AppLifecycleState.inactive) {
+          return;
+        }
         final keep = onTop && !screenOn;
         _chat.setVisible(keep);
         if (!keep) {
