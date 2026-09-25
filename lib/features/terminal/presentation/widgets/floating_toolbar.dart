@@ -433,6 +433,7 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
         prefixLabel: widget.keyRows.tmuxPrefixKey.label,
         cached: cache[host.id],
         paneListUnavailableReason: reason,
+        showCdTo: widget.keyRows.onOpenRecentDirectories != null,
         load: runner == null
             ? null
             : () async {
@@ -448,6 +449,8 @@ class _FloatingTerminalToolbarState extends State<FloatingTerminalToolbar>
           _focusTerminal();
         case HerdrShortcutPick(:final shortcut):
           _sendHerdrShortcut(shortcut);
+        case HerdrCdToPick():
+          widget.keyRows.onOpenRecentDirectories?.call();
         case HerdrPanePick(:final entry):
           final switched =
               runner != null && await HerdrNavigator.focus(runner, entry);

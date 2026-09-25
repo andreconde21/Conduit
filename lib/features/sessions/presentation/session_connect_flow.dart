@@ -8,6 +8,7 @@ import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/sessions/domain/connect_preferences.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
 import 'package:conduit/features/sessions/presentation/connect_picker_sheet.dart';
+import 'package:conduit/features/terminal/presentation/recent_directories_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:flutter/material.dart';
@@ -24,12 +25,17 @@ class SessionConnectFlow {
     required this.workspace,
     required this.runnerFactory,
     required this.preferences,
+    this.recentDirectories,
   });
 
   final HostsController hostsController;
   final TerminalWorkspaceController workspace;
   final AgentCommandRunnerFactory runnerFactory;
   final ConnectPreferencesRepository preferences;
+
+  /// Recent working directories per host: the picker's "Recent dirs" and
+  /// the terminal's "cd to…". Null hides both.
+  final RecentDirectoriesController? recentDirectories;
 
   /// Target keys with an open session for [host], for the "Active" badges.
   Set<String> activeTargetKeysFor(SavedHost host) => {
@@ -51,6 +57,8 @@ class SessionConnectFlow {
       return workspace.open(host);
     }
     final saved = await preferences.load(host.id);
+    final directories =
+        await recentDirectories?.load(host.id) ?? const <String>[];
     if (!context.mounted) {
       return null;
     }
@@ -70,6 +78,7 @@ class SessionConnectFlow {
           initialTab: remembered?.kind == ConnectTargetKind.herdr
               ? ConnectPickerTab.herdr
               : ConnectPickerTab.tmux,
+          recentDirectories: directories,
         );
       } finally {
         unawaited(runner.close());
