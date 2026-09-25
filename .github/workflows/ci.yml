@@ -1,0 +1,128 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  # release.yml runs the checks job as its gate (builds: false).
+  workflow_call:
+    inputs:
+      builds:
+        description: Also run the Android debug and unsigned iOS builds
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  # Called from release.yml, github.workflow is "Release", so the release's
+  # gate never cancels (or waits for) a regular CI run.
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  FLUTTER_VERSION: '3.44.1'
+
+jobs:
+  checks:
+    name: Analyze and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test --concurrency=2
+
+      - name: Host companion tests
+        working-directory: host
+        run: node --test
+
+      - name: Bundled companion matches host/
+        run: tools/bundle-companion.sh --check
+
+  android:
+    name: Android debug build
+    # inputs is empty unless called (github.event_name is the caller's event
+    # there, so it cannot tell the cases apart).
+    if: ${{ inputs.builds != false }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build debug APK (play flavor)
+        run: flutter build apk --debug --flavor play
+
+  ios:
+    name: iOS build (no codesign)
+    if: ${{ inputs.builds != false }}
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select the newest stable Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Cache CocoaPods and Swift packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ios/Pods
+            ~/Library/Caches/CocoaPods
+            ~/Library/Caches/org.swift.swiftpm
+          key: ios-deps-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+          restore-keys: ios-deps-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build iOS app without signing
+        run: flutter build ios --release --no-codesign
