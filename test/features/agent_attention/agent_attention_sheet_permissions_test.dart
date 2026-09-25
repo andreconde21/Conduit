@@ -66,8 +66,9 @@ void main() {
   testWidgets('shows the pending request with its buttons', (tester) async {
     await pumpSheet(tester, [pending]);
 
-    expect(find.text('Needs permission'), findsOneWidget);
-    expect(find.text('Conductore companion'), findsOneWidget);
+    expect(find.text('Approval'), findsOneWidget);
+    expect(find.text('NEEDS APPROVAL  1'), findsOneWidget);
+    expect(find.textContaining('Conductore companion'), findsOneWidget);
     expect(find.text('Bash'), findsOneWidget);
     expect(find.text('rm -rf build'), findsOneWidget);
     expect(find.widgetWithText(FilledButton, 'Allow'), findsOneWidget);

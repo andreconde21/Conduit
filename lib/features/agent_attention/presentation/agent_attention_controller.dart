@@ -8,6 +8,7 @@ import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention_notifier.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention_provider.dart';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
+import 'package:conduit/features/agent_attention/domain/agent_inbox.dart';
 import 'package:conduit/features/agent_attention/domain/agent_permission_actions.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
@@ -107,6 +108,10 @@ class AgentAttentionController extends ChangeNotifier {
   final Duration _watchRestartDelay;
 
   final Map<String, _HostMonitor> _monitors = {};
+
+  /// Inbox rows swiped away on this phone; they come back when the agent
+  /// changes. Kept here so they survive closing the panel.
+  final AgentInboxDismissals inboxDismissals = AgentInboxDismissals();
   final Set<String> _deciding = {};
 
   /// Per host: request ids that currently have a permission notification.
@@ -821,14 +826,16 @@ class AgentAttentionController extends ChangeNotifier {
       if (previous != null && !_isTransition(previous, agent)) {
         continue;
       }
-      // A pending permission request gets its own actionable notification.
+      // Loud: an agent waiting on a human (a pending permission request
+      // gets its own actionable notification). Quiet unless the level is
+      // "All": a finished agent. Everything else only updates the inbox.
+      final level = host.agentNotifyLevel;
       final needsInput =
           agent.state.needsAttention &&
-          host.agentNotifyInput &&
+          level.notifiesApprovalsAndErrors &&
           agent.pendingRequests.isEmpty;
       final finished =
-          agent.state == AgentAttentionState.finished &&
-          host.agentNotifyFinished;
+          agent.state == AgentAttentionState.finished && level.notifiesFinished;
       if (!needsInput && !finished) {
         continue;
       }
@@ -857,7 +864,8 @@ class AgentAttentionController extends ChangeNotifier {
     for (final agent in snapshot.agents) {
       for (final request in agent.pendingRequests) {
         seen.add(request.id);
-        if (!host.agentNotifyInput || notified.contains(request.id)) {
+        if (!host.agentNotifyLevel.notifiesApprovalsAndErrors ||
+            notified.contains(request.id)) {
           continue;
         }
         // Commit before showing so a throwing notifier cannot re-notify.
@@ -918,6 +926,7 @@ class AgentAttentionController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    inboxDismissals.dispose();
     _workspace.removeListener(_syncMonitors);
     for (final hostId in _monitors.keys.toList()) {
       _stopMonitor(hostId);

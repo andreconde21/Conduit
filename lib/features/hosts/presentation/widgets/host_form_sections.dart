@@ -519,23 +519,36 @@ class HostAdvancedSection extends StatelessWidget {
           ),
         ),
         if (agentAttentionEnabled) ...[
-          Material(
-            color: Colors.transparent,
-            child: SwitchListTile(
-              contentPadding: const EdgeInsetsDirectional.only(start: 16),
-              title: const Text('Notify when an agent needs input'),
-              value: agentNotifyInput,
-              onChanged: onAgentNotifyInputChanged,
-            ),
-          ),
-          Material(
-            color: Colors.transparent,
-            child: SwitchListTile(
-              contentPadding: const EdgeInsetsDirectional.only(start: 16),
-              title: const Text('Notify when an agent finishes'),
-              value: agentNotifyFinished,
-              onChanged: onAgentNotifyFinishedChanged,
-            ),
+          const SizedBox(height: 8),
+          // One level stored as the two legacy flags (see AgentNotifyLevel).
+          Builder(
+            builder: (context) {
+              final level = AgentNotifyLevel.fromFlags(
+                input: agentNotifyInput,
+                finished: agentNotifyFinished,
+              );
+              return DropdownButtonFormField<AgentNotifyLevel>(
+                key: const ValueKey('agent-notify-level'),
+                initialValue: level,
+                decoration: InputDecoration(
+                  labelText: 'Agent notifications',
+                  helperText: level.description,
+                  helperMaxLines: 3,
+                  prefixIcon: const Icon(Icons.notifications_outlined),
+                ),
+                items: [
+                  for (final value in AgentNotifyLevel.values)
+                    DropdownMenuItem(value: value, child: Text(value.label)),
+                ],
+                onChanged: (value) {
+                  if (value == null) {
+                    return;
+                  }
+                  onAgentNotifyInputChanged(value.inputFlag);
+                  onAgentNotifyFinishedChanged(value.finishedFlag);
+                },
+              );
+            },
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<AgentMonitorKind>(

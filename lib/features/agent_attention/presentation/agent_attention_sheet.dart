@@ -3,7 +3,10 @@ import 'dart:async';
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
+import 'package:conduit/features/agent_attention/domain/agent_inbox.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
+import 'package:conduit/features/agent_attention/presentation/widgets/agent_inbox_widgets.dart';
+import 'package:conduit/features/agent_attention/presentation/widgets/agent_usage_tab.dart';
 import 'package:conduit/features/companion_setup/presentation/companion_status_chip.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:flutter/material.dart';
@@ -13,12 +16,14 @@ import 'package:flutter/services.dart';
 /// (and optionally send the provider's focus command first).
 typedef AgentAttentionNavigate = void Function(SavedHost host, AgentInfo agent);
 
-/// Shows the Agent Attention dashboard: every monitored host with its
-/// agents, their states, and useful empty/error/unavailable states.
+/// Shows the Agent panel: the Inbox (one live row per agent session, by
+/// section, approvals pinned on top) and the Usage tab. [onOpenChat], when
+/// given, adds a "Chat" button to every row.
 Future<void> showAgentAttentionSheet({
   required BuildContext context,
   required AgentAttentionController controller,
   required AgentAttentionNavigate onOpenAgent,
+  AgentAttentionNavigate? onOpenChat,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -35,23 +40,51 @@ Future<void> showAgentAttentionSheet({
           controller: controller,
           scrollController: scrollController,
           onOpenAgent: onOpenAgent,
+          onOpenChat: onOpenChat,
         ),
       ),
     ),
   );
 }
 
-class AgentAttentionSheet extends StatelessWidget {
+class AgentAttentionSheet extends StatefulWidget {
   const AgentAttentionSheet({
     required this.controller,
     required this.onOpenAgent,
+    this.onOpenChat,
     this.scrollController,
     super.key,
   });
 
   final AgentAttentionController controller;
   final AgentAttentionNavigate onOpenAgent;
+
+  /// Opens the agent's chat view; the row shows a "Chat" button when set.
+  final AgentAttentionNavigate? onOpenChat;
   final ScrollController? scrollController;
+
+  @override
+  State<AgentAttentionSheet> createState() => _AgentAttentionSheetState();
+}
+
+class _AgentAttentionSheetState extends State<AgentAttentionSheet>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabs = TabController(length: 2, vsync: this)
+    ..addListener(_onTab);
+
+  AgentAttentionController get controller => widget.controller;
+
+  // Swap the content as soon as a tab is picked, not after the indicator
+  // animation.
+  void _onTab() => setState(() {});
+
+  @override
+  void dispose() {
+    _tabs
+      ..removeListener(_onTab)
+      ..dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -63,14 +96,59 @@ class AgentAttentionSheet extends StatelessWidget {
         ? MediaQuery.viewPaddingOf(context).bottom
         : 0.0;
     return ListenableBuilder(
-      listenable: controller,
+      listenable: Listenable.merge([controller, controller.inboxDismissals]),
       builder: (context, _) {
         final hosts = controller.monitoredHosts;
+        final inputs = <AgentInboxHostInput>[
+          for (final host in hosts)
+            (
+              hostId: host.id,
+              hostName: host.name,
+              agents: controller.statusFor(host.id)?.agents ?? const [],
+            ),
+        ];
+        final inbox = AgentInbox.build(
+          inputs,
+          dismissals: controller.inboxDismissals,
+        );
+        final attention =
+            inbox.countIn(AgentInboxSection.needsApproval) +
+            inbox.countIn(AgentInboxSection.needsInput);
         return ListView(
-          controller: scrollController,
-          padding: EdgeInsets.fromLTRB(20, 12, 20, 24 + bottomInset),
+          controller: widget.scrollController,
+          padding: EdgeInsets.fromLTRB(16, 8, 16, 24 + bottomInset),
           children: [
-            Text('Agents', style: theme.textTheme.titleMedium),
+            Row(
+              children: [
+                Expanded(
+                  child: Text('Agents', style: theme.textTheme.titleMedium),
+                ),
+                if (inbox.hiddenCount > 0)
+                  TextButton(
+                    onPressed: controller.inboxDismissals.restoreAll,
+                    child: Text('Show ${inbox.hiddenCount} hidden'),
+                  ),
+              ],
+            ),
+            TabBar(
+              controller: _tabs,
+              tabs: [
+                Tab(
+                  height: 40,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text('Inbox'),
+                      if (attention > 0) ...[
+                        const SizedBox(width: 6),
+                        Badge.count(count: attention),
+                      ],
+                    ],
+                  ),
+                ),
+                const Tab(height: 40, text: 'Usage'),
+              ],
+            ),
             const SizedBox(height: 8),
             if (hosts.isEmpty)
               const _EmptyState(
@@ -80,23 +158,126 @@ class AgentAttentionSheet extends StatelessWidget {
                     "monitoring in a machine's settings, then connect "
                     'to it.',
               )
-            else
-              for (final host in hosts)
-                _HostSection(
-                  host: host,
-                  providerLabel: controller.providerFor(host.id).label,
-                  status:
-                      controller.statusFor(host.id) ??
-                      const AgentHostStatus(loading: true),
-                  onRefresh: () => controller.refresh(host.id),
-                  onOpenAgent: (agent) => onOpenAgent(host, agent),
-                  isDeciding: controller.isDeciding,
-                  onDecide: (request, verdict) =>
-                      _decide(context, host, request, verdict),
-                ),
+            else ...[
+              if (_tabs.index == 0)
+                ..._inboxChildren(context, inbox, grouped: hosts.length > 1)
+              else
+                ...buildAgentUsageChildren(context, inputs),
+              _MachinesSection(
+                hosts: hosts,
+                controller: controller,
+                hasAgents: inputs.any((input) => input.agents.isNotEmpty),
+              ),
+            ],
           ],
         );
       },
+    );
+  }
+
+  List<Widget> _inboxChildren(
+    BuildContext context,
+    AgentInbox inbox, {
+    required bool grouped,
+  }) {
+    final theme = Theme.of(context);
+    final hostsById = {
+      for (final host in controller.monitoredHosts) host.id: host,
+    };
+    final anyLoaded = controller.monitoredHosts.any((host) {
+      final status = controller.statusFor(host.id);
+      return status != null && !status.loading;
+    });
+    if (inbox.isEmpty) {
+      if (!anyLoaded) {
+        return const [];
+      }
+      return [
+        _EmptyState(
+          icon: Icons.check_circle_outline_rounded,
+          message: inbox.hiddenCount > 0
+              ? 'Nothing new. Dismissed agents come back when they change.'
+              : 'No agents are running on the monitored machines.',
+        ),
+      ];
+    }
+    return [
+      for (final MapEntry(key: section, value: groups)
+          in inbox.sections.entries) ...[
+        _SectionHeader(section: section, count: inbox.countIn(section)),
+        for (final group in groups) ...[
+          if (grouped)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 2, 4, 6),
+              child: Text(
+                '${group.hostName} / ${group.project}',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          for (final entry in group.entries)
+            if (hostsById[entry.hostId] case final host?)
+              _row(context, host, entry, section, showHost: !grouped),
+        ],
+      ],
+    ];
+  }
+
+  Widget _row(
+    BuildContext context,
+    SavedHost host,
+    AgentInboxEntry entry,
+    AgentInboxSection section, {
+    required bool showHost,
+  }) {
+    final agent = entry.agent;
+    final openChat = widget.onOpenChat;
+    final row = AgentInboxRow(
+      key: ValueKey('agent-row-${entry.key}'),
+      entry: entry,
+      showHost: showHost,
+      onOpen: () => widget.onOpenAgent(host, agent),
+      onOpenChat: openChat == null ? null : () => openChat(host, agent),
+      pending: agent.pendingRequests.isEmpty
+          ? null
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (final request in agent.pendingRequests)
+                  PendingRequestCard(
+                    key: ValueKey('request-${request.id}'),
+                    request: request,
+                    busy: controller.isDeciding(request.id),
+                    onDecide: (verdict) =>
+                        _decide(context, host, request, verdict),
+                  ),
+              ],
+            ),
+    );
+    if (!section.dismissible) {
+      return row;
+    }
+    final theme = Theme.of(context);
+    Widget background(AlignmentGeometry alignment) => Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      alignment: alignment,
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Text('Hide', style: theme.textTheme.labelLarge),
+    );
+    return Dismissible(
+      key: ValueKey('dismiss-${entry.key}'),
+      background: background(AlignmentDirectional.centerStart),
+      secondaryBackground: background(AlignmentDirectional.centerEnd),
+      onDismissed: (_) =>
+          controller.inboxDismissals.dismiss(entry.hostId, agent),
+      child: row,
     );
   }
 
@@ -122,27 +303,46 @@ class AgentAttentionSheet extends StatelessWidget {
   }
 }
 
-typedef _DecideCallback =
-    void Function(PendingPermissionRequest request, PermissionVerdict verdict);
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({required this.section, required this.count});
 
-class _HostSection extends StatelessWidget {
-  const _HostSection({
-    required this.host,
-    required this.providerLabel,
-    required this.status,
-    required this.onRefresh,
-    required this.onOpenAgent,
-    required this.isDeciding,
-    required this.onDecide,
+  final AgentInboxSection section;
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final loud =
+        section == AgentInboxSection.needsApproval ||
+        section == AgentInboxSection.needsInput;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 10, 4, 6),
+      child: Text(
+        '${section.label.toUpperCase()}  $count',
+        style: theme.textTheme.labelMedium?.copyWith(
+          letterSpacing: 0.8,
+          fontWeight: FontWeight.w700,
+          color: loud
+              ? theme.colorScheme.error
+              : theme.colorScheme.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+}
+
+/// Per machine: which provider it uses, whether it is loading, failing or
+/// unavailable, and a refresh button.
+class _MachinesSection extends StatelessWidget {
+  const _MachinesSection({
+    required this.hosts,
+    required this.controller,
+    required this.hasAgents,
   });
 
-  final SavedHost host;
-  final String providerLabel;
-  final AgentHostStatus status;
-  final VoidCallback onRefresh;
-  final ValueChanged<AgentInfo> onOpenAgent;
-  final bool Function(String requestId) isDeciding;
-  final _DecideCallback onDecide;
+  final List<SavedHost> hosts;
+  final AgentAttentionController controller;
+  final bool hasAgents;
 
   @override
   Widget build(BuildContext context) {
@@ -151,330 +351,107 @@ class _HostSection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.only(top: 10, bottom: 4),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  host.name,
-                  style: theme.textTheme.titleSmall,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+          padding: const EdgeInsets.fromLTRB(4, 14, 4, 2),
+          child: Text(
+            'MACHINES',
+            style: theme.textTheme.labelMedium?.copyWith(
+              letterSpacing: 0.8,
+              fontWeight: FontWeight.w700,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+        for (final host in hosts)
+          _MachineRow(
+            host: host,
+            providerLabel: controller.providerFor(host.id).label,
+            status:
+                controller.statusFor(host.id) ??
+                const AgentHostStatus(loading: true),
+            onRefresh: () => controller.refresh(host.id),
+          ),
+      ],
+    );
+  }
+}
+
+class _MachineRow extends StatelessWidget {
+  const _MachineRow({
+    required this.host,
+    required this.providerLabel,
+    required this.status,
+    required this.onRefresh,
+  });
+
+  final SavedHost host;
+  final String providerLabel;
+  final AgentHostStatus status;
+  final VoidCallback onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final count = status.agents.length;
+    final problem =
+        status.unavailableReason ??
+        (status.error == null
+            ? null
+            : 'Could not read agent state. ${status.error!} '
+                  'Monitoring keeps retrying while connected.');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(text: host.name, style: theme.textTheme.bodyLarge),
+                    TextSpan(
+                      text:
+                          '  $providerLabel'
+                          '${problem == null && !status.loading ? ' · $count agent${count == 1 ? '' : 's'}' : ''}',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
                 ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
-              Text(providerLabel, style: theme.textTheme.bodySmall),
+            ),
+            if (status.loading && status.agents.isEmpty && problem == null)
+              const Padding(
+                padding: EdgeInsets.all(12),
+                child: SizedBox.square(
+                  dimension: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              )
+            else
               IconButton(
-                tooltip: 'Refresh',
+                tooltip: 'Refresh ${host.name}',
                 iconSize: 18,
                 icon: const Icon(Icons.refresh_rounded),
                 onPressed: onRefresh,
               ),
-            ],
-          ),
+          ],
         ),
         // Offers the Agent hooks screen while the companion is missing
         // (renders nothing once it is installed, or without a scope).
         if (status.unavailableReason != null ||
             (!status.loading && status.error == null && status.agents.isEmpty))
           CompanionInstallBanner(host: host),
-        if (status.unavailableReason != null)
+        if (problem != null)
           _EmptyState(
-            icon: Icons.extension_off_outlined,
-            message: status.unavailableReason!,
-          )
-        else if (status.error != null)
-          _EmptyState(
-            icon: Icons.error_outline_rounded,
-            message:
-                'Could not read agent state. ${status.error!} '
-                'Monitoring keeps retrying while connected.',
-          )
-        else if (status.loading && status.agents.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 18),
-            child: Center(child: CircularProgressIndicator()),
-          )
-        else if (status.agents.isEmpty)
-          const _EmptyState(
-            icon: Icons.check_circle_outline_rounded,
-            message: 'No agents are running on this machine.',
-          )
-        else
-          for (final agent in status.agents)
-            _AgentTile(
-              agent: agent,
-              onTap: () => onOpenAgent(agent),
-              isDeciding: isDeciding,
-              onDecide: onDecide,
-            ),
+            icon: status.unavailableReason != null
+                ? Icons.extension_off_outlined
+                : Icons.error_outline_rounded,
+            message: problem,
+          ),
       ],
-    );
-  }
-}
-
-class _AgentTile extends StatelessWidget {
-  const _AgentTile({
-    required this.agent,
-    required this.onTap,
-    required this.isDeciding,
-    required this.onDecide,
-  });
-
-  final AgentInfo agent;
-  final VoidCallback onTap;
-  final bool Function(String requestId) isDeciding;
-  final _DecideCallback onDecide;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final (icon, color) = switch (agent.state) {
-      AgentAttentionState.working => (
-        Icons.autorenew_rounded,
-        colorScheme.primary,
-      ),
-      AgentAttentionState.needsInput => (
-        Icons.pan_tool_alt_outlined,
-        colorScheme.error,
-      ),
-      AgentAttentionState.blocked => (Icons.block_rounded, colorScheme.error),
-      AgentAttentionState.finished => (
-        Icons.check_circle_rounded,
-        colorScheme.tertiary,
-      ),
-      AgentAttentionState.idle => (
-        Icons.pause_circle_outline_rounded,
-        colorScheme.onSurfaceVariant,
-      ),
-      AgentAttentionState.unknown => (
-        Icons.help_outline_rounded,
-        colorScheme.onSurfaceVariant,
-      ),
-    };
-    final location = [
-      if (agent.kind.isNotEmpty) agent.kind,
-      if (agent.workspace != null) 'workspace ${agent.workspace}',
-      if (agent.tab != null) 'tab ${agent.tab}',
-    ].join(' · ');
-    final changed = agent.stateChangedAt;
-    final pending = agent.pendingRequests;
-    // A permission prompt is reported as "needs input"; say what kind.
-    final stateLabel = pending.isNotEmpty && agent.state.needsAttention
-        ? 'Needs permission'
-        : agent.state.label;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Material(
-        color: theme.colorScheme.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-          side: BorderSide(color: theme.colorScheme.outlineVariant),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Semantics(
-              label:
-                  'Agent ${agent.name}, $stateLabel'
-                  '${location.isEmpty ? '' : ', $location'}',
-              button: true,
-              child: ListTile(
-                onTap: onTap,
-                leading: Icon(icon, color: color),
-                title: Text(
-                  agent.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: location.isEmpty ? null : Text(location, maxLines: 1),
-                trailing: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      stateLabel,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: color,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    if (changed != null)
-                      Text(
-                        _relativeTime(changed),
-                        style: theme.textTheme.bodySmall,
-                      ),
-                  ],
-                ),
-              ),
-            ),
-            if (agent.lastMessage case final message?)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-                child: Text(
-                  message,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
-                  ),
-                  maxLines: 4,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            for (final request in pending)
-              _PendingRequestCard(
-                request: request,
-                busy: isDeciding(request.id),
-                onDecide: (verdict) => onDecide(request, verdict),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  String _relativeTime(DateTime time) {
-    final delta = DateTime.now().toUtc().difference(time.toUtc());
-    if (delta.inSeconds < 60) {
-      return 'just now';
-    }
-    if (delta.inMinutes < 60) {
-      return '${delta.inMinutes}m ago';
-    }
-    if (delta.inHours < 24) {
-      return '${delta.inHours}h ago';
-    }
-    return '${delta.inDays}d ago';
-  }
-}
-
-/// One pending permission request: what the agent wants to run, the full
-/// tool input on demand, and the three answers.
-class _PendingRequestCard extends StatefulWidget {
-  const _PendingRequestCard({
-    required this.request,
-    required this.busy,
-    required this.onDecide,
-  });
-
-  final PendingPermissionRequest request;
-  final bool busy;
-  final ValueChanged<PermissionVerdict> onDecide;
-
-  @override
-  State<_PendingRequestCard> createState() => _PendingRequestCardState();
-}
-
-class _PendingRequestCardState extends State<_PendingRequestCard> {
-  bool _expanded = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final request = widget.request;
-    final hasInput = request.toolInput.trim().isNotEmpty;
-    return Container(
-      color: theme.colorScheme.errorContainer.withValues(alpha: 0.25),
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Icon(
-                Icons.shield_outlined,
-                size: 18,
-                color: theme.colorScheme.error,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  request.toolName,
-                  style: theme.textTheme.titleSmall,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              if (hasInput)
-                TextButton.icon(
-                  onPressed: () => setState(() => _expanded = !_expanded),
-                  icon: Icon(
-                    _expanded
-                        ? Icons.expand_less_rounded
-                        : Icons.expand_more_rounded,
-                    size: 18,
-                  ),
-                  label: Text(_expanded ? 'Hide input' : 'Tool input'),
-                ),
-            ],
-          ),
-          SelectableText(
-            request.summary,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              fontFamily: 'monospace',
-            ),
-            maxLines: _expanded ? null : 3,
-          ),
-          if (_expanded && hasInput) ...[
-            const SizedBox(height: 8),
-            Container(
-              constraints: const BoxConstraints(maxHeight: 220),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              padding: const EdgeInsets.all(10),
-              child: SingleChildScrollView(
-                child: SelectableText(
-                  request.toolInput,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    fontFamily: 'monospace',
-                  ),
-                ),
-              ),
-            ),
-          ],
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              for (final verdict in const [
-                PermissionVerdict.deny,
-                PermissionVerdict.always,
-                PermissionVerdict.allow,
-              ]) ...[
-                if (verdict != PermissionVerdict.deny) const SizedBox(width: 8),
-                Expanded(
-                  child: switch (verdict) {
-                    PermissionVerdict.allow => FilledButton(
-                      onPressed: widget.busy
-                          ? null
-                          : () => widget.onDecide(verdict),
-                      child: Text(verdict.label),
-                    ),
-                    PermissionVerdict.always => FilledButton.tonal(
-                      onPressed: widget.busy
-                          ? null
-                          : () => widget.onDecide(verdict),
-                      child: Text(verdict.label),
-                    ),
-                    PermissionVerdict.deny => OutlinedButton(
-                      onPressed: widget.busy
-                          ? null
-                          : () => widget.onDecide(verdict),
-                      child: Text(verdict.label),
-                    ),
-                  },
-                ),
-              ],
-            ],
-          ),
-          if (widget.busy)
-            const Padding(
-              padding: EdgeInsets.only(top: 8),
-              child: LinearProgressIndicator(),
-            ),
-        ],
-      ),
     );
   }
 }
@@ -489,7 +466,7 @@ class _EmptyState extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 14),
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

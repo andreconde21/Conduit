@@ -1,3 +1,7 @@
+import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
+import 'package:conduit/features/companion_setup/data/companion_bundle.dart';
+import 'package:conduit/features/companion_setup/presentation/companion_setup_controller.dart';
+import 'package:conduit/features/companion_setup/presentation/companion_setup_page.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/host_form_page.dart';
 import 'package:flutter/material.dart';
@@ -64,4 +68,47 @@ void main() {
 
   // The Agent hooks row that replaced "Set up companion" is covered in
   // test/features/companion_setup/companion_setup_page_test.dart.
+
+  testWidgets('the notification level picker writes both notify flags', (
+    tester,
+  ) async {
+    final controller = CompanionSetupController(
+      runnerFactory: (_) {
+        return ScriptedAgentCommandRunner([
+          const AgentCommandResult(stdout: '', stderr: '', exitCode: 127),
+        ]);
+      },
+      sftpRepository: NoNetworkSftpRepository(),
+      loadBundle: () async => const CompanionBundle(version: '0', files: {}),
+    );
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      CompanionSetupScope(
+        controller: controller,
+        child: MaterialApp(home: HostFormPage(host: buildHost('h'))),
+      ),
+    );
+    await revealAgentSection(tester);
+    final picker = find.byKey(const ValueKey('agent-notify-level'));
+    await scrollTo(tester, picker);
+    expect(find.text('All'), findsOneWidget);
+
+    await tester.tap(picker);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Approvals and errors').last);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('update the inbox quietly'), findsOneWidget);
+
+    final tile = find.byKey(const ValueKey('companion-setup-tile'));
+    await scrollTo(tester, tile);
+    await tester.tap(tile);
+    await tester.pumpAndSettle();
+    // The Agent hooks row opens its screen with the draft as edited.
+    final probed = tester
+        .widget<CompanionSetupPage>(find.byType(CompanionSetupPage))
+        .host;
+    expect(probed.agentNotifyLevel, AgentNotifyLevel.approvalsAndErrors);
+    expect(probed.agentNotifyInput, isTrue);
+    expect(probed.agentNotifyFinished, isFalse);
+  });
 }

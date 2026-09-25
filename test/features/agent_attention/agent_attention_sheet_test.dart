@@ -62,7 +62,7 @@ void main() {
     );
   });
 
-  testWidgets('shows agents with states, kind, and location', (tester) async {
+  testWidgets('shows agents with states, kind, and machine', (tester) async {
     await pumpSheet(tester, [
       const AgentCommandResult(
         stdout:
@@ -76,7 +76,9 @@ void main() {
 
     expect(find.text('builder'), findsOneWidget);
     expect(find.text('Working'), findsOneWidget);
-    expect(find.text('claude-code · workspace w1 · tab w1:t2'), findsOneWidget);
+    // The kind badge names the CLI; the meta line names the machine.
+    expect(find.byTooltip('Claude Code (claude-code)'), findsOneWidget);
+    expect(find.text('Host h'), findsWidgets);
     expect(find.text('reviewer'), findsOneWidget);
     expect(find.text('Needs input'), findsOneWidget);
   });
