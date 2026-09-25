@@ -51,8 +51,13 @@ final _scrubber = TelemetryScrubber(
   ],
 );
 
-void expectClean(Object json) {
-  final text = jsonEncode(json);
+void expectClean(Map<String, dynamic> json) {
+  // Random ids and times can contain any digits.
+  final text = jsonEncode(
+    {...json}
+      ..remove('event_id')
+      ..remove('timestamp'),
+  );
   for (final word in _forbidden) {
     expect(text, isNot(contains(word)), reason: 'leaked "$word": $text');
   }
