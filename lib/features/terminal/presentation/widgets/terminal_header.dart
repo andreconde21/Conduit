@@ -395,9 +395,15 @@ class _OverflowMenu extends StatelessWidget {
           ],
           <PopupMenuEntry<TerminalHeaderAction>>[
             if (onReconnect != null)
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: TerminalHeaderAction.reconnect,
-                child: _MenuRow(Icons.refresh_rounded, 'Reconnect'),
+                child: _MenuRow(
+                  Icons.refresh_rounded,
+                  // A local shell starts over; there is no connection.
+                  session?.runsOnThisComputer ?? false
+                      ? 'Restart'
+                      : 'Reconnect',
+                ),
               ),
             if (onToggleFullscreen != null)
               const PopupMenuItem(

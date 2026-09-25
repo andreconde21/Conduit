@@ -40,6 +40,15 @@ class FlutterPtyProcess implements PtyProcess {
   @override
   void resize(int rows, int columns) => _pty.resize(rows, columns);
 
+  /// Sends [signal] to the process (Linux and macOS; Windows ends it).
+  bool signal(ProcessSignal signal) {
+    try {
+      return _pty.kill(signal);
+    } catch (_) {
+      return false;
+    }
+  }
+
   @override
   void kill() {
     try {

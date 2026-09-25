@@ -54,6 +54,8 @@ import 'package:conduit/features/terminal/presentation/terminal_page.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:conduit/features/terminal/presentation/trusted_keys_page.dart';
+import 'package:conduit/features/this_computer/data/host_channels.dart';
+import 'package:conduit/features/this_computer/domain/local_shell_launch.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
@@ -90,6 +92,7 @@ class HostsPage extends StatefulWidget {
     ),
     this.previewRefreshInterval = const Duration(seconds: 2),
     this.paneRefocusDelay = const Duration(seconds: 4),
+    this.hostChannels,
     super.key,
   });
 
@@ -129,6 +132,10 @@ class HostsPage extends StatefulWidget {
   /// After opening a new session for a pane, the pane is focused again
   /// once Herdr has attached.
   final Duration paneRefocusDelay;
+
+  /// Commands and port forwards per machine for the terminal page (SSH or
+  /// This computer); null means SSH only.
+  final HostChannels? hostChannels;
 
   @override
   State<HostsPage> createState() => _HostsPageState();
@@ -180,7 +187,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
 
   MachineFilter get _filter => MachineFilter(
     _preferences.machineFilter,
-  ).validFor(widget.hostsController.hosts);
+  ).validFor(widget.hostsController.machines);
 
   @override
   void initState() {
@@ -295,7 +302,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
   List<SavedHost> get _shownHosts {
     final filter = _filter;
     return [
-      for (final host in widget.hostsController.sortedHosts)
+      for (final host in widget.hostsController.sortedMachines)
         if (!host.isLocal && filter.includes(host.id)) host,
     ];
   }
@@ -325,6 +332,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
   }
 
   bool _connectedBefore(SavedHost host) =>
+      host.isThisComputer ||
       _trustedEndpoints.contains('${host.host.trim()}:${host.port}') ||
       _sessionsFor(host).isNotEmpty;
 
@@ -344,8 +352,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
       if (baseHostId(session.host.id) == host.id) session,
   ];
 
-  SavedHost? _hostById(String id) =>
-      widget.hostsController.hosts.where((host) => host.id == id).firstOrNull;
+  SavedHost? _hostById(String id) => widget.hostsController.findById(id);
 
   void _handlePromptChanged() {
     if (_showingHostKeyPrompt || !mounted) return;
@@ -471,11 +478,11 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
 
   Widget _machineChip() {
     final filter = _filter;
-    final hosts = widget.hostsController.hosts;
+    final hosts = widget.hostsController.machines;
     return MachineChip(
       label: hosts.isEmpty && filter.isAll
           ? 'Machines'
-          : filter.label(widget.hostsController.sortedHosts),
+          : filter.label(widget.hostsController.sortedMachines),
       live: _shownSessions.isNotEmpty,
       otherAttentionCount: _hiddenAttentionCount(filter),
       onTap: _openMachineSheet,
@@ -484,7 +491,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
 
   List<Widget> _buildMain(BuildContext context) {
     final controller = widget.hostsController;
-    if (controller.isLoading && controller.hosts.isEmpty) {
+    if (controller.isLoading && controller.machines.isEmpty) {
       return const [
         SliverToBoxAdapter(
           child: Padding(
@@ -494,7 +501,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
         ),
       ];
     }
-    if (controller.errorMessage != null && controller.hosts.isEmpty) {
+    if (controller.errorMessage != null && controller.machines.isEmpty) {
       return [
         SliverToBoxAdapter(
           child: MessageState(
@@ -507,7 +514,8 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
         ),
       ];
     }
-    if (controller.hosts.isEmpty && !widget.workspaceController.hasSessions) {
+    if (controller.machines.isEmpty &&
+        !widget.workspaceController.hasSessions) {
       return [_buildNoMachines(context)];
     }
     return [..._buildSessions(context), ..._buildOtherWorkspaces(context)];
@@ -1101,11 +1109,46 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
 
   Future<void> _handleMenu(MachineMenuChoice choice, SavedHost host) async {
     final action = choice.hostAction;
-    if (action == null) {
-      await showCompanionSetup(context, host);
+    if (action != null) {
+      await _handleHostAction(action, host);
       return;
     }
-    await _handleHostAction(action, host);
+    if (choice == MachineMenuChoice.shell) {
+      await _pickWindowsShell();
+      return;
+    }
+    await showCompanionSetup(context, host);
+  }
+
+  /// Windows: which shell "This computer" opens (new sessions use it).
+  Future<void> _pickWindowsShell() async {
+    final controller = widget.hostsController;
+    final picked = await showDialog<WindowsShellKind>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Shell on this computer'),
+        children: [
+          RadioGroup<WindowsShellKind>(
+            groupValue: controller.windowsShell,
+            onChanged: (value) => Navigator.of(context).pop(value),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final kind in WindowsShellKind.values)
+                  RadioListTile<WindowsShellKind>(
+                    value: kind,
+                    title: Text(kind.label),
+                    subtitle: kind == WindowsShellKind.wsl
+                        ? const Text('Local tmux, Herdr and agent hooks')
+                        : null,
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+    if (picked != null) await controller.setWindowsShell(picked);
   }
 
   /// "+": the connect picker for the one shown machine, or a machine
@@ -1117,7 +1160,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
       return;
     }
     final candidates = shown.isEmpty
-        ? widget.hostsController.sortedHosts
+        ? widget.hostsController.sortedMachines
         : shown;
     if (candidates.isEmpty) {
       await _openForm();
@@ -1144,7 +1187,11 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
               for (final host in candidates)
                 ListTile(
                   key: ValueKey('new-session-${host.id}'),
-                  leading: const Icon(Icons.dns_outlined),
+                  leading: Icon(
+                    host.isThisComputer
+                        ? Icons.computer_rounded
+                        : Icons.dns_outlined,
+                  ),
                   title: Text(host.name),
                   subtitle: Text(host.endpoint),
                   onTap: () => Navigator.of(context).pop(host),
@@ -1362,6 +1409,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
           hostKeyVerifier: widget.hostKeyVerifier,
           connectFlow: widget.connectFlow,
           homeBoards: _boards,
+          hostChannels: widget.hostChannels,
         ),
       ),
     );
