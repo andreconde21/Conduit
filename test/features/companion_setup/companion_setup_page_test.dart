@@ -107,8 +107,8 @@ void main() {
 
     expect(badge('Waiting for first event'), findsOneWidget);
     expect(find.text('Send test event'), findsOneWidget);
-    // The fake bundle (0.2.0) is newer than the installed 0.1.0.
-    expect(find.text('Update to 0.2.0'), findsOneWidget);
+    // The fake bundle (0.3.0) is newer than the installed 0.2.0.
+    expect(find.text('Update to 0.3.0'), findsOneWidget);
     expect(find.text('Stop daemon'), findsNothing);
     expect(find.text('Uninstall'), findsOneWidget);
   });
@@ -147,7 +147,7 @@ void main() {
     await pumpPage(tester);
     expect(badge('Update available'), findsOneWidget);
     expect(
-      find.widgetWithText(FilledButton, 'Update to 0.2.0'),
+      find.widgetWithText(FilledButton, 'Update to 0.3.0'),
       findsOneWidget,
     );
   });

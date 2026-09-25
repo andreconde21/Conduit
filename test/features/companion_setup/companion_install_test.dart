@@ -46,7 +46,7 @@ void main() {
     final log = <String>[];
     final outcome = await controller.install(host, onLog: log.add);
 
-    const dir = '/home/andre/.local/share/conductore-src/0.2.0';
+    const dir = '/home/andre/.local/share/conductore-src/0.3.0';
     expect(outcome.ok, isTrue);
     expect(outcome.directory, dir);
     expect(sftp.writtenFiles.keys, {
@@ -77,7 +77,7 @@ void main() {
       controller.statusFor(host)?.state,
       CompanionState.waitingForFirstEvent,
     );
-    expect(log.first, contains('Uploading companion 0.2.0 (4 files)'));
+    expect(log.first, contains('Uploading companion 0.3.0 (4 files)'));
     expect(log, contains('Installed.'));
   });
 

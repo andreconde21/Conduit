@@ -160,12 +160,12 @@ void main() {
     test('older version or protocol is outdated', () {
       final oldVersion = classify(
         CompanionProbeResults(
-          version: ok(versionJson(version: '0.0.9')),
+          version: ok(versionJson(version: '0.1.0')),
           doctor: ok(doctorJson()),
         ),
       );
       expect(oldVersion.state, CompanionState.outdated);
-      expect(oldVersion.installedVersion, '0.0.9');
+      expect(oldVersion.installedVersion, '0.1.0');
 
       final oldProtocol = classify(
         CompanionProbeResults(
@@ -198,7 +198,7 @@ void main() {
       );
       expect(status.state, CompanionState.error);
       expect(status.errorDetail, contains('SyntaxError'));
-      expect(status.installedVersion, '0.1.0');
+      expect(status.installedVersion, '0.2.0');
     });
 
     test('an unreachable host is an error', () {
@@ -210,9 +210,9 @@ void main() {
     });
   });
 
-  test('output shaped like a real 0.1.0 install with a running daemon '
+  test('output shaped like a real 0.2.0 install with a running daemon '
       'classifies as active', () {
-    // Mirrors the shape of conductore-hostd 0.1.0 on a live host (checked
+    // Mirrors the shape of conductore-hostd on a live host (checked
     // 2026-09-25): 14 doctor checks, all passing, and three agents.
     const names = [
       'node',
@@ -240,7 +240,7 @@ void main() {
     final checkedAt = DateTime(2026, 9, 25, 12);
     final result = classifyCompanionStatus(
       CompanionProbeResults(
-        version: ok('{"version":"0.1.0","protocol":1,"node":"22.23.1"}\n'),
+        version: ok('{"version":"0.2.0","protocol":1,"node":"22.23.1"}\n'),
         doctor: ok('$doctor\n'),
         status: ok(
           statusJson(
@@ -270,7 +270,7 @@ void main() {
       now: checkedAt,
     );
     expect(result.state, CompanionState.active);
-    expect(result.installedVersion, '0.1.0');
+    expect(result.installedVersion, '0.2.0');
     expect(result.installedProtocol, 1);
     expect(result.daemonRunning, isTrue);
     expect(result.checks, hasLength(14));

@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:conduit/features/agent_attention/domain/agent_command_runner.dart';
 
 /// Oldest companion release this app talks to.
-const kCompanionMinVersion = '0.1.0';
+const kCompanionMinVersion = '0.2.0';
 
 /// Companion CLI/JSON protocol this app speaks (`version` → `protocol`).
 const kCompanionProtocol = 1;

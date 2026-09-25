@@ -12,7 +12,7 @@ const os = require('os')
 const path = require('path')
 
 const PROTOCOL_VERSION = 1
-const VERSION = '0.1.0'
+const VERSION = '0.2.0'
 
 function homeDir () {
   return process.env.CONDUCTORE_HOME || path.join(os.homedir(), '.conductore')

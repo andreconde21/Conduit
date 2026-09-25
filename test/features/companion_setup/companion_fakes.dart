@@ -15,7 +15,7 @@ final notFound = failed(
   stderr: 'sh: 1: exec: conductore-hostd: not found',
 );
 
-String versionJson({String version = '0.1.0', int protocol = 1}) =>
+String versionJson({String version = '0.2.0', int protocol = 1}) =>
     jsonEncode({'version': version, 'protocol': protocol, 'node': '22.1.0'});
 
 String doctorJson({
@@ -105,7 +105,7 @@ Map<String, Object> healthyResponses({bool daemon = true}) => {
 };
 
 CompanionBundle fakeBundle() => CompanionBundle(
-  version: '0.2.0',
+  version: '0.3.0',
   files: {
     'install.sh': Uint8List.fromList(utf8.encode('#!/bin/sh\n')),
     'bin/conductore-hostd': Uint8List.fromList(utf8.encode('hostd')),
