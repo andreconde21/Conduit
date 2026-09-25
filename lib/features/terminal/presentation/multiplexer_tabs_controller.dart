@@ -178,13 +178,22 @@ class MultiplexerTabsKeys {
 class MultiplexerTabsController extends ChangeNotifier {
   MultiplexerTabsController({
     required this.backend,
-    this.pollInterval = const Duration(seconds: 2),
+    this.initialPollInterval = const Duration(seconds: 2),
     this.agentStateFor,
     this.keys = const MultiplexerTabsKeys(),
   });
 
   final MultiplexerTabsBackend backend;
-  final Duration pollInterval;
+
+  /// How often the tabs are listed while visible, until [setPollInterval].
+  final Duration initialPollInterval;
+
+  /// The strip's pace, and the open list's.
+  static const listPollInterval = Duration(seconds: 2);
+
+  /// The phone's compact label: it only names the current tab, and every
+  /// action (and a lifted finger) lists at once anyway.
+  static const compactPollInterval = Duration(seconds: 5);
 
   /// The companion's most urgent agent state for a tab, merged into the
   /// multiplexer's own status.
@@ -192,6 +201,22 @@ class MultiplexerTabsController extends ChangeNotifier {
   final MultiplexerTabsKeys keys;
 
   final _unread = MultiplexerUnreadTracker();
+  late Duration _pollInterval = initialPollInterval;
+
+  /// How often the tabs are listed while visible.
+  Duration get pollInterval => _pollInterval;
+
+  /// Polls every [interval] from now on (the strip wants 2 s; the phone's
+  /// compact label is fine with 5 s, the open list with 2 s again).
+  void setPollInterval(Duration interval) {
+    if (interval == _pollInterval || _disposed) return;
+    _pollInterval = interval;
+    if (_visible) {
+      _timer?.cancel();
+      _timer = Timer.periodic(interval, (_) => unawaited(refresh()));
+    }
+  }
+
   List<MultiplexerTab> _tabs = const [];
   bool _loaded = false;
   bool _visible = false;
@@ -216,7 +241,7 @@ class MultiplexerTabsController extends ChangeNotifier {
     _timer?.cancel();
     _timer = null;
     if (visible) {
-      _timer = Timer.periodic(pollInterval, (_) => unawaited(refresh()));
+      _timer = Timer.periodic(_pollInterval, (_) => unawaited(refresh()));
       unawaited(refresh());
     }
   }

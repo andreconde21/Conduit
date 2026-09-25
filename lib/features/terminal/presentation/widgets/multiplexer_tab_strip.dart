@@ -38,12 +38,16 @@ class MultiplexerTabsPoller extends StatefulWidget {
   const MultiplexerTabsPoller({
     required this.controller,
     this.active = true,
+    this.interval = const Duration(seconds: 2),
     this.child = const SizedBox.shrink(),
     super.key,
   });
 
   final MultiplexerTabsController controller;
   final bool active;
+
+  /// How often to list the tabs while polling.
+  final Duration interval;
   final Widget child;
 
   @override
@@ -83,9 +87,11 @@ class _MultiplexerTabsPollerState extends State<MultiplexerTabsPoller>
     _sync();
   }
 
-  void _sync() => widget.controller.setVisible(
-    widget.active && _routeVisible && _appResumed,
-  );
+  void _sync() {
+    widget.controller
+      ..setPollInterval(widget.interval)
+      ..setVisible(widget.active && _routeVisible && _appResumed);
+  }
 
   @override
   void dispose() {
