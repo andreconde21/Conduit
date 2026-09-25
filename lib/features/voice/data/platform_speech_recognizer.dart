@@ -26,8 +26,12 @@ class PlatformSpeechRecognizer implements SpeechRecognizer {
   Future<bool> requestPermission() => _bool('requestPermission');
 
   @override
-  Future<void> start({String? language}) => _call('start', {
+  Future<void> start({
+    String? language,
+    SpeechListenOptions options = const SpeechListenOptions(),
+  }) => _call('start', {
     'language': language == null || language.isEmpty ? null : language,
+    ...options.toMap(),
   });
 
   @override

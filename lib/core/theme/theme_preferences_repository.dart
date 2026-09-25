@@ -6,6 +6,7 @@ import 'package:conduit/core/theme/terminal_appearance.dart';
 import 'package:conduit/core/theme/terminal_pill_items.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
 import 'package:conduit/features/terminal/domain/terminal_gesture_preferences.dart';
+import 'package:conduit/features/voice/domain/voice_preferences.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -28,6 +29,7 @@ class ThemePreferences {
     this.menuButtonsEnabled = true,
     this.terminalGestures = TerminalGesturePreferences.defaults,
     this.speechLanguage = '',
+    this.voice = VoicePreferences.defaults,
     this.remoteClipboardEnabled = true,
     this.restoreSessionsOnLaunch = true,
     this.omarchySyncHostId,
@@ -70,6 +72,9 @@ class ThemePreferences {
 
   /// BCP-47 tag dictation listens in; empty means the device locale.
   final String speechLanguage;
+
+  /// Read-aloud and continuous-dictation settings.
+  final VoicePreferences voice;
 
   /// Whether text the remote copies with OSC 52 lands on the phone
   /// clipboard. On by default, like most desktop terminals.
@@ -120,6 +125,7 @@ class ThemePreferencesRepository {
   static const _menuButtonsEnabledKey = 'conduit.menu_buttons_enabled.v1';
   static const _terminalGesturesKey = 'conduit.terminal_gestures.v1';
   static const _speechLanguageKey = 'conduit.speech_language.v1';
+  static const _voiceKey = 'conductore.voice.v1';
   static const _remoteClipboardEnabledKey =
       'conduit.remote_clipboard_enabled.v1';
   static const _restoreSessionsOnLaunchKey =
@@ -179,6 +185,7 @@ class ThemePreferencesRepository {
     );
     final rawTerminalGestures = await _storage.read(key: _terminalGesturesKey);
     final rawSpeechLanguage = await _storage.read(key: _speechLanguageKey);
+    final rawVoice = await _storage.read(key: _voiceKey);
     final rawRemoteClipboardEnabled = await _storage.read(
       key: _remoteClipboardEnabledKey,
     );
@@ -224,6 +231,7 @@ class ThemePreferencesRepository {
           rawMenuButtonsEnabled == null || rawMenuButtonsEnabled == 'true',
       terminalGestures: TerminalGesturePreferences.decode(rawTerminalGestures),
       speechLanguage: rawSpeechLanguage?.trim() ?? '',
+      voice: VoicePreferences.decode(rawVoice),
       remoteClipboardEnabled:
           rawRemoteClipboardEnabled == null ||
           rawRemoteClipboardEnabled == 'true',
@@ -341,6 +349,7 @@ class ThemePreferencesRepository {
       key: _speechLanguageKey,
       value: preferences.speechLanguage,
     );
+    await _storage.write(key: _voiceKey, value: preferences.voice.encode());
     await _storage.write(
       key: _remoteClipboardEnabledKey,
       value: preferences.remoteClipboardEnabled.toString(),
