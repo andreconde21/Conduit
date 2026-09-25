@@ -321,6 +321,14 @@ class _TerminalPageState extends State<TerminalPage> {
       context: context,
       controller: attention,
       onOpenAgent: (host, agent) {
+        final flow = widget.connectFlow;
+        if (flow != null) {
+          // The agent's exact workspace, tab and pane, in the right tab.
+          unawaited(flow.openAgent(host, agent));
+          Navigator.of(context).pop();
+          _focusNode.requestFocus();
+          return;
+        }
         // Navigate as close as possible: activate the host's terminal tab
         // and ask the provider to focus the agent in the remote UI.
         final session = widget.workspace.sessions

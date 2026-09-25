@@ -389,6 +389,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
                   channel: PlatformAgentStatusWidgetChannel.instance,
                   agentAttention: widget.agentAttention,
                   workspace: widget.workspaceController,
+                  connectFlow: widget.connectFlow,
                   child: AgentPermissionActionListener(
                     source: PlatformAgentPermissionActions.instance,
                     agentAttention: widget.agentAttention,

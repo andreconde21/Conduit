@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_sheet.dart';
 import 'package:conduit/features/home_widget/domain/agent_status_widget_channel.dart';
+import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
 import 'package:conduit/features/terminal/presentation/terminal_workspace_controller.dart';
 import 'package:flutter/material.dart';
 
@@ -18,8 +19,13 @@ class AgentStatusLaunchListener extends StatefulWidget {
     required this.agentAttention,
     required this.workspace,
     required this.child,
+    this.connectFlow,
     super.key,
   });
+
+  /// Opens agents at their exact Herdr place; without it the sheet only
+  /// activates the host's tab and asks the provider to focus the agent.
+  final SessionConnectFlow? connectFlow;
 
   final AgentStatusWidgetChannel channel;
   final AgentAttentionController agentAttention;
@@ -79,6 +85,12 @@ class _AgentStatusLaunchListenerState extends State<AgentStatusLaunchListener> {
         context: context,
         controller: widget.agentAttention,
         onOpenAgent: (host, agent) {
+          final flow = widget.connectFlow;
+          if (flow != null) {
+            unawaited(flow.openAgent(host, agent));
+            Navigator.of(context).pop();
+            return;
+          }
           // The terminal page (if open) shows the activated tab; from the
           // hosts page the user opens the workspace with it preselected.
           final session = widget.workspace.sessions

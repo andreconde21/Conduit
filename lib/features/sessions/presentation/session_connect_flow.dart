@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:conduit/core/presentation/system_navigation_insets.dart';
 import 'package:conduit/core/theme/app_theme.dart';
+import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
@@ -59,7 +60,45 @@ class SessionConnectFlow {
     );
   }
 
-  void dispose() => unawaited(herdr.dispose());
+  /// Bumped when a deep link wants the terminal on screen; the home page
+  /// listens and opens the terminal workspace if it is not showing.
+  final ValueNotifier<int> terminalRequests = ValueNotifier<int>(0);
+
+  /// Deep link to [agent] on [host] (a notification, the agent sheet, the
+  /// home-screen widget): with a Herdr location, the exact workspace, tab
+  /// and pane; otherwise the host's open session, if any. Asks for the
+  /// terminal to be shown when something was opened.
+  Future<TerminalSessionController?> openAgent(
+    SavedHost host,
+    AgentInfo agent,
+  ) async {
+    final workspaceId = agent.workspace ?? '';
+    TerminalSessionController? session;
+    if (workspaceId.isNotEmpty && !host.isLocal) {
+      session = await openAgentLocation(
+        host,
+        workspaceId: workspaceId,
+        tabId: agent.tab ?? '',
+        paneId: agent.pane ?? '',
+      );
+    } else {
+      session = workspace.sessions
+          .where((candidate) => baseHostId(candidate.host.id) == host.id)
+          .firstOrNull;
+      if (session != null) {
+        workspace.activate(session);
+      }
+    }
+    if (session != null) {
+      terminalRequests.value += 1;
+    }
+    return session;
+  }
+
+  void dispose() {
+    unawaited(herdr.dispose());
+    terminalRequests.dispose();
+  }
 
   /// Target keys with an open session for [host], for the "Active" badges.
   Set<String> activeTargetKeysFor(SavedHost host) => {

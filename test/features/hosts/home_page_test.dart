@@ -9,7 +9,9 @@ import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/hosts/presentation/hosts_page.dart';
 import 'package:conduit/features/hosts/presentation/widgets/herdr_board.dart';
 import 'package:conduit/features/local_shell/presentation/local_shell_controller.dart';
+import 'package:conduit/features/sessions/domain/connect_preferences.dart';
 import 'package:conduit/features/sessions/domain/connect_target.dart';
+import 'package:conduit/features/sessions/presentation/session_connect_flow.dart';
 import 'package:conduit/features/sessions/presentation/session_grid_page.dart';
 import 'package:conduit/features/terminal/presentation/host_key_prompt_coordinator.dart';
 import 'package:conduit/features/terminal/presentation/terminal_page.dart';
@@ -32,9 +34,12 @@ void main() {
     runnerHosts = [];
   });
 
+  SessionConnectFlow? flow;
+
   Future<(TerminalWorkspaceController, HomeBoardController)> pumpHome(
     WidgetTester tester, {
     List<SavedHost> hosts = const [],
+    bool withConnectFlow = false,
   }) async {
     tester.view.physicalSize = const Size(1080, 2400);
     tester.view.devicePixelRatio = 2.6;
@@ -63,6 +68,14 @@ void main() {
     );
     addTearDown(board.dispose);
     final verifier = NoopVerifier();
+    flow = withConnectFlow
+        ? SessionConnectFlow(
+            hostsController: hostsController,
+            workspace: workspace,
+            runnerFactory: (_) => runner,
+            preferences: InMemoryConnectPreferencesRepository(),
+          )
+        : null;
 
     await tester.pumpWidget(
       MaterialApp(
@@ -85,6 +98,7 @@ void main() {
           ),
           fileExport: RecordingFileExport(),
           homeBoard: board,
+          connectFlow: flow,
           previewRefreshInterval: const Duration(days: 1),
           paneRefocusDelay: const Duration(milliseconds: 50),
         ),
@@ -185,6 +199,40 @@ void main() {
       runner.commands.where((c) => c.contains('workspace list')).length,
       greaterThan(before),
     );
+  });
+
+  testWidgets('with the connect flow a pane opens at its exact place', (
+    tester,
+  ) async {
+    final (workspace, _) = await pumpHome(
+      tester,
+      hosts: [host('a')],
+      withConnectFlow: true,
+    );
+
+    await tester.tap(find.text('Proofing PR 398'));
+    await tester.pump();
+    await tester.pump();
+
+    final session = workspace.sessions.single;
+    expect(session.host.id, 'a#herdr:w1');
+    // The attach command focuses the agent's pane before attaching, so the
+    // new client lands on it (Herdr's focus is per server).
+    expect(session.startupCommand, contains('herdr agent focus w1:p2'));
+    expect(session.startupCommand, endsWith('; herdr'));
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.byType(TerminalPage), findsOneWidget);
+
+    // Tapping another pane in that workspace reuses the tab.
+    tester.state<NavigatorState>(find.byType(Navigator)).pop();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.tap(find.text('Deploying images'));
+    await tester.pump();
+    await tester.pump();
+    expect(workspace.sessions, hasLength(1));
+    expect(runner.commands.last, contains('agent focus w1:p1'));
+    await tester.pump(const Duration(seconds: 1));
+    await flow!.herdr.dispose();
   });
 
   testWidgets('a pane in an open Herdr session activates that session', (
