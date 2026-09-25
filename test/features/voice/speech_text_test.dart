@@ -70,7 +70,7 @@ void main() {
         SpeechText.fromMarkdown(
           'Results\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n---\n\nAll good',
         ),
-        'Results. Table. All good.',
+        'Results. Table with 1 row. All good.',
       );
     });
 
