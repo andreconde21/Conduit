@@ -10,10 +10,10 @@
 #
 # Throttle: after the daemon takes a report from the spool it creates
 # usage/<session>.hold for CONDUCTORE_USAGE_THROTTLE_MS (10 s). While it
-# exists, reports are parked in usage/<session>.json (latest wins) instead of
-# waking the daemon, which reads the parked one when the hold ends. So the
-# daemon wakes at most once per 10 s per session and never misses the last
-# value. Layout: see bin/conductore-hook.
+# exists, reports are parked as usage/<session>.<pid> instead of waking the
+# daemon, which applies the newest one when the hold ends. So the daemon
+# wakes at most once per 10 s per session and never misses the last value.
+# Files are published with `ln` like the hook. Layout: see bin/conductore-hook.
 
 exec 2>/dev/null
 umask 077
@@ -70,13 +70,15 @@ case $sid in '' | *[!A-Za-z0-9_-]*) sid= ;; esac
 if [ -n "$sid" ] && { { [ -d "$d/spool" ] && [ -d "$d/tmp" ] && [ -d "$d/usage" ]; } ||
   mkdir -p "$d/spool" "$d/tmp" "$d/usage"; }; then
   tmp=$d/tmp/u.$$
+  while [ -e "$tmp" ]; do tmp=$tmp.n; done
   if [ -e "$d/usage/$sid.hold" ]; then
-    dest=$d/usage/$sid.json
+    dest=$d/usage/$sid.$$
   else
     dest=$d/spool/u.$$
-    while [ -e "$dest" ]; do dest=$dest.n; done
   fi
-  if printf 'conductore 1\nkind=usage\n\n%s\n' "$input" >"$tmp" && mv -f "$tmp" "$dest"; then
+  while [ -e "$dest" ]; do dest=$dest.n; done
+  if printf 'conductore 1\nkind=usage\ntmp=%s\n\n%s\n' "${tmp##*/}" "$input" >"$tmp" &&
+    { ln "$tmp" "$dest" || mv -f "$tmp" "$dest"; }; then
     case $dest in "$d/spool/"*) wake ;; esac
   else
     rm -f "$tmp"

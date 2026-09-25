@@ -141,6 +141,7 @@ class Daemon {
     this.pollers = new Set() // { socket, since, timer }
     this.usageEmits = new Map() // sessionId -> { at, timer }
     this.holds = new Map() // sessionId -> timer (usage/<sid>.hold exists)
+    this.usageSeen = new Map() // sessionId -> mtime of the last applied report
     this.queue = Promise.resolve()
     this.drainScheduled = false
     this.server = null
@@ -226,7 +227,7 @@ class Daemon {
     for (const name of names) {
       const file = path.join(dir, name)
       try {
-        if (name.startsWith('.claim.') || now - fs.lstatSync(file).mtimeMs > TMP_MAX_AGE_MS) fs.unlinkSync(file)
+        if (now - fs.lstatSync(file).mtimeMs > TMP_MAX_AGE_MS) fs.unlinkSync(file)
       } catch {}
     }
   }
@@ -264,15 +265,15 @@ class Daemon {
       if (!entries.length) return
       this.touch()
       for (const entry of entries) {
-        const item = spool.take(entry)
+        const item = spool.take(entry, paths.tmpDir())
         if (!item) continue
         try { await this.process(item) } catch (err) { log('daemon', 'spool entry failed', err.stack || String(err)) }
       }
     }
   }
 
-  async process ({ header, body }) {
-    if (header.kind === 'usage') return this.onUsageReport(body, true)
+  async process ({ header, body, mtime }) {
+    if (header.kind === 'usage') return this.onUsageReport(body, true, mtime)
     if (header.kind !== 'hook') return
     const event = body && typeof body === 'object' && !Array.isArray(body) ? body : {}
     if (!event.hook_event_name && header.event) event.hook_event_name = header.event
@@ -344,11 +345,14 @@ class Daemon {
   // --- usage ------------------------------------------------------------------
 
   // A statusline report (raw statusline JSON). From the spool it also opens a
-  // hold window: until it closes, the sh statusline parks newer reports in
-  // usage/<sid>.json instead of waking us; the last one is read on close.
-  onUsageReport (input, fromSpool) {
+  // hold window: until it closes, the sh statusline parks newer reports as
+  // usage/<sid>.<pid> instead of waking us; the newest is applied on close.
+  // Reports older than one already applied are ignored.
+  onUsageReport (input, fromSpool, mtime = Date.now()) {
     if (!input || typeof input !== 'object' || typeof input.session_id !== 'string' || !input.session_id) return
     const sid = input.session_id
+    if (mtime < (this.usageSeen.get(sid) || 0)) return
+    this.usageSeen.set(sid, mtime)
     this.handleUsage({ sessionId: sid, usage: usageFrom(input) })
     if (fromSpool) this.hold(sid)
   }
@@ -362,25 +366,31 @@ class Daemon {
     const timer = setTimeout(() => {
       this.holds.delete(sid)
       try { fs.unlinkSync(file) } catch {}
-      const parked = spool.claim(path.join(paths.usageDir(), `${sid}.json`), paths.tmpDir())
-      if (parked && parked.header.kind === 'usage') this.onUsageReport(parked.body, true)
+      this.applyParked(sid)
     }, ms)
     timer.unref()
     this.holds.set(sid, timer)
   }
 
+  // Applies the newest parked report of a session (or of all, at start) and
+  // drops the others.
+  applyParked (sid) {
+    const newest = new Map()
+    for (const entry of spool.list(paths.usageDir(), sid ? `${sid}.` : '')) {
+      if (entry.name.endsWith('.hold')) continue
+      const item = spool.take(entry, paths.tmpDir())
+      if (!item || item.header.kind !== 'usage' || !item.body || typeof item.body.session_id !== 'string') continue
+      newest.set(item.body.session_id, item) // list() is oldest first
+    }
+    for (const item of newest.values()) this.onUsageReport(item.body, true, item.mtime)
+  }
+
   // At start: holds from a previous run are stale; parked reports still count.
   importParkedUsage () {
-    const dir = paths.usageDir()
-    let names = []
-    try { names = fs.readdirSync(dir) } catch {}
-    for (const name of names) {
-      const file = path.join(dir, name)
-      if (name.endsWith('.hold')) { try { fs.unlinkSync(file) } catch {} continue }
-      if (!name.endsWith('.json')) continue
-      const parked = spool.claim(file, paths.tmpDir())
-      if (parked && parked.header.kind === 'usage') this.onUsageReport(parked.body, false)
+    for (const entry of spool.list(paths.usageDir())) {
+      if (entry.name.endsWith('.hold')) { try { fs.unlinkSync(entry.file) } catch {} }
     }
+    this.applyParked(null)
   }
 
   // Stores a usage record now, publishes it throttled so the long-poll does
@@ -416,6 +426,7 @@ class Daemon {
       if (ch.type === 'remove') {
         const e = this.usageEmits.get(ch.sessionId)
         if (e) { clearTimeout(e.timer); this.usageEmits.delete(ch.sessionId) }
+        this.usageSeen.delete(ch.sessionId)
       }
       if (ch.type === 'remove' || ch.reason === 'SessionEnd') pruneRelevant = true
       this.changes.push(ch)

@@ -184,13 +184,13 @@ test('statusline stores usage without changing state; reports are held and the l
   await run(SL, [], JSON.stringify(sample({ context_window: { used_percentage: 50 } })))
   await run(SL, [], JSON.stringify(sample({ context_window: { used_percentage: 60 } })))
   assert.deepEqual(fs.readdirSync(path.join(home, 'spool')), [])
-  assert.match(fs.readFileSync(path.join(home, 'usage', 'st1.json'), 'utf8'), /"used_percentage":60/)
+  assert.equal(fs.readdirSync(path.join(home, "usage")).filter(n => n.startsWith("st1.") && n !== "st1.hold").length, 2)
   // When the hold ends (3 s here) the parked report is applied: one change, the last value.
   const lines = (await run(HOSTD, ['events', '--since', String(seq2), '--timeout', '8'], '')).stdout.trim().split('\n').map(l => JSON.parse(l))
   const usageChanges = lines.filter(l => l.reason === 'usage')
   assert.equal(usageChanges.length, 1)
   assert.equal(usageChanges[0].agent.usage.contextUsedPct, 60)
-  assert.equal(fs.existsSync(path.join(home, 'usage', 'st1.json')), false)
+  assert.deepEqual(fs.readdirSync(path.join(home, "usage")).filter(n => n.startsWith("st1.") && n !== "st1.hold"), [])
 
   // The same usage again publishes nothing.
   const seq3 = usageChanges[0].seq

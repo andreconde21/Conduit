@@ -2,8 +2,10 @@
 # conductore-hook <Event>: Claude Code hook client. POSIX sh, no Node.
 #
 # Hands the hook JSON (stdin) to conductore-hostd through the spool
-# directory and exits: one `cat` and one `mv` per event. The daemon adds
-# the tmux/Herdr location from the variables passed in the header.
+# directory and exits: one `cat` and one `ln` per event (a hard link
+# publishes the finished file atomically and never overwrites; `ln` is
+# lighter than GNU `mv`). The daemon removes both names, and adds the
+# tmux/Herdr location from the variables passed in the header.
 #
 # PermissionRequest waits on a FIFO for the phone's decision, at most
 # $CONDUCTORE_PERMISSION_TIMEOUT seconds (default 120), and prints the
@@ -40,9 +42,15 @@ wake() {
   return 1
 }
 
+# Publishes $tmp as $out (a fresh name): hard link, else rename.
+publish() {
+  while [ -e "$out" ]; do out=$out.n; done
+  ln "$tmp" "$out" || mv -f "$tmp" "$out" || { rm -f "$tmp"; return 1; }
+}
+
 # Header, then Claude Code's JSON untouched.
 header() {
-  printf 'conductore 1\nkind=hook\nevent=%s\npid=%s\n' "$ev" "$$"
+  printf 'conductore 1\nkind=hook\nevent=%s\npid=%s\ntmp=%s\n' "$ev" "$$" "${tmp##*/}"
   if [ -n "${TMUX:-}" ]; then printf 'tmux=%s\ntmux_pane=%s\n' "$TMUX" "${TMUX_PANE:-}"; fi
   if [ -n "${HERDR_WORKSPACE_ID:-}${HERDR_PANE_ID:-}" ]; then
     printf 'herdr_workspace=%s\nherdr_tab=%s\nherdr_pane=%s\nherdr_name=%s\n' \
@@ -51,11 +59,12 @@ header() {
 }
 
 tmp=$d/tmp/h.$$
+while [ -e "$tmp" ]; do tmp=$tmp.n; done
 out=$d/spool/$$
-while [ -e "$out" ]; do out=$out.n; done
 
 if [ "$ev" != PermissionRequest ]; then
-  { header; printf '\n'; cat; } >"$tmp" && mv -f "$tmp" "$out" || { rm -f "$tmp"; exit 0; }
+  { header; printf '\n'; cat; } >"$tmp" || { rm -f "$tmp"; exit 0; }
+  publish || exit 0
   wake
   exit 0
 fi
@@ -70,11 +79,10 @@ rm -f "$fifo"
 if ! mkfifo -m 600 "$fifo" || ! exec 3<>"$fifo"; then
   # No FIFO: still report the prompt, then let the terminal ask.
   rm -f "$fifo"
-  { header; printf '\n'; cat; } >"$tmp" && mv -f "$tmp" "$out" || rm -f "$tmp"
-  wake
+  { header; printf '\n'; cat; } >"$tmp" && publish && wake
   exit 0
 fi
-{ header; printf 'fifo=%s\ntimeout=%s\n\n' "$fifo" "$t"; cat; } >"$tmp" && mv -f "$tmp" "$out" || {
+{ header; printf 'fifo=%s\ntimeout=%s\n\n' "$fifo" "$t"; cat; } >"$tmp" && publish || {
   rm -f "$tmp" "$fifo"
   exit 0
 }
@@ -105,6 +113,6 @@ line=
 IFS= read -r line <&3
 exec 3<&-
 kill "$watchdog"
-rm -f "$fifo" "$out"
+rm -f "$fifo" "$out" "$tmp"
 [ -n "$line" ] && printf '%s\n' "$line"
 exit 0

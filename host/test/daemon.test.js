@@ -115,6 +115,8 @@ test('the hook is a sh script: it spools and returns without waiting for the dae
   assert.equal(a.state, 'waiting_input')
   assert.equal(a.lastMessage, 'done')
   assert.equal(spooled().length, 0)
+  // The staging names (hard links of the spooled files) are gone too.
+  assert.deepEqual(fs.readdirSync(path.join(home, 'tmp')), [])
 })
 
 test('the daemon runs with the memory flags and reports its footprint', async () => {
