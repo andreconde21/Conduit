@@ -1,0 +1,8 @@
+#!/usr/bin/env node
+'use strict'
+// Claude Code hook client. Must never break Claude Code: always exits 0.
+const { main } = require('../lib/hook')
+main(process.argv.slice(2)).then(() => process.exit(0), err => {
+  try { require('../lib/log').log('hook', 'fatal', err && (err.stack || err.message)) } catch {}
+  process.exit(0)
+})

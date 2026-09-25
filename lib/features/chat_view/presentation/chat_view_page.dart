@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/features/agent_attention/domain/agent_attention.dart';
+import 'package:conduit/features/chat_view/data/conductore_chat_client.dart';
 import 'package:conduit/features/chat_view/domain/chat_items.dart';
 import 'package:conduit/features/chat_view/presentation/chat_view_controller.dart';
 import 'package:conduit/features/chat_view/presentation/widgets/chat_composer.dart';
@@ -20,6 +21,7 @@ class ChatViewPage extends StatefulWidget {
     this.hostName,
     this.dictation,
     this.ownsController = true,
+    this.onSetUpCompanion,
     super.key,
   });
 
@@ -32,6 +34,10 @@ class ChatViewPage extends StatefulWidget {
 
   /// Disposes [controller] with the page.
   final bool ownsController;
+
+  /// Opens the Agent hooks screen from the "not installed / too old"
+  /// state; null hides the button.
+  final VoidCallback? onSetUpCompanion;
 
   @override
   State<ChatViewPage> createState() => _ChatViewPageState();
@@ -243,7 +249,23 @@ class _ChatViewPageState extends State<ChatViewPage>
   Widget _buildThread(BuildContext context) {
     final theme = Theme.of(context);
     if (_chat.unsupported case final reason?) {
-      return _Centered(icon: Icons.extension_off_outlined, text: reason);
+      final setUp = widget.onSetUpCompanion;
+      return _Centered(
+        icon: Icons.extension_off_outlined,
+        text: reason,
+        action: setUp == null
+            ? null
+            : FilledButton.icon(
+                key: const ValueKey('chat-set-up-companion'),
+                onPressed: setUp,
+                icon: const Icon(Icons.webhook_rounded),
+                label: Text(
+                  _chat.unsupportedKind == ChatUnsupportedKind.outdated
+                      ? 'Update agent hooks'
+                      : 'Install agent hooks',
+                ),
+              ),
+      );
     }
     if (_chat.loading) {
       return const Center(child: CircularProgressIndicator());
@@ -336,10 +358,11 @@ class _ChatViewPageState extends State<ChatViewPage>
 }
 
 class _Centered extends StatelessWidget {
-  const _Centered({required this.icon, required this.text});
+  const _Centered({required this.icon, required this.text, this.action});
 
   final IconData icon;
   final String text;
+  final Widget? action;
 
   @override
   Widget build(BuildContext context) {
@@ -357,6 +380,7 @@ class _Centered extends StatelessWidget {
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyMedium,
             ),
+            if (action != null) ...[const SizedBox(height: 16), action!],
           ],
         ),
       ),

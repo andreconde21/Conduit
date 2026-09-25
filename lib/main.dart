@@ -14,6 +14,7 @@ import 'package:conduit/features/app_lock/data/local_app_authenticator.dart';
 import 'package:conduit/features/app_lock/presentation/app_lock_controller.dart';
 import 'package:conduit/features/app_lock/presentation/lock_page.dart';
 import 'package:conduit/features/backup/data/app_backup_service.dart';
+import 'package:conduit/features/companion_setup/presentation/companion_setup_controller.dart';
 import 'package:conduit/features/home_widget/data/platform_agent_status_widget_channel.dart';
 import 'package:conduit/features/home_widget/presentation/agent_status_launch_listener.dart';
 import 'package:conduit/features/home_widget/presentation/agent_status_widget_pusher.dart';
@@ -130,26 +131,36 @@ void main() {
     uploader: SftpShareUploader(sftpRepository),
   );
 
+  // Agent hooks screen: companion status per machine, shared by every
+  // entry point through the scope around the whole app.
+  final companionSetup = CompanionSetupController(
+    runnerFactory: (host) => SshAgentCommandRunner(hostKeyVerifier, host),
+    sftpRepository: sftpRepository,
+  );
+
   unawaited(themeController.load());
   unawaited(shareTarget.start());
 
   runApp(
-    ConduitApp(
-      themeController: themeController,
-      lockController: lockController,
-      hostsController: hostsController,
-      terminalRepository: terminalRepository,
-      workspaceController: workspaceController,
-      localShellController: localShellController,
-      hostKeyVerifier: hostKeyVerifier,
-      promptCoordinator: promptCoordinator,
-      sftpRepository: sftpRepository,
-      sftpBookmarksRepository: sftpBookmarksRepository,
-      agentAttention: agentAttention,
-      backupService: backupService,
-      fileExport: fileExport,
-      connectFlow: connectFlow,
-      shareTarget: shareTarget,
+    CompanionSetupScope(
+      controller: companionSetup,
+      child: ConduitApp(
+        themeController: themeController,
+        lockController: lockController,
+        hostsController: hostsController,
+        terminalRepository: terminalRepository,
+        workspaceController: workspaceController,
+        localShellController: localShellController,
+        hostKeyVerifier: hostKeyVerifier,
+        promptCoordinator: promptCoordinator,
+        sftpRepository: sftpRepository,
+        sftpBookmarksRepository: sftpBookmarksRepository,
+        agentAttention: agentAttention,
+        backupService: backupService,
+        fileExport: fileExport,
+        connectFlow: connectFlow,
+        shareTarget: shareTarget,
+      ),
     ),
   );
 }

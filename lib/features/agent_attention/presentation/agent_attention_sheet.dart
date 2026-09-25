@@ -7,6 +7,7 @@ import 'package:conduit/features/agent_attention/domain/agent_inbox.dart';
 import 'package:conduit/features/agent_attention/presentation/agent_attention_controller.dart';
 import 'package:conduit/features/agent_attention/presentation/widgets/agent_inbox_widgets.dart';
 import 'package:conduit/features/agent_attention/presentation/widgets/agent_usage_tab.dart';
+import 'package:conduit/features/companion_setup/presentation/companion_status_chip.dart';
 import 'package:conduit/features/hosts/domain/saved_host.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -438,6 +439,11 @@ class _MachineRow extends StatelessWidget {
               ),
           ],
         ),
+        // Offers the Agent hooks screen while the companion is missing
+        // (renders nothing once it is installed, or without a scope).
+        if (status.unavailableReason != null ||
+            (!status.loading && status.error == null && status.agents.isEmpty))
+          CompanionInstallBanner(host: host),
         if (problem != null)
           _EmptyState(
             icon: status.unavailableReason != null
