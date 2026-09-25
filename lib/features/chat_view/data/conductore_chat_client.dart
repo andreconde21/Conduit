@@ -145,7 +145,8 @@ class ConductoreChatClient {
   /// A short spoken summary of [text] by Claude on the machine. Never
   /// throws: every failure (an older companion, a runner that cannot pass
   /// stdin, a dropped connection) is a [SpeechSummaryFailed]. Completing
-  /// [cancel] stops the remote command.
+  /// [cancel] stops waiting (throwing [AgentCommandCancelled]); the remote
+  /// command may finish on its own, within `--timeout-ms`, unheard.
   Future<SpeechSummaryResult> summarize(
     String text, {
     Future<void>? cancel,
