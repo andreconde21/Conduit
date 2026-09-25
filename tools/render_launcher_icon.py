@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""Renders Conductore's launcher PNGs (pre-Android 8 mipmaps and the
-flutter_launcher_icons sources) from the geometry of
+"""Renders Conductore's launcher PNGs (pre-Android 8 mipmaps, the iOS
+AppIcon set and the flutter_launcher_icons sources) from the geometry of
 android/app/src/main/res/drawable/ic_launcher_foreground.xml.
 
 Usage: tools/render_launcher_icon.py  (run from the repo root; needs Pillow)
 """
+import json
+
 from PIL import Image, ImageDraw
+
+IOS_ICONS = 'ios/Runner/Assets.xcassets/AppIcon.appiconset'
 
 BG = (0x2D, 0x35, 0x3B)
 CHEVRON = (0xA7, 0xC0, 0x80)
@@ -54,6 +58,13 @@ def main():
     render(1024, crop=0.8).save('assets/icon/icon.png')
     render(1024, background=False).save('assets/icon/icon_foreground.png')
     render(1024, background=False, mono=(255, 255, 255)).save('assets/icon/icon_monochrome.png')
+    # iOS masks the corners itself and rejects icons with an alpha channel.
+    with open(f'{IOS_ICONS}/Contents.json') as contents:
+        images = json.load(contents)['images']
+    for image in images:
+        points = float(image['size'].split('x')[0])
+        pixels = round(points * int(image['scale'].rstrip('x')))
+        render(pixels, crop=0.8).convert('RGB').save(f"{IOS_ICONS}/{image['filename']}")
 
 
 if __name__ == '__main__':

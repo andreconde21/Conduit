@@ -18,7 +18,7 @@ class SceneDelegate: FlutterSceneDelegate {
         overlay.backgroundColor = UIColor.black
 
         let label = UILabel()
-        label.text = "Conduit"
+        label.text = "Conductore"
         label.textColor = UIColor.white
         label.font = UIFont.systemFont(ofSize: 28, weight: .heavy)
         label.translatesAutoresizingMaskIntoConstraints = false

@@ -1,0 +1,6 @@
+// Conductore's App Store identity, shared by Debug, Profile and Release.
+// Override per build without editing this file, e.g.
+//   xcodebuild ... APP_BUNDLE_ID=com.example.conductore
+// (the release workflow passes the IOS_BUNDLE_ID repository variable).
+APP_BUNDLE_ID = com.outsmartis.conductore
+APP_DISPLAY_NAME = Conductore
