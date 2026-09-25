@@ -49,7 +49,7 @@ void main() {
     await toggle('Drag scrolls the remote app (mouse wheel)');
     expect(controller.terminalGestures.dragScrollsRemote, isFalse);
 
-    await toggle('Swipe down opens sessions');
+    await toggle('Top-row swipes switch sessions');
     expect(controller.terminalGestures.headerSwipeOpensSessions, isFalse);
 
     await toggle('Edge swipe opens agents');
