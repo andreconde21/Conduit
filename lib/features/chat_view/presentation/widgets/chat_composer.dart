@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:conduit/core/app_failure.dart';
 import 'package:conduit/core/theme/app_theme.dart';
 import 'package:conduit/features/voice/presentation/dictation_button.dart';
@@ -159,6 +161,39 @@ class _ChatComposerState extends State<ChatComposer> {
       );
   }
 
+  /// Why Talk and the mic are disabled: the composer's own reason.
+  String get _disabledVoiceTooltip =>
+      widget.disabledHint ?? 'Voice input works once you can send';
+
+  /// Talk (the hands-free loop). Without a speech recognizer it explains
+  /// why instead of starting a loop that cannot hear.
+  Widget _talkButton() {
+    final dictation = widget.dictation;
+    Widget button() {
+      final unavailable = dictation != null && !dictation.isAvailable;
+      return IconButton(
+        key: const ValueKey('chat-talk'),
+        tooltip: widget.enabled ? 'Talk' : _disabledVoiceTooltip,
+        icon: Icon(
+          Icons.record_voice_over_outlined,
+          color: unavailable ? Theme.of(context).disabledColor : null,
+        ),
+        onPressed: !widget.enabled
+            ? null
+            : unavailable
+            ? () => unawaited(showSpeechUnavailableDialog(context, dictation))
+            : widget.onTalk,
+      );
+    }
+
+    return dictation == null
+        ? button()
+        : ListenableBuilder(
+            listenable: dictation,
+            builder: (context, _) => button(),
+          );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -205,18 +240,16 @@ class _ChatComposerState extends State<ChatComposer> {
                 ),
               ),
             ),
-            if (widget.onTalk != null && widget.enabled)
-              IconButton(
-                key: const ValueKey('chat-talk'),
-                tooltip: 'Talk',
-                icon: const Icon(Icons.record_voice_over_outlined),
-                onPressed: widget.onTalk,
-              ),
-            if (widget.dictation != null && widget.enabled)
+            // Talk and the mic stay visible (disabled) while the chat
+            // cannot send, so voice is always where the user expects it.
+            if (widget.onTalk != null) _talkButton(),
+            if (widget.dictation != null)
               DictationButton(
                 controller: widget.dictation!,
                 textController: _controller,
                 focusNode: _focusNode,
+                enabled: widget.enabled,
+                disabledTooltip: _disabledVoiceTooltip,
                 onMessage: (message) => ScaffoldMessenger.maybeOf(context)
                   ?..hideCurrentSnackBar()
                   ..showSnackBar(SnackBar(content: Text(message))),

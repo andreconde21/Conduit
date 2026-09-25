@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:conduit/features/voice/presentation/dictation_controller.dart';
 import 'package:conduit/features/voice/presentation/dictation_text_inserter.dart';
 import 'package:conduit/features/voice/presentation/voice_settings_scope.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 /// The mic button: starts dictation into [textController], streams partial
@@ -14,6 +15,12 @@ import 'package:flutter/material.dart';
 /// level; after a continuous session paused itself it reads "Paused, tap
 /// to continue".
 ///
+/// Without a speech recognizer on the device the mic stays visible but
+/// muted; a tap explains why and how to get one
+/// ([showSpeechUnavailableDialog]). When [enabled] is false it shows
+/// disabled with [disabledTooltip] rather than disappearing, so the mic
+/// is always where the user expects it.
+///
 /// Several buttons may share one [DictationController] (composer sheet and
 /// inline bar); only the button that started the session animates and can
 /// stop it. Unmounting a button mid-session cancels its own session so the
@@ -24,6 +31,8 @@ class DictationButton extends StatefulWidget {
     required this.textController,
     this.focusNode,
     this.enabled = true,
+    this.disabledTooltip,
+    this.autoStart = false,
     this.onMessage,
     super.key,
   });
@@ -32,6 +41,13 @@ class DictationButton extends StatefulWidget {
   final TextEditingController textController;
   final FocusNode? focusNode;
   final bool enabled;
+
+  /// Why the mic cannot be used right now, while [enabled] is false.
+  final String? disabledTooltip;
+
+  /// Start dictating as soon as the button appears (the terminal's
+  /// Dictate button opens the chat line this way).
+  final bool autoStart;
 
   /// Receives error text to show near the field (the button has no room).
   final ValueChanged<String>? onMessage;
@@ -63,6 +79,35 @@ class _DictationButtonState extends State<DictationButton> {
       },
     );
     widget.controller.addListener(_handleControllerChanged);
+    if (widget.autoStart) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _autoStart());
+    }
+  }
+
+  Future<void> _autoStart() async {
+    final controller = widget.controller;
+    await controller.checkAvailability();
+    if (!mounted || !widget.enabled) return;
+    if (!controller.isAvailable) {
+      await showSpeechUnavailableDialog(context, controller);
+      return;
+    }
+    if (controller.status == DictationStatus.idle) {
+      await controller.toggle(_sink, options: _options());
+    }
+  }
+
+  /// A tap on the muted mic: re-check (a recognizer may have been
+  /// installed since), then dictate or explain.
+  Future<void> _tapUnavailable() async {
+    final controller = widget.controller;
+    await controller.checkAvailability();
+    if (!mounted) return;
+    if (controller.isAvailable) {
+      await controller.toggle(_sink, options: _options());
+      return;
+    }
+    await showSpeechUnavailableDialog(context, controller);
   }
 
   @override
@@ -121,7 +166,19 @@ class _DictationButtonState extends State<DictationButton> {
       builder: (context, _) {
         final controller = widget.controller;
         if (!controller.isAvailable) {
-          return const SizedBox.shrink();
+          return IconButton(
+            key: const ValueKey('dictation-button'),
+            tooltip: widget.enabled
+                ? 'Voice input unavailable'
+                : widget.disabledTooltip ?? 'Voice input unavailable',
+            icon: Icon(
+              Icons.mic_off_rounded,
+              color: Theme.of(context).disabledColor,
+            ),
+            onPressed: widget.enabled
+                ? () => unawaited(_tapUnavailable())
+                : null,
+          );
         }
         final status = controller.status;
         final active = status != DictationStatus.idle;
@@ -146,7 +203,9 @@ class _DictationButtonState extends State<DictationButton> {
           tooltip = 'Microphone access denied';
           icon = Icons.mic_off_rounded;
         } else {
-          tooltip = 'Dictate';
+          tooltip = widget.enabled
+              ? 'Dictate'
+              : widget.disabledTooltip ?? 'Dictate';
           icon = Icons.mic_none_rounded;
         }
         final Widget child = busy && _mine
@@ -184,6 +243,46 @@ class _DictationButtonState extends State<DictationButton> {
       },
     );
   }
+}
+
+/// Explains that the device has no speech recognizer and, on Android,
+/// offers the voice input settings where one is chosen. Shared by the mic
+/// and Chat View's Talk button.
+Future<void> showSpeechUnavailableDialog(
+  BuildContext context,
+  DictationController controller,
+) {
+  final android = defaultTargetPlatform == TargetPlatform.android;
+  return showDialog<void>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      key: const ValueKey('speech-unavailable-dialog'),
+      icon: const Icon(Icons.mic_off_rounded),
+      title: const Text('No speech recognizer'),
+      content: const Text(
+        'This device has no speech recognition service, so the mic cannot '
+        'dictate yet.\n\n'
+        'Install or enable Google speech services (the Google app, or '
+        '"Speech Recognition and Synthesis from Google"), or pick a voice '
+        'input app in Android settings. Then tap the mic again.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(),
+          child: const Text('Close'),
+        ),
+        if (android)
+          FilledButton(
+            key: const ValueKey('speech-open-settings'),
+            onPressed: () {
+              Navigator.of(dialogContext).pop();
+              unawaited(controller.openSpeechSettings());
+            },
+            child: const Text('Open settings'),
+          ),
+      ],
+    ),
+  );
 }
 
 /// A soft halo behind the stop icon that grows with the input level, so
