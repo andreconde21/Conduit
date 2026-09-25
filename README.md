@@ -198,6 +198,10 @@ tmux.
 - Ctrl+Shift+C and Ctrl+Shift+V to copy and paste (Cmd on macOS).
 - Omarchy theme sync works the same way, so the app follows the theme of
   your Omarchy PC.
+- A synced machine that is the PC itself (the phone's SSH entry for it)
+  folds into *This computer* on that PC, matched by host key or address,
+  and stays a normal SSH machine on your other devices
+  ([docs/desktop.md](docs/desktop.md#this-computer-and-a-synced-entry-for-the-same-pc)).
 - What each platform supports, and why, is in
   [docs/desktop.md](docs/desktop.md).
 

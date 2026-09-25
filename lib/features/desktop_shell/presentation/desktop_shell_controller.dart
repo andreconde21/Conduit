@@ -88,7 +88,32 @@ class DesktopShellController extends ChangeNotifier {
   bool get sidebarCollapsed => _sidebarCollapsed;
   ShellRightPanel get rightPanel => _rightPanel;
   double get rightPanelWidth => _rightPanelWidth;
-  SidebarPrefs get prefs => _prefs;
+
+  /// The sidebar prefs, with [machineAlias] applied.
+  SidebarPrefs get prefs {
+    final alias = machineAlias;
+    if (alias == null) return _prefs;
+    final cached = _aliased;
+    if (cached != null &&
+        identical(cached.source, _prefs) &&
+        cached.alias == alias) {
+      return cached.prefs;
+    }
+    final aliased = _prefs.withMachineAlias(alias.from, alias.to);
+    _aliased = (source: _prefs, alias: alias, prefs: aliased);
+    return aliased;
+  }
+
+  ({SidebarPrefs source, ({String from, String to}) alias, SidebarPrefs prefs})?
+  _aliased;
+
+  /// A saved machine (`from`) the sidebar shows as another (`to`): the
+  /// synced machine that is this device, as "This computer". Its pins,
+  /// group and order carry over ([SidebarPrefs.withMachineAlias]); the
+  /// first edit saves them under `to`. Set by the page as it builds the
+  /// tree, so setting it notifies nobody.
+  ({String from, String to})? machineAlias;
+
   bool get loaded => _loaded;
 
   /// The dashboard is on screen although views are open ("Home").
@@ -224,7 +249,7 @@ class DesktopShellController extends ChangeNotifier {
   }
 
   void updatePrefs(SidebarPrefs Function(SidebarPrefs prefs) edit) {
-    final next = edit(_prefs);
+    final next = edit(prefs);
     if (next == _prefs) return;
     _prefs = next;
     _changed();
@@ -238,7 +263,7 @@ class DesktopShellController extends ChangeNotifier {
   );
 
   bool isExpanded(SidebarNode node) =>
-      _prefs.isExpanded(node.key, byDefault: node.expandedByDefault);
+      prefs.isExpanded(node.key, byDefault: node.expandedByDefault);
 
   /// Applies [edit] to the layout as rendered with [views] (panes of views
   /// that are gone are dropped first) and saves it.

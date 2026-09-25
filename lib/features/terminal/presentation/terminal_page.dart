@@ -1958,7 +1958,13 @@ class _TerminalPageState extends State<TerminalPage>
     final controller = LivePreviewController(
       _portForwarderFor(host)!,
       hostId: host.id,
-      portStore: widget.livePreviewPortStore,
+      portStore: switch (widget.connectFlow?.hostsController) {
+        final hosts? => FallbackLivePreviewPortStore(
+          widget.livePreviewPortStore,
+          hosts.fallbackHostIdFor,
+        ),
+        null => widget.livePreviewPortStore,
+      },
       commandRunner: _commandRunnerFor(host),
     );
     final int? chosenPort;

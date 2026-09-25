@@ -419,6 +419,22 @@ class SettingsSectionBody extends StatelessWidget {
   List<Widget> _syncBackup(BuildContext context) {
     final backup = services.backupService;
     return [
+      if (services.hostsController case final hosts?
+          when showsSelfMachineSetting(hosts))
+        ListenableBuilder(
+          listenable: hosts,
+          builder: (context, _) => switch (hosts.selfMachine) {
+            final self? => Padding(
+              padding: const EdgeInsets.only(bottom: 14),
+              child: SelfMachineCard(
+                name: self.name,
+                showSeparately: hosts.showSelfSeparately,
+                onChanged: hosts.setShowSelfSeparately,
+              ),
+            ),
+            null => const SizedBox.shrink(),
+          },
+        ),
       if (services.hasSync) ...[
         SettingsCard(
           child: ListTile(
@@ -521,6 +537,51 @@ class SettingsSectionBody extends StatelessWidget {
 bool showsWindowsShellSetting(HostsController hosts) =>
     defaultTargetPlatform == TargetPlatform.windows &&
     hosts.thisComputer != null;
+
+/// Whether Settings › Sync & backup shows how "This computer" treats the
+/// synced machine that is this device: a desktop that found one.
+bool showsSelfMachineSetting(HostsController hosts) =>
+    hosts.thisComputer != null && hosts.selfMachine != null;
+
+/// "This computer" on the user's other devices: the synced machine that is
+/// this device ([name]) is folded into This computer here unless
+/// [showSeparately] (kept on this device, never synced).
+class SelfMachineCard extends StatelessWidget {
+  const SelfMachineCard({
+    required this.name,
+    required this.showSeparately,
+    required this.onChanged,
+    super.key,
+  });
+
+  static const title = 'This computer on your other devices';
+
+  final String name;
+  final bool showSeparately;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SettingsHeading(title),
+        SettingsSwitchCard(
+          key: const ValueKey('settings-self-machine'),
+          switchKey: const ValueKey('settings-self-machine-switch'),
+          icon: Icons.computer_rounded,
+          title: 'Show it separately here too',
+          subtitle:
+              'Also shown as $name on your other devices. Here it opens as '
+              'This computer; turn this on to also list $name and reach '
+              'this computer over SSH. Kept on this device, never synced.',
+          value: showSeparately,
+          onChanged: onChanged,
+        ),
+      ],
+    );
+  }
+}
 
 /// A heading over a group of settings (plain case, unlike the uppercase
 /// section labels elsewhere).

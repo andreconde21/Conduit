@@ -17,13 +17,29 @@ class SessionViewController extends ChangeNotifier {
 
   SessionView get defaultView => _preferences.defaultView;
 
+  /// Where a session without a choice of its own reads one (see
+  /// `HostsController.fallbackHostIdFor`: a session on "This computer"
+  /// reads the same session on the synced machine that is this device),
+  /// or null. Only read: a choice is always saved under the session's own
+  /// machine.
+  String? Function(String hostId)? fallbackHostOf;
+
   /// The override of [sessionHostId], or null when it follows the default.
   SessionView? overrideFor(String sessionHostId) =>
-      _preferences.overrideFor(sessionHostId);
+      _preferences.overrideFor(sessionHostId) ??
+      _fallbackOverride(sessionHostId);
 
-  /// See [SessionViewPreferences.resolve].
-  SessionView viewFor(String sessionHostId, {required bool runsClaude}) =>
-      _preferences.resolve(sessionHostId, runsClaude: runsClaude);
+  SessionView? _fallbackOverride(String sessionHostId) {
+    final fallback = fallbackHostOf?.call(sessionHostId);
+    return fallback == null ? null : _preferences.overrideFor(fallback);
+  }
+
+  /// The view [sessionHostId] opens in: the terminal unless its pane runs
+  /// Claude ([runsClaude]); then its override, else the default.
+  SessionView viewFor(String sessionHostId, {required bool runsClaude}) {
+    if (!runsClaude) return SessionView.terminal;
+    return overrideFor(sessionHostId) ?? defaultView;
+  }
 
   Future<void> load() => _loading ??= _load();
 

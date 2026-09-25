@@ -12,6 +12,10 @@ class HostsController extends ChangeNotifier {
   /// too: listed first by [machines] and [sortedMachines], found by
   /// [findById], and its settings go to that store instead of the saved
   /// list, so they are never backed up or synced.
+  ///
+  /// A saved machine that is this device ([selfMachine], usually one
+  /// synced from a phone) is folded into "This computer" on that device:
+  /// see [hiddenSelfMachine].
   HostsController(this._repository, {ThisComputerStore? thisComputerStore})
     : _thisComputerStore = thisComputerStore,
       _thisComputer = thisComputerStore == null
@@ -23,6 +27,7 @@ class HostsController extends ChangeNotifier {
   ThisComputerSettings? _thisComputer;
 
   List<SavedHost> _hosts = const [];
+  String? _selfMachineId;
   List<SavedHost>? _sortedHostsCache;
   HostListSortMode _sortMode = HostListSortMode.lastConnected;
   List<String> _manualOrder = const [];
@@ -34,29 +39,116 @@ class HostsController extends ChangeNotifier {
   /// for work that must see the saved hosts right after app start.
   Future<void> get firstLoad => _firstLoad.future;
 
-  /// The saved machines (what backups and sync carry).
+  /// The saved machines (what backups and sync carry), all of them: a
+  /// hidden [hiddenSelfMachine] included.
   List<SavedHost> get hosts => _hosts;
+
+  /// The saved machines in the machine list's order, as lists show them:
+  /// without [hiddenSelfMachine].
   List<SavedHost> get sortedHosts =>
       _sortedHostsCache ??= _computeSortedHosts();
 
-  /// "This computer" on a desktop, else null.
-  SavedHost? get thisComputer => _thisComputer?.host;
+  /// "This computer" on a desktop, else null. While [hiddenSelfMachine]
+  /// is folded into it, it carries that machine's name ("This computer ·
+  /// omarchy") and its preferences where it has none of its own.
+  SavedHost? get thisComputer {
+    final settings = _thisComputer;
+    if (settings == null) return null;
+    final self = hiddenSelfMachine;
+    return self == null ? settings.host : settings.hostFoldedWith(self);
+  }
+
+  /// The saved machine that is this device (found by the desktop's
+  /// `SelfMachineWatcher`), or null. Always null on phones.
+  SavedHost? get selfMachine {
+    final id = _selfMachineId;
+    if (id == null || _thisComputer == null) return null;
+    return _hosts.where((host) => host.id == id).firstOrNull;
+  }
+
+  /// [selfMachine] unless the user shows it separately: left out of every
+  /// machine list on this device, and anything that targets it opens "This
+  /// computer" instead ([findById]). It stays in [hosts], so backups and
+  /// sync carry it unchanged to the other devices.
+  SavedHost? get hiddenSelfMachine =>
+      _thisComputer?.showSelfSeparately ?? true ? null : selfMachine;
+
+  /// Whether a synced machine that is this device stays listed as a
+  /// machine of its own (SSH to itself). Kept on this device only.
+  bool get showSelfSeparately => _thisComputer?.showSelfSeparately ?? false;
+
+  /// Completes once the saved machines were matched against this device
+  /// (at most [timeout] after the first load), so a restore or deep link
+  /// right after start resolves a machine that is this device to "This
+  /// computer". Completes at once on phones.
+  Future<void> selfMachineKnown({
+    Duration timeout = const Duration(seconds: 4),
+  }) async {
+    await firstLoad;
+    if (_thisComputer == null || _selfMachineKnown.isCompleted) return;
+    await _selfMachineKnown.future.timeout(timeout, onTimeout: () {});
+  }
+
+  final Completer<void> _selfMachineKnown = Completer<void>();
+
+  /// Records which saved machine is this device (null: none). Ignored
+  /// without "This computer" (phones).
+  void setSelfMachineId(String? id) {
+    if (!_selfMachineKnown.isCompleted) _selfMachineKnown.complete();
+    if (_thisComputer == null || id == _selfMachineId) return;
+    _selfMachineId = id;
+    _sortedHostsCache = null;
+    notifyListeners();
+  }
+
+  Future<void> setShowSelfSeparately(bool value) async {
+    final current = _thisComputer;
+    if (current == null || current.showSelfSeparately == value) return;
+    _sortedHostsCache = null;
+    await _saveThisComputer(current.copyWith(showSelfSeparately: value));
+  }
+
+  /// Where "This computer" reads per-host preferences it has none of its
+  /// own for, while [hiddenSelfMachine] is folded into it: [hostId] (the
+  /// machine or a session on it, `this-computer#tmux:work`) on that saved
+  /// machine instead. Null for other machines. Lookups only: nothing is
+  /// written under the returned id.
+  String? fallbackHostIdFor(String hostId) {
+    final self = hiddenSelfMachine?.id;
+    if (self == null) return null;
+    if (hostId == thisComputerHostId) return self;
+    if (hostId.startsWith('$thisComputerHostId#')) {
+      return '$self${hostId.substring(thisComputerHostId.length)}';
+    }
+    return null;
+  }
 
   /// The shell "This computer" opens on Windows.
   WindowsShellKind get windowsShell =>
       _thisComputer?.windowsShell ?? WindowsShellKind.powershell;
 
   /// Every machine a session can open on: "This computer" first, then the
-  /// saved ones.
-  List<SavedHost> get machines => [?thisComputer, ..._hosts];
+  /// saved ones (without [hiddenSelfMachine]).
+  List<SavedHost> get machines {
+    final hidden = hiddenSelfMachine?.id;
+    return [
+      ?thisComputer,
+      for (final host in _hosts)
+        if (host.id != hidden) host,
+    ];
+  }
 
   /// [machines] in the machine list's order ("This computer" stays first).
   List<SavedHost> get sortedMachines => [?thisComputer, ...sortedHosts];
 
   /// The machine with [id] (a saved one or "This computer"), or null.
+  /// The id of [hiddenSelfMachine] finds "This computer": a deep link,
+  /// restored session or pin for it opens this device locally.
   SavedHost? findById(String id) {
     final local = thisComputer;
-    if (local != null && id == local.id) return local;
+    if (local != null && (id == local.id || id == hiddenSelfMachine?.id)) {
+      return local;
+    }
     return _hosts.where((host) => host.id == id).firstOrNull;
   }
 
@@ -122,7 +214,9 @@ class HostsController extends ChangeNotifier {
     final seedManualOrder =
         mode == HostListSortMode.manual && _manualOrder.isEmpty;
     if (seedManualOrder) {
-      _manualOrder = sortedHosts.map((host) => host.id).toList();
+      _manualOrder = _withHiddenSelf(
+        sortedHosts.map((host) => host.id).toList(),
+      );
     }
 
     _sortMode = mode;
@@ -151,7 +245,7 @@ class HostsController extends ChangeNotifier {
 
     final moved = ordered.removeAt(oldIndex);
     ordered.insert(newIndex, moved);
-    _manualOrder = ordered.map((host) => host.id).toList();
+    _manualOrder = _withHiddenSelf(ordered.map((host) => host.id).toList());
     _sortMode = HostListSortMode.manual;
     _sortedHostsCache = null;
     notifyListeners();
@@ -170,10 +264,9 @@ class HostsController extends ChangeNotifier {
   Future<void> upsert(SavedHost host) async {
     if (host.isThisComputer) {
       final current = _thisComputer;
-      if (current == null) return;
-      await _saveThisComputer(
-        current.copyWith(host: host.copyWith(id: thisComputerHostId)),
-      );
+      final shown = thisComputer;
+      if (current == null || shown == null) return;
+      await _saveThisComputer(current.withEdit(host, shown: shown));
       return;
     }
     final index = _hosts.indexWhere((currentHost) => currentHost.id == host.id);
@@ -296,13 +389,31 @@ class HostsController extends ChangeNotifier {
     }
   }
 
+  /// [visibleOrder] (a manual order of the listed machines) with the
+  /// hidden [hiddenSelfMachine] kept where it was: the order syncs, and
+  /// the other devices list that machine.
+  List<String> _withHiddenSelf(List<String> visibleOrder) {
+    final hidden = hiddenSelfMachine?.id;
+    if (hidden == null || visibleOrder.contains(hidden)) return visibleOrder;
+    final previous = _manualOrder.indexOf(hidden);
+    final at = previous < 0 ? visibleOrder.length : previous;
+    return [...visibleOrder]..insert(at.clamp(0, visibleOrder.length), hidden);
+  }
+
   void _setHosts(List<SavedHost> hosts) {
     _hosts = hosts;
     _sortedHostsCache = null;
   }
 
   List<SavedHost> _computeSortedHosts() {
-    final sorted = [..._hosts];
+    final hidden = hiddenSelfMachine?.id;
+    final hosts = hidden == null
+        ? _hosts
+        : [
+            for (final host in _hosts)
+              if (host.id != hidden) host,
+          ];
+    final sorted = [...hosts];
     switch (_sortMode) {
       case HostListSortMode.lastConnected:
         sorted.sort(_compareLastConnected);
@@ -311,13 +422,13 @@ class HostsController extends ChangeNotifier {
       case HostListSortMode.added:
         break;
       case HostListSortMode.manual:
-        return _computeManualOrder();
+        return _computeManualOrder(hosts);
     }
     return List.unmodifiable(sorted);
   }
 
-  List<SavedHost> _computeManualOrder() {
-    final byId = {for (final host in _hosts) host.id: host};
+  List<SavedHost> _computeManualOrder(List<SavedHost> hosts) {
+    final byId = {for (final host in hosts) host.id: host};
     final ordered = <SavedHost>[];
     final seen = <String>{};
     for (final id in _manualOrder) {
@@ -326,7 +437,7 @@ class HostsController extends ChangeNotifier {
         ordered.add(host);
       }
     }
-    for (final host in _hosts) {
+    for (final host in hosts) {
       if (seen.add(host.id)) {
         ordered.add(host);
       }
