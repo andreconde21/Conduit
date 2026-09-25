@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/features/terminal/domain/terminal_link_detector.dart';
 import 'package:conduit/features/terminal/domain/terminal_path_detector.dart';
+import 'package:conduit/features/terminal/domain/terminal_remote_scroll.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit_vt/conduit_vt.dart';
 import 'package:flutter/gestures.dart';
@@ -24,6 +25,9 @@ class TerminalSurface extends StatefulWidget {
     this.onLinkTap,
     this.onLinkLongPress,
     this.autoConnect = true,
+    this.onKeyEvent,
+    this.dragScrollsRemote = true,
+    this.onEnterScrollMode,
     super.key,
   });
 
@@ -55,6 +59,21 @@ class TerminalSurface extends StatefulWidget {
   /// restored from the last app run); it connects when this turns true.
   final bool autoConnect;
 
+  /// Sees each hardware key before the terminal does; a result other than
+  /// ignored keeps the key from the session (app shortcuts like Ctrl+K).
+  final FocusOnKeyEventCallback? onKeyEvent;
+
+  /// Whether a one-finger vertical drag scrolls the remote program when it
+  /// is on the alternate screen or asked for mouse reports (see
+  /// [remoteScrollRouteFor]). Off, drags go to the terminal view as before.
+  final bool dragScrollsRemote;
+
+  /// Enters the multiplexer's copy mode (sends the keys and flips the
+  /// page's scroll-mode state), for a drag on the alternate screen that
+  /// has no other way to reach history. Null when the session is not a
+  /// tmux or Herdr session: such drags send arrow keys instead.
+  final VoidCallback? onEnterScrollMode;
+
   @override
   State<TerminalSurface> createState() => _TerminalSurfaceState();
 }
@@ -66,6 +85,17 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
   Timer? _longPressTimer;
   int? _longPressPointer;
   Offset? _longPressOrigin;
+
+  // One-finger drags that scroll the remote program.
+  // Owned (and disposed) by its RawGestureDetector.
+  _RemoteScrollDragRecognizer? _remoteDrag;
+  final _remoteScroll = RemoteScrollAccumulator();
+  RemoteScrollRoute _remoteRoute = RemoteScrollRoute.local;
+  Offset _remoteDragPosition = Offset.zero;
+  Timer? _momentumTimer;
+  int _pointersDown = 0;
+  // Copy mode this surface entered for a drag; a tap leaves it again.
+  bool _dragEnteredScrollMode = false;
 
   static PointerInputs _pointerInputsFor(bool terminalMouseInput) {
     return terminalMouseInput
@@ -95,14 +125,24 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
         _pointerInputsFor(widget.terminalMouseInput),
       );
     }
+    if (oldWidget.session != widget.session) {
+      _stopMomentum();
+    }
     if (oldWidget.session != widget.session ||
         (!oldWidget.autoConnect && widget.autoConnect)) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _connectIfNeeded());
+    }
+    if (!widget.tmuxScrollMode) {
+      _dragEnteredScrollMode = false;
+    }
+    if (!widget.dragScrollsRemote) {
+      _stopMomentum();
     }
   }
 
   @override
   void dispose() {
+    _stopMomentum();
     _longPressTimer?.cancel();
     _terminalController.dispose();
     super.dispose();
@@ -215,6 +255,14 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
   // same pointer without competing, so selection keeps working and the
   // link menu opens on top of it.
   void _handlePointerDown(PointerDownEvent event) {
+    _pointersDown += 1;
+    // Any touch catches a running fling, as in a scroll view.
+    _stopMomentum();
+    if (_pointersDown > 1) {
+      // Two fingers belong to the gesture layer (pinch, two-finger
+      // scrollback, Herdr swipes), not to a one-finger drag.
+      _remoteDrag?.yieldToMultiTouch();
+    }
     // A second finger (pinch, two-finger scroll) is never a long press.
     final multiTouch = _longPressPointer != null;
     _cancelLongPress();
@@ -242,6 +290,9 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
   }
 
   void _handlePointerEnd(PointerEvent event) {
+    if (_pointersDown > 0) {
+      _pointersDown -= 1;
+    }
     if (event.pointer == _longPressPointer) {
       _cancelLongPress();
     }
@@ -275,6 +326,121 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
     }
   }
 
+  /// Decides at pointer down whether this drag is the remote program's.
+  bool _claimRemoteDrag(PointerEvent event) {
+    if (!widget.dragScrollsRemote ||
+        widget.tmuxScrollMode ||
+        _pointersDown > 0 ||
+        event.kind != PointerDeviceKind.touch) {
+      return false;
+    }
+    final terminal = widget.session.terminal;
+    _remoteRoute = remoteScrollRouteFor(
+      mouseMode: terminal.mouseMode,
+      altBuffer: terminal.isUsingAltBuffer,
+      alternateScroll: terminal.altBufferMouseScrollMode,
+      multiplexer: widget.onEnterScrollMode != null,
+    );
+    return _remoteRoute != RemoteScrollRoute.local;
+  }
+
+  void _handleRemoteDragStart(DragStartDetails details) {
+    _remoteScroll.reset();
+    _remoteDragPosition = details.globalPosition;
+    if (_remoteRoute == RemoteScrollRoute.copyMode) {
+      // The same path as the two-finger scrollback: the multiplexer's
+      // copy mode keys, then the page's scroll-mode state. The rest of
+      // this drag scrolls there with arrows.
+      _dragEnteredScrollMode = true;
+      _remoteRoute = RemoteScrollRoute.arrows;
+      widget.onEnterScrollMode?.call();
+    }
+  }
+
+  void _handleRemoteDragUpdate(DragUpdateDetails details) {
+    _remoteDragPosition = details.globalPosition;
+    _sendRemoteScroll(_remoteScroll.add(details.delta.dy));
+  }
+
+  void _handleRemoteDragEnd(DragEndDetails details) {
+    _remoteScroll.reset();
+    final schedule = remoteScrollMomentum(details.primaryVelocity ?? 0);
+    if (schedule.isEmpty) {
+      return;
+    }
+    var index = 0;
+    _momentumTimer?.cancel();
+    _momentumTimer = Timer.periodic(momentumTick, (timer) {
+      if (!mounted || index >= schedule.length) {
+        timer.cancel();
+        return;
+      }
+      _sendRemoteScroll(schedule[index]);
+      index += 1;
+    });
+  }
+
+  void _stopMomentum() {
+    _momentumTimer?.cancel();
+    _momentumTimer = null;
+  }
+
+  /// Sends [notches] of scrolling (positive: up, towards older output) by
+  /// the route chosen for this drag.
+  void _sendRemoteScroll(int notches) {
+    if (notches == 0) {
+      return;
+    }
+    final terminal = widget.session.terminal;
+    final up = notches > 0;
+    final count = notches.abs();
+    if (_remoteRoute == RemoteScrollRoute.wheel) {
+      if (!terminal.mouseMode.reportScroll) {
+        // The program switched mouse reports off mid-drag.
+        _stopMomentum();
+        return;
+      }
+      final cell = _remoteCell(_remoteDragPosition);
+      final notch = encodeWheelEvent(
+        up: up,
+        column: cell.x,
+        row: cell.y,
+        mode: terminal.mouseReportMode,
+      );
+      // Straight to the terminal's output: a sticky Ctrl or Alt on the
+      // keyboard bar is for the next key, not for the wheel.
+      terminal.textInput(notch * count);
+      return;
+    }
+    // Arrow keys follow the cursor-key mode (ESC O A in vim and less).
+    final arrow = encodeScrollArrow(
+      up: up,
+      applicationCursorKeys: terminal.cursorKeysMode,
+    );
+    terminal.textInput(arrow * count);
+  }
+
+  /// The screen cell (zero-based column and row of the visible screen)
+  /// under [globalPosition].
+  CellOffset _remoteCell(Offset globalPosition) {
+    final terminal = widget.session.terminal;
+    final render = _viewKey.currentState?.renderTerminal;
+    if (render == null || !render.attached) {
+      return const CellOffset(0, 0);
+    }
+    final cell = render.getCellOffset(render.globalToLocal(globalPosition));
+    return CellOffset(
+      cell.x.clamp(0, terminal.viewWidth - 1),
+      (cell.y - terminal.buffer.scrollBack).clamp(0, terminal.viewHeight - 1),
+    );
+  }
+
+  void _leaveDragScrollMode() {
+    _dragEnteredScrollMode = false;
+    widget.session.sendText('q');
+    widget.onExitTmuxScrollMode();
+  }
+
   @override
   Widget build(BuildContext context) {
     return ClipRect(
@@ -296,6 +462,7 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
                   controller: _terminalController,
                   onTapUp: _handleTapUp,
                   focusNode: widget.focusNode,
+                  onKeyEvent: widget.onKeyEvent,
                   autofocus: widget.focusNode != null,
                   deleteDetection: true,
                   keyboardType: TextInputType.visiblePassword,
@@ -315,17 +482,82 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
               },
             ),
           ),
+          if (widget.dragScrollsRemote)
+            // Above the terminal view so it sees each move first: the
+            // view's own scrollables would otherwise take the drag and, on
+            // the alternate screen, send Shift+wheel (see
+            // encodeWheelEvent). It only joins the arena for drags that
+            // belong to the remote program, so local scrollback, taps and
+            // long-press selection behave as before. It stays mounted in
+            // scroll mode (declining every drag there) so a drag that
+            // enters copy mode keeps going.
+            Positioned.fill(
+              child: RawGestureDetector(
+                behavior: HitTestBehavior.translucent,
+                gestures: {
+                  _RemoteScrollDragRecognizer:
+                      GestureRecognizerFactoryWithHandlers<
+                        _RemoteScrollDragRecognizer
+                      >(
+                        () => _RemoteScrollDragRecognizer(
+                          claim: _claimRemoteDrag,
+                        ),
+                        (recognizer) => _remoteDrag = recognizer
+                          ..onStart = _handleRemoteDragStart
+                          ..onUpdate = _handleRemoteDragUpdate
+                          ..onEnd = _handleRemoteDragEnd
+                          ..onCancel = _remoteScroll.reset,
+                      ),
+                },
+                child: const SizedBox.expand(),
+              ),
+            ),
           if (widget.tmuxScrollMode)
             Positioned.fill(
               child: GestureDetector(
                 behavior: HitTestBehavior.translucent,
                 onVerticalDragUpdate: _handleTmuxScrollDrag,
                 onVerticalDragEnd: _handleTmuxScrollEnd,
+                // Copy mode a drag opened on its own closes with a tap.
+                onTap: _dragEnteredScrollMode ? _leaveDragScrollMode : null,
                 child: const SizedBox.expand(),
               ),
             ),
         ],
       ),
     );
+  }
+}
+
+/// A vertical drag that only takes pointers [claim] accepts, and steps
+/// aside when a second finger lands before it has won.
+class _RemoteScrollDragRecognizer extends VerticalDragGestureRecognizer {
+  _RemoteScrollDragRecognizer({required this.claim})
+    : super(supportedDevices: const {PointerDeviceKind.touch});
+
+  final bool Function(PointerEvent event) claim;
+  bool _dragging = false;
+
+  @override
+  bool isPointerAllowed(PointerEvent event) =>
+      super.isPointerAllowed(event) && claim(event);
+
+  @override
+  void acceptGesture(int pointer) {
+    _dragging = true;
+    super.acceptGesture(pointer);
+  }
+
+  @override
+  void didStopTrackingLastPointer(int pointer) {
+    _dragging = false;
+    super.didStopTrackingLastPointer(pointer);
+  }
+
+  /// Gives the pointer up unless the drag already started.
+  void yieldToMultiTouch() {
+    if (!_dragging) {
+      resolve(GestureDisposition.rejected);
+    }
   }
 }
