@@ -1,6 +1,6 @@
 'use strict'
 
-// Integration: a real daemon on a temp socket, the real hook client, the CLI.
+// Integration: a real daemon on a temp socket, the real (sh) hook client, the CLI.
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
@@ -14,17 +14,22 @@ const HOOK = path.join(__dirname, '..', 'bin', 'conductore-hook')
 
 // Short socket path: unix sockets are limited to ~100 bytes.
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-'))
+// A fake tmux on PATH (the daemon inherits it from the hook that starts it):
+// logs its arguments, answers display-message like tmux would.
+const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-bin-'))
+const tmuxLog = path.join(fakeBin, 'tmux.log')
+fs.writeFileSync(path.join(fakeBin, 'tmux'), `#!/bin/sh
+printf '%s\n' "$*" >> '${tmuxLog}'
+printf 'main\t2\t%s\t/work/t\tfixer\n' "$6"
+`, { mode: 0o755 })
 const env = {
   ...process.env,
+  PATH: `${fakeBin}:${process.env.PATH}`,
   CONDUCTORE_HOME: home,
   CONDUCTORE_SOCKET: path.join(home, 'hostd.sock'),
   CONDUCTORE_CLAUDE_SETTINGS: path.join(home, 'settings.json')
 }
-delete env.TMUX
-delete env.TMUX_PANE
-delete env.HERDR_WORKSPACE_ID
-delete env.HERDR_PANE_ID
-delete env.HERDR_TAB_ID
+for (const k of ['TMUX', 'TMUX_PANE', 'HERDR_WORKSPACE_ID', 'HERDR_PANE_ID', 'HERDR_TAB_ID', 'HERDR_AGENT_NAME']) delete env[k]
 
 process.env.CONDUCTORE_HOME = env.CONDUCTORE_HOME
 process.env.CONDUCTORE_SOCKET = env.CONDUCTORE_SOCKET
@@ -42,19 +47,23 @@ function cli (...args) {
   })
 }
 
-// Runs the hook binary with the given event on stdin; resolves when it exits.
+// Runs the hook script with the given event on stdin; resolves when it
+// exits (and its stdout closes, as Claude Code waits for).
 function hook (event, extraEnv = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [HOOK, event.hook_event_name], { env: { ...env, ...extraEnv }, stdio: ['pipe', 'pipe', 'pipe'] })
+    const t0 = Date.now()
+    const child = spawn(HOOK, [event.hook_event_name], { env: { ...env, ...extraEnv }, stdio: ['pipe', 'pipe', 'pipe'] })
     let stdout = ''
     let stderr = ''
     child.stdout.on('data', d => { stdout += d })
     child.stderr.on('data', d => { stderr += d })
     child.on('error', reject)
-    child.on('exit', code => resolve({ code, stdout, stderr }))
+    child.on('close', code => resolve({ code, stdout, stderr, ms: Date.now() - t0 }))
     child.stdin.end(JSON.stringify(event))
   })
 }
+
+const spooled = () => fs.readdirSync(path.join(home, 'spool')).filter(n => !n.startsWith('.'))
 
 async function status () {
   return (await cli('status')).json
@@ -89,10 +98,52 @@ test('first hook call starts the daemon; events flow into status', async () => {
   assert.equal(fs.statSync(env.CONDUCTORE_SOCKET).mode & 0o077, 0)
 })
 
+test('the hook is a sh script: it spools and returns without waiting for the daemon', async () => {
+  assert.match(fs.readFileSync(HOOK, 'utf8'), /^#!\/bin\/sh\n/)
+  await cli('stop')
+  await waitFor(async () => !fs.existsSync(env.CONDUCTORE_SOCKET))
+  // Pretend a start attempt just happened, so this hook does not start one.
+  fs.writeFileSync(path.join(home, 'spawn.at'), `${Math.floor(Date.now() / 1000)}\n`)
+  const r = await hook(ev('q1', 'UserPromptSubmit'))
+  assert.equal(r.code, 0)
+  assert.equal(r.stdout, '')
+  assert.equal(spooled().length, 1)
+  assert.equal(fs.existsSync(env.CONDUCTORE_SOCKET), false)
+  // Ordered delivery once the daemon runs: the reply to status includes it.
+  await hook(ev('q1', 'Stop', { last_assistant_message: 'done' }))
+  const a = (await status()).agents.find(a => a.sessionId === 'q1')
+  assert.equal(a.state, 'waiting_input')
+  assert.equal(a.lastMessage, 'done')
+  assert.equal(spooled().length, 0)
+})
+
+test('the daemon runs with the memory flags and reports its footprint', async () => {
+  const [ping] = await client.request({ op: 'ping' })
+  assert.ok(ping.execArgv.includes('--max-old-space-size=16'), ping.execArgv.join(' '))
+  assert.ok(ping.rss > 0)
+  assert.equal(typeof ping.cpuMs, 'number')
+})
+
+test('tmux location is resolved by the daemon from the variables in the spool header', async () => {
+  const r = await hook(ev('t1', 'SessionStart'), { TMUX: '/tmp/fake-tmux-sock,123,0', TMUX_PANE: '%7' })
+  assert.equal(r.code, 0)
+  const a = (await status()).agents.find(a => a.sessionId === 't1')
+  assert.deepEqual(a.tmux, { session: 'main', window: 2, paneId: '%7', windowName: 'fixer' })
+  assert.equal(a.name, 'fixer')
+  assert.match(fs.readFileSync(tmuxLog, 'utf8'), /^-S \/tmp\/fake-tmux-sock display-message -p -t %7 /m)
+  // Herdr comes straight from the header.
+  await hook(ev('t2', 'SessionStart'), { HERDR_WORKSPACE_ID: 'w1', HERDR_TAB_ID: 'w1:t1', HERDR_PANE_ID: 'w1:p1', HERDR_AGENT_NAME: 'rev' })
+  const b = (await status()).agents.find(a => a.sessionId === 't2')
+  assert.deepEqual(b.herdr, { workspaceId: 'w1', tabId: 'w1:t1', paneId: 'w1:p1', name: 'rev' })
+  assert.equal(b.name, 'rev')
+})
+
 test('concurrent hooks do not start two daemons', async () => {
   await cli('stop')
   await waitFor(async () => !fs.existsSync(env.CONDUCTORE_SOCKET))
   await Promise.all([1, 2, 3, 4].map(i => hook(ev(`c${i}`, 'UserPromptSubmit'))))
+  await waitFor(async () => fs.existsSync(env.CONDUCTORE_SOCKET))
+  await sleep(200)
   const [ping] = await client.request({ op: 'ping' })
   await sleep(300)
   const [ping2] = await client.request({ op: 'ping' })
@@ -171,14 +222,44 @@ test('PermissionRequest timeout prints nothing and leaves the terminal prompt to
 })
 
 test('killing a waiting hook drops its pending request', async () => {
-  const child = spawn(process.execPath, [HOOK, 'PermissionRequest'], { env: { ...env, CONDUCTORE_PERMISSION_TIMEOUT: '30' }, stdio: ['pipe', 'ignore', 'ignore'] })
+  const child = spawn(HOOK, ['PermissionRequest'], { env: { ...env, CONDUCTORE_PERMISSION_TIMEOUT: '30' }, stdio: ['pipe', 'ignore', 'ignore'] })
   child.stdin.end(JSON.stringify(ev('s1', 'PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'sleep' } })))
-  await waitFor(async () => ((await status()).agents.find(a => a.sessionId === 's1') || {}).pending?.length === 1)
+  const req = await waitFor(async () => ((await status()).agents.find(a => a.sessionId === 's1') || {}).pending?.[0])
   child.kill('SIGKILL')
   await waitFor(async () => ((await status()).agents.find(a => a.sessionId === 's1') || {}).pending?.length === 0)
+  const late = await cli('decide', req.id, 'allow')
+  assert.equal(late.code, 1)
+  // Its FIFO is cleaned up with it.
+  await waitFor(async () => !fs.readdirSync(path.join(home, 'tmp')).some(n => n.startsWith('p.')))
+})
+
+test('stopping the daemon while a hook waits releases the hook with no output', async () => {
+  const pending = hook(ev('s1', 'PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'make' } }), { CONDUCTORE_PERMISSION_TIMEOUT: '30' })
+  await waitFor(async () => ((await status()).agents.find(a => a.sessionId === 's1') || {}).pending?.[0])
+  await cli('stop')
+  const r = await pending
+  assert.equal(r.code, 0)
+  assert.equal(r.stdout, '')
+  assert.ok(r.ms < 10000, `${r.ms} ms`)
+})
+
+test('a daemon that dies mid-wait releases the hook within seconds', async () => {
+  const pending = hook(ev('s1', 'PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'make' } }), { CONDUCTORE_PERMISSION_TIMEOUT: '30' })
+  await waitFor(async () => ((await status()).agents.find(a => a.sessionId === 's1') || {}).pending?.[0])
+  const [ping] = await client.request({ op: 'ping' })
+  const t0 = Date.now()
+  process.kill(ping.pid, 'SIGKILL')
+  const r = await pending
+  assert.equal(r.stdout, '')
+  assert.ok(Date.now() - t0 < 5000, `${Date.now() - t0} ms`)
+  // Leave no stale lock/socket behind for the next test.
+  await status()
 })
 
 test('events long-poll returns the batch since seq, waits for new changes, and times out', async () => {
+  // At least two buffered changes, whatever restarts happened before.
+  await hook(ev('s1', 'UserPromptSubmit'))
+  await hook(ev('s1', 'PreToolUse', { tool_name: 'Read', tool_input: { file_path: '/x' } }))
   const before = (await status()).seq
   // Backlog: the buffered changes since a recent cursor are served at once.
   const backlog = await cli('events', '--since', String(before - 2), '--timeout', '5')
@@ -256,15 +337,37 @@ test('install and uninstall edit the settings file idempotently', async () => {
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo other' }] }] } })
 })
 
-test('doctor reports checks as JSON', async () => {
+test('doctor reports checks as JSON, with hook latency and daemon memory', async () => {
+  await cli('events', '--timeout', '0') // starts the daemon
   const d = await cli('doctor')
   assert.equal(d.code, 0)
   assert.ok(Array.isArray(d.json.checks))
   assert.ok(d.json.checks.some(c => c.name === 'node' && c.ok))
+  const latency = d.json.checks.find(c => c.name === 'hook latency')
+  assert.equal(latency.ok, true)
+  assert.match(latency.detail, /^\d+\.\d ms per event/)
+  assert.match(d.json.checks.find(c => c.name === 'daemon memory').detail, /MB RSS/)
+})
+
+test('a PermissionRequest with no daemon that can start gives up after 5 s, printing nothing', async () => {
+  const lone = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-lone-'))
+  fs.writeFileSync(path.join(lone, 'node'), '/bin/false\n')
+  const t0 = Date.now()
+  const r = await hook(ev('x1', 'PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'ls' } }),
+    { CONDUCTORE_HOME: lone, CONDUCTORE_SOCKET: path.join(lone, 's.sock'), CONDUCTORE_PERMISSION_TIMEOUT: '60' })
+  const ms = Date.now() - t0
+  assert.equal(r.code, 0)
+  assert.equal(r.stdout, '')
+  assert.ok(ms >= 4500 && ms < 9000, `${ms} ms`)
+  // The abandoned request does not linger for a later daemon to show.
+  assert.deepEqual(fs.readdirSync(path.join(lone, 'spool')), [])
+  assert.deepEqual(fs.readdirSync(path.join(lone, 'tmp')), [])
+  fs.rmSync(lone, { recursive: true, force: true })
 })
 
 test.after(async () => {
   await cli('stop').catch(() => {})
   await sleep(200)
   fs.rmSync(home, { recursive: true, force: true })
+  fs.rmSync(fakeBin, { recursive: true, force: true })
 })

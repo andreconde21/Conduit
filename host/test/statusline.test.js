@@ -1,19 +1,23 @@
 'use strict'
 
-// Statusline usage: mapping, settings wiring, and the full path through a
-// real daemon (usage stored without touching state, throttled change events).
+// Statusline usage: mapping, settings wiring and migration, and the full path
+// through the sh client and a real daemon (usage stored without touching
+// state, held/parked reports, throttled change events, chained passthrough).
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
-const { spawn, execFile } = require('child_process')
+const { spawn } = require('child_process')
 const sl = require('../lib/statusline')
 
 const HOSTD = path.join(__dirname, '..', 'bin', 'conductore-hostd')
 const HOOK = path.join(__dirname, '..', 'bin', 'conductore-hook')
-const BIN = '/home/u/.local/share/conductore/bin/conductore-hostd'
+const SL = path.join(__dirname, '..', 'bin', 'conductore-statusline')
+const BIN = '/home/u/.local/share/conductore/bin/conductore-statusline'
+const LEGACY = '/home/u/.local/share/conductore/bin/conductore-hostd'
+const q = s => `'${s.replace(/'/g, "'\\''")}'`
 
 const sample = (extra = {}) => ({
   session_id: 'st1',
@@ -56,7 +60,7 @@ test('defaultLine is short and survives junk', () => {
 test('merge sets, wraps and is idempotent; unmerge restores', () => {
   const set = sl.merge({}, BIN)
   assert.equal(set.action, 'set')
-  assert.deepEqual(set.settings.statusLine, { type: 'command', command: `'${BIN}' statusline` })
+  assert.deepEqual(set.settings.statusLine, { type: 'command', command: `'${BIN}'` })
   assert.equal(sl.merge(set.settings, BIN).action, 'unchanged')
   assert.deepEqual(sl.unmerge(set.settings), {})
 
@@ -69,14 +73,32 @@ test('merge sets, wraps and is idempotent; unmerge restores', () => {
   assert.equal(again.action, 'unchanged')
   assert.deepEqual(sl.unmerge(again.settings), theirs)
   // A moved install updates the path but keeps the wrapped command.
-  const moved = sl.merge(wrapped.settings, '/opt/c/bin/conductore-hostd')
+  const moved = sl.merge(wrapped.settings, '/opt/c/bin/conductore-statusline')
   assert.equal(moved.action, 'updated')
   assert.equal(sl.chainOf(moved.settings.statusLine), "~/bin/line.sh --fmt 'a b'")
   assert.deepEqual(sl.describe(wrapped.settings), { wired: true, detail: "wired, wrapping: ~/bin/line.sh --fmt 'a b'" })
   assert.equal(sl.describe(theirs).wired, false)
 })
 
-// --- through the real CLI and daemon ---
+test('merge migrates the Node statusline of 0.3 to the sh one, keeping what it wraps', () => {
+  const chain = "~/bin/line.sh --fmt 'a b'"
+  const old = { statusLine: { type: 'command', command: `${q(LEGACY)} statusline --chain ${q(chain)}`, padding: 2 } }
+  assert.equal(sl.isOurs(old.statusLine), true)
+  assert.equal(sl.chainOf(old.statusLine), chain)
+  assert.match(sl.describe(old).detail, /Node statusline from 0\.3/)
+  const m = sl.merge(old, BIN)
+  assert.equal(m.action, 'updated')
+  assert.equal(m.settings.statusLine.padding, 2)
+  assert.equal(m.settings.statusLine.command, `${q(BIN)} --chain ${q(chain)}`)
+  assert.equal(sl.chainOf(m.settings.statusLine), chain)
+  assert.equal(sl.merge(m.settings, BIN).action, 'unchanged')
+  assert.deepEqual(sl.unmerge(m.settings), { statusLine: { type: 'command', command: chain, padding: 2 } })
+  // A bare legacy line becomes a bare sh line.
+  assert.equal(sl.merge({ statusLine: { type: 'command', command: `${q(LEGACY)} statusline` } }, BIN).settings.statusLine.command, q(BIN))
+  assert.equal(sl.isOurs({ command: '~/bin/conductore-statusline-ish' }), false)
+})
+
+// --- through the real clients and daemon ---
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cnd-sl-'))
 const env = {
@@ -86,15 +108,18 @@ const env = {
   CONDUCTORE_CLAUDE_SETTINGS: path.join(home, 'settings.json'),
   CONDUCTORE_USAGE_THROTTLE_MS: '3000'
 }
-for (const k of ['TMUX', 'TMUX_PANE', 'HERDR_WORKSPACE_ID', 'HERDR_PANE_ID', 'HERDR_TAB_ID']) delete env[k]
+for (const k of ['TMUX', 'TMUX_PANE', 'HERDR_WORKSPACE_ID', 'HERDR_PANE_ID', 'HERDR_TAB_ID', 'HERDR_AGENT_NAME']) delete env[k]
 
+// The Node CLI runs under node; the sh clients run as themselves.
 function run (bin, args, input) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [bin, ...args], { env, stdio: ['pipe', 'pipe', 'pipe'] })
+    const child = bin === HOSTD
+      ? spawn(process.execPath, [bin, ...args], { env, stdio: ['pipe', 'pipe', 'pipe'] })
+      : spawn(bin, args, { env, stdio: ['pipe', 'pipe', 'pipe'] })
     let stdout = ''
     child.stdout.on('data', d => { stdout += d })
     child.on('error', reject)
-    child.on('exit', code => resolve({ code, stdout }))
+    child.on('close', code => resolve({ code, stdout }))
     child.stdin.end(input)
   })
 }
@@ -102,25 +127,45 @@ const cli = async (...args) => {
   const r = await run(HOSTD, args, '')
   return { code: r.code, json: JSON.parse(r.stdout.trim().split('\n').pop()) }
 }
-const sleep = ms => new Promise(r => setTimeout(r, ms))
+// `status` applies everything spooled so far (starting the daemon if needed).
 const agentOf = async sid => (await cli('status')).json.agents.find(a => a.sessionId === sid)
 
-test.after(async () => { await cli('stop') })
-
-test('statusline without a daemon or valid input still prints and exits 0', async () => {
-  const r = await run(HOSTD, ['statusline'], 'not json')
-  assert.equal(r.code, 0)
-  assert.equal(r.stdout, 'conductore\n')
+test.after(async () => {
+  await cli('stop')
+  fs.rmSync(home, { recursive: true, force: true })
 })
 
-test('statusline stores usage without changing state; changes are throttled', async () => {
+test('statusline without a daemon or valid input still prints and exits 0 (sh and legacy Node)', async () => {
+  for (const [bin, args] of [[SL, []], [HOSTD, ['statusline']]]) {
+    const r = await run(bin, args, 'not json')
+    assert.equal(r.code, 0)
+    assert.equal(r.stdout, 'conductore\n')
+  }
+})
+
+test('the sh default line matches lib/statusline.js', async () => {
+  const cases = [
+    sample(),
+    { ...sample(), context_window: null, rate_limits: { five_hour: null, seven_day: { used_percentage: 5 } } },
+    { ...sample(), context_window: { current_usage: { input_tokens: 1 }, used_percentage: 99.6 }, rate_limits: { five_hour: { resets_at: 1, used_percentage: 140 } } },
+    { session_id: 'j1', model: { display_name: 'Sonnet' }, cwd: '/' },
+    { session_id: 'j2', workspace: { current_dir: '/a/b/' }, context_window: { used_percentage: 0.4 } }
+  ]
+  for (const [i, input] of cases.entries()) {
+    input.session_id = `dl${i}`
+    const expected = sl.defaultLine(input) + '\n'
+    assert.equal((await run(SL, [], JSON.stringify(input))).stdout, expected, JSON.stringify(input))
+    assert.equal((await run(SL, [], JSON.stringify(input, null, 2))).stdout, expected, 'pretty-printed')
+  }
+})
+
+test('statusline stores usage without changing state; reports are held and the last one wins', async () => {
   await run(HOOK, ['SessionStart'], JSON.stringify({ session_id: 'st1', cwd: '/work/api', hook_event_name: 'SessionStart' }))
-  let before
-  for (let i = 0; i < 50 && !(before = await agentOf('st1')); i++) await sleep(50)
+  const before = await agentOf('st1')
   assert.ok(before, 'session registered')
 
   const { json: { seq } } = await cli('status')
-  const r = await run(HOSTD, ['statusline'], JSON.stringify(sample()))
+  const r = await run(SL, [], JSON.stringify(sample()))
   assert.equal(r.code, 0)
   assert.equal(r.stdout, 'Opus · api · 43% ctx · 5h 24%\n')
   const after = await agentOf('st1')
@@ -132,36 +177,57 @@ test('statusline stores usage without changing state; changes are throttled', as
   assert.equal(first.json.reason, 'usage')
   assert.deepEqual(first.json.agent.usage, after.usage)
 
-  // Two more reports inside the throttle window: one change, carrying the last.
+  // The daemon took that report from the spool and opened a hold: the next
+  // reports are parked (latest wins) instead of waking it.
+  assert.ok(fs.existsSync(path.join(home, 'usage', 'st1.hold')))
   const seq2 = first.json.seq
-  await run(HOSTD, ['statusline'], JSON.stringify(sample({ context_window: { used_percentage: 50 } })))
-  await run(HOSTD, ['statusline'], JSON.stringify(sample({ context_window: { used_percentage: 60 } })))
-  // The window is wide (3 s) so slow process start-up under load cannot split
-  // the two reports; the held change arrives when the window ends.
+  await run(SL, [], JSON.stringify(sample({ context_window: { used_percentage: 50 } })))
+  await run(SL, [], JSON.stringify(sample({ context_window: { used_percentage: 60 } })))
+  assert.deepEqual(fs.readdirSync(path.join(home, 'spool')), [])
+  assert.match(fs.readFileSync(path.join(home, 'usage', 'st1.json'), 'utf8'), /"used_percentage":60/)
+  // When the hold ends (3 s here) the parked report is applied: one change, the last value.
   const lines = (await run(HOSTD, ['events', '--since', String(seq2), '--timeout', '8'], '')).stdout.trim().split('\n').map(l => JSON.parse(l))
   const usageChanges = lines.filter(l => l.reason === 'usage')
   assert.equal(usageChanges.length, 1)
   assert.equal(usageChanges[0].agent.usage.contextUsedPct, 60)
+  assert.equal(fs.existsSync(path.join(home, 'usage', 'st1.json')), false)
 
   // The same usage again publishes nothing.
   const seq3 = usageChanges[0].seq
-  await run(HOSTD, ['statusline'], JSON.stringify(sample({ context_window: { used_percentage: 60 } })))
-  const none = await cli('events', '--since', String(seq3), '--timeout', '1')
+  await run(SL, [], JSON.stringify(sample({ context_window: { used_percentage: 60 } })))
+  const none = await cli('events', '--since', String(seq3), '--timeout', '4')
   assert.equal(none.json.type, 'timeout')
 })
 
 test('usage reported before the first hook event attaches when it arrives', async () => {
-  await run(HOSTD, ['statusline'], JSON.stringify(sample({ session_id: 'early' })))
+  await run(SL, [], JSON.stringify(sample({ session_id: 'early' })))
   await run(HOOK, ['SessionStart'], JSON.stringify({ session_id: 'early', cwd: '/work/e', hook_event_name: 'SessionStart' }))
-  let agent
-  for (let i = 0; i < 50 && !(agent = await agentOf('early')); i++) await sleep(50)
+  const agent = await agentOf('early')
   assert.equal(agent.usage.contextUsedPct, 42.5)
 })
 
+test('legacy `conductore-hostd statusline` still reports over the socket', async () => {
+  await run(HOOK, ['SessionStart'], JSON.stringify({ session_id: 'leg', cwd: '/work/l', hook_event_name: 'SessionStart' }))
+  assert.ok(await agentOf('leg'))
+  const r = await run(HOSTD, ['statusline'], JSON.stringify(sample({ session_id: 'leg' })))
+  assert.equal(r.stdout, 'Opus · api · 43% ctx · 5h 24%\n')
+  assert.equal((await agentOf('leg')).usage.contextUsedPct, 42.5)
+})
+
 test('--chain feeds the same stdin to the previous command and prints its output unchanged', async () => {
-  const r = await run(HOSTD, ['statusline', '--chain', "read -r l; printf 'mine %s' \"$(printf '%s' \"$l\" | wc -c | tr -d ' ')\""], '{"a":1}\n')
-  assert.equal(r.code, 0)
-  assert.equal(r.stdout, 'mine 7')
+  const chain = "read -r l; printf 'mine %s' \"$(printf '%s' \"$l\" | wc -c | tr -d ' ')\""
+  for (const [bin, pre] of [[SL, []], [HOSTD, ['statusline']]]) {
+    const r = await run(bin, [...pre, '--chain', chain], '{"a":1}\n')
+    assert.equal(r.code, 0)
+    assert.equal(r.stdout, 'mine 7')
+  }
+  // A failing chained command never breaks the line: no output, exit 0.
+  const bad = await run(SL, ['--chain', 'echo oops >&2; exit 3'], JSON.stringify(sample()))
+  assert.equal(bad.code, 0)
+  assert.equal(bad.stdout, '')
+  // The whole input arrives, not just its first line.
+  const multi = await run(SL, ['--chain', 'cat'], JSON.stringify(sample(), null, 2))
+  assert.equal(multi.stdout, JSON.stringify(sample(), null, 2) + '\n')
 })
 
 test('install wraps an existing statusline, doctor reports it, uninstall restores it', async () => {
@@ -172,12 +238,44 @@ test('install wraps an existing statusline, doctor reports it, uninstall restore
   assert.equal(inst.json.statusLine, 'wrapped')
   const written = JSON.parse(fs.readFileSync(file, 'utf8'))
   assert.equal(sl.chainOf(written.statusLine), '~/bin/my-line')
-  assert.match(written.statusLine.command, /conductore-hostd' statusline --chain/)
+  assert.equal(written.statusLine.command, `${q(SL)} --chain '~/bin/my-line'`)
   const doc = await cli('doctor')
   const check = doc.json.checks.find(c => c.name === 'statusline (usage)')
   assert.equal(check.ok, true)
-  assert.match(check.detail, /wrapping: ~\/bin\/my-line/)
+  assert.equal(check.detail, 'wired, wrapping: ~/bin/my-line')
   const un = await cli('uninstall')
   assert.equal(un.json.statusLineRestored, true)
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')).statusLine, original)
+})
+
+test('install migrates a 0.3 install (Node hook entries, Node statusline) idempotently', async () => {
+  const file = env.CONDUCTORE_CLAUDE_SETTINGS
+  const oldHook = '/old/share/conductore/bin/conductore-hook'
+  const hooks = {}
+  for (const e of ['SessionStart', 'PreToolUse', 'PermissionRequest', 'Stop']) {
+    hooks[e] = [{ matcher: '', hooks: [{ type: 'command', command: `${q(oldHook)} ${e}`, async: true }] }]
+  }
+  hooks.Stop.unshift({ hooks: [{ type: 'command', command: 'echo other' }] })
+  const legacyLine = { type: 'command', command: `${q('/old/share/conductore/bin/conductore-hostd')} statusline --chain 'bash ~/line.sh'`, padding: 0 }
+  fs.writeFileSync(file, JSON.stringify({ hooks, statusLine: legacyLine }))
+  const inst = await cli('install')
+  assert.equal(inst.json.ok, true)
+  assert.equal(inst.json.statusLine, 'updated')
+  const cfg = JSON.parse(fs.readFileSync(file, 'utf8'))
+  const ours = Object.values(cfg.hooks).flat().flatMap(g => g.hooks).filter(h => /conductore-hook' \w+$/.test(h.command))
+  assert.equal(ours.length, 9)
+  assert.ok(ours.every(h => h.command.startsWith(`${q(HOOK)} `)))
+  assert.equal(cfg.hooks.PermissionRequest[0].hooks[0].async, undefined)
+  assert.deepEqual(cfg.hooks.Stop[0], { hooks: [{ type: 'command', command: 'echo other' }] })
+  assert.equal(cfg.statusLine.command, `${q(SL)} --chain 'bash ~/line.sh'`)
+  assert.equal(cfg.statusLine.padding, 0)
+  assert.equal(fs.readFileSync(path.join(home, 'node'), 'utf8'), process.execPath + '\n')
+  // Second run: nothing to change, the file is not rewritten.
+  const bytes = fs.readFileSync(file, 'utf8')
+  const mtime = fs.statSync(file).mtimeMs
+  const again = await cli('install')
+  assert.equal(again.json.statusLine, 'unchanged')
+  assert.equal(fs.readFileSync(file, 'utf8'), bytes)
+  assert.equal(fs.statSync(file).mtimeMs, mtime)
+  await cli('uninstall')
 })

@@ -1,0 +1,113 @@
+#!/bin/sh
+# conductore-statusline [--chain '<command>']: Claude Code statusLine
+# command. POSIX sh, no Node.
+#
+# Hands the statusline JSON (stdin) to conductore-hostd for the session's
+# context and rate-limit usage, then prints a status line: the chained
+# command's output unchanged (it gets the same JSON on stdin), else a short
+# default line built from the JSON with shell parameter expansion only.
+# Never fails visibly: always exits 0.
+#
+# Throttle: after the daemon takes a report from the spool it creates
+# usage/<session>.hold for CONDUCTORE_USAGE_THROTTLE_MS (10 s). While it
+# exists, reports are parked in usage/<session>.json (latest wins) instead of
+# waking the daemon, which reads the parked one when the hold ends. So the
+# daemon wakes at most once per 10 s per session and never misses the last
+# value. Layout: see bin/conductore-hook.
+
+exec 2>/dev/null
+umask 077
+d=${CONDUCTORE_HOME:-$HOME/.conductore}
+chain=
+[ "${1:-}" = --chain ] && chain=${2:-}
+input=$(cat)
+
+wake() {
+  if [ -f "$d/hostd.pid" ] && read -r pid <"$d/hostd.pid" && kill -0 "$pid"; then
+    return 0
+  fi
+  now=$(date +%s)
+  last=0
+  [ -f "$d/spawn.at" ] && read -r last <"$d/spawn.at"
+  case $last in '' | *[!0-9]*) last=0 ;; esac
+  age=$((now - last))
+  [ "$age" -ge 0 ] && [ "$age" -lt 10 ] && return 1
+  printf '%s\n' "$now" >"$d/spawn.at"
+  node=node
+  [ -f "$d/node" ] && read -r node <"$d/node"
+  case $0 in */*) bin=${0%/*} ;; *) bin=. ;; esac
+  "$node" "$bin/conductore-hostd" daemon --detach </dev/null >/dev/null 2>&1 &
+  return 1
+}
+
+# v = what follows "<key>": in $1 (colon and blanks trimmed); 1 if absent.
+after() {
+  case $1 in *"\"$2\""*) ;; *) v= && return 1 ;; esac
+  v=${1#*"\"$2\""}
+  v=${v#"${v%%[!:	 ]*}"}
+}
+# v = the string value of <key> in $1.
+str() {
+  after "$1" "$2" || return 1
+  case $v in \"*) v=${v#\"} && v=${v%%\"*} ;; *) v= && return 1 ;; esac
+}
+# v = the numeric value of <key> in $1, rounded and clamped to 0..100.
+pct() {
+  after "$1" "$2" || return 1
+  v=${v%%[!0-9.-]*}
+  case $v in -*) v=0 ;; '' | *[!0-9.]* | *.*.*) v= && return 1 ;; esac
+  case $v in *.*) f=${v#*.} && v=${v%%.*} ;; *) f= ;; esac
+  v=${v:-0}
+  case $f in [5-9]*) v=$((v + 1)) ;; esac
+  [ "$v" -gt 100 ] && v=100
+  return 0
+}
+
+sid=
+str "$input" session_id && sid=$v
+case $sid in '' | *[!A-Za-z0-9_-]*) sid= ;; esac
+
+if [ -n "$sid" ] && { { [ -d "$d/spool" ] && [ -d "$d/tmp" ] && [ -d "$d/usage" ]; } ||
+  mkdir -p "$d/spool" "$d/tmp" "$d/usage"; }; then
+  tmp=$d/tmp/u.$$
+  if [ -e "$d/usage/$sid.hold" ]; then
+    dest=$d/usage/$sid.json
+  else
+    dest=$d/spool/u.$$
+    while [ -e "$dest" ]; do dest=$dest.n; done
+  fi
+  if printf 'conductore 1\nkind=usage\n\n%s\n' "$input" >"$tmp" && mv -f "$tmp" "$dest"; then
+    case $dest in "$d/spool/"*) wake ;; esac
+  else
+    rm -f "$tmp"
+  fi
+fi
+
+if [ -n "$chain" ]; then
+  sh -c "$chain" <<EOF
+$input
+EOF
+  exit 0
+fi
+
+# Default line: "Opus · api · 43% ctx · 5h 24%" (same as lib/statusline.js).
+line=
+add() { if [ -n "$line" ]; then line="$line · $1"; else line=$1; fi; }
+after "$input" model && str "$v" display_name && [ -n "$v" ] && add "$v"
+if str "$input" current_dir || str "$input" cwd; then
+  dir=${v%/}
+  [ -n "$dir" ] && add "${dir##*/}"
+  [ -z "$dir" ] && [ -n "$v" ] && add "$v"
+fi
+if after "$input" context_window; then
+  cw=$v
+  pre=${cw%%'"used_percentage"'*}
+  case $pre in "{"*'"rate_limits"'* | [!{]*) ;; *) pct "$cw" used_percentage && add "$v% ctx" ;; esac
+fi
+if after "$input" five_hour; then
+  fh=$v
+  pre=${fh%%'"used_percentage"'*}
+  case $pre in "{"*"}"* | [!{]*) ;; *) pct "$fh" used_percentage && add "5h $v%" ;; esac
+fi
+printf '%s\n' "${line:-conductore}"
+exit 0

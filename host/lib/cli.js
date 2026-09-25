@@ -8,12 +8,16 @@ const path = require('path')
 const { execFile } = require('child_process')
 const paths = require('./paths')
 const client = require('./client')
-const settings = require('./settings')
 const state = require('./state')
-const transcript = require('./transcript')
-const pane = require('./pane')
-const statusline = require('./statusline')
 const { log } = require('./log')
+
+// Loaded on first use: the daemon process never needs them.
+const lazy = name => { let m; return () => m || (m = require(name)) }
+const settingsMod = lazy('./settings')
+const transcriptMod = lazy('./transcript')
+const paneMod = lazy('./pane')
+const statuslineMod = lazy('./statusline')
+const spoolMod = lazy('./spool')
 
 const USAGE = `usage: conductore-hostd <command>
 
@@ -29,8 +33,8 @@ const USAGE = `usage: conductore-hostd <command>
                                   type a prompt into the agent's pane (text
                                   from stdin when neither flag is given)
   interrupt <sessionId>           press Escape in the agent's pane
-  statusline [--chain '<cmd>']    Claude Code statusLine command: records
-                                  context/rate-limit usage, prints a line
+  statusline [--chain '<cmd>']    legacy Node statusLine command (install
+                                  now registers bin/conductore-statusline)
   install | uninstall             register / remove the Claude Code hooks
   doctor | stop | version
 `
@@ -59,13 +63,9 @@ function parseFlags (args) {
   return { flags, positional }
 }
 
-function hostdBinPath () {
-  return path.join(__dirname, '..', 'bin', 'conductore-hostd')
-}
-
-function hookBinPath () {
-  return path.join(__dirname, '..', 'bin', 'conductore-hook')
-}
+const binPath = name => path.join(__dirname, '..', 'bin', name)
+const hookBinPath = () => binPath('conductore-hook')
+const statuslineBinPath = () => binPath('conductore-statusline')
 
 function readSnapshotFile () {
   const snap = JSON.parse(fs.readFileSync(paths.statePath(), 'utf8'))
@@ -81,6 +81,15 @@ async function status () {
     const [res] = await client.request({ op: 'status' }, { timeoutMs: 5000 })
     if (res && !res.error) return out(res)
   } catch {}
+  // Events are waiting in the spool (the daemon is starting, or exited
+  // idle): start it and let it apply them rather than print stale state.
+  if (spoolMod().isSpooled(paths.spoolDir())) {
+    try {
+      await client.ensureDaemon()
+      const [res] = await client.request({ op: 'status' }, { timeoutMs: 5000 })
+      if (res && !res.error) return out(res)
+    } catch {}
+  }
   try {
     return out(readSnapshotFile())
   } catch (err) {
@@ -188,7 +197,7 @@ async function transcriptCmd (args) {
     const a = found.agent
     // The agent's live status rides along so one poll refreshes the whole view.
     const agent = { name: a.name, state: a.state, lastMessage: a.lastMessage, startedAt: a.startedAt, updatedAt: a.updatedAt, endedAt: a.endedAt, pending: a.pending || [] }
-    return out({ sessionId, agent, ...transcript.readTranscript(file, opts) })
+    return out({ sessionId, agent, ...transcriptMod().readTranscript(file, opts) })
   } catch (err) {
     if (err.code === 'ENOENT') return fail(`transcript not found: ${file}`)
     return fail(`cannot read transcript: ${err.message}`)
@@ -202,7 +211,7 @@ function readStdin () {
     process.stdin.setEncoding('utf8')
     process.stdin.on('data', d => {
       data += d
-      if (data.length > pane.MAX_TEXT * 4) { process.stdin.destroy(); reject(new Error('text too long')) }
+      if (data.length > paneMod().MAX_TEXT * 4) { process.stdin.destroy(); reject(new Error('text too long')) }
     })
     process.stdin.on('end', () => resolve(data))
     process.stdin.on('error', reject)
@@ -218,7 +227,7 @@ async function inputAgent (sessionId, { allowPermission = false } = {}) {
   if (!allowPermission && agent.state === 'needs_permission') {
     return { error: 'agent is waiting for a permission decision; answer it first' }
   }
-  if (!pane.targets(agent).length) return { error: 'session not in tmux or Herdr' }
+  if (!paneMod().targets(agent).length) return { error: 'session not in tmux or Herdr' }
   return { agent }
 }
 
@@ -237,10 +246,10 @@ async function send (args) {
   text = text.replace(/\r\n?/g, '\n')
   const enter = !flags['no-enter']
   if (!text.length && !enter) return fail('nothing to send')
-  if (text.length > pane.MAX_TEXT) return fail(`text too long (${text.length} > ${pane.MAX_TEXT} characters)`)
+  if (text.length > paneMod().MAX_TEXT) return fail(`text too long (${text.length} > ${paneMod().MAX_TEXT} characters)`)
   const found = await inputAgent(sessionId)
   if (found.error) return fail(found.error)
-  const r = await pane.sendText(found.agent, text, { enter })
+  const r = await paneMod().sendText(found.agent, text, { enter })
   if (r.error) return fail(r.error)
   return out({ ok: true, sessionId, via: r.via, paneId: r.paneId, chars: text.length, enter })
 }
@@ -251,7 +260,7 @@ async function interrupt (args) {
   // Escape also dismisses a permission prompt, so it is allowed then.
   const found = await inputAgent(sessionId, { allowPermission: true })
   if (found.error) return fail(found.error)
-  const r = await pane.sendKey(found.agent, 'escape')
+  const r = await paneMod().sendKey(found.agent, 'escape')
   if (r.error) return fail(r.error)
   return out({ ok: true, sessionId, via: r.via, paneId: r.paneId, key: 'Escape' })
 }
@@ -296,7 +305,7 @@ async function statuslineCmd (args) {
   try { input = JSON.parse(raw) } catch {}
   const report = (async () => {
     if (!input || typeof input.session_id !== 'string') return
-    const req = { op: 'usage', sessionId: input.session_id, usage: statusline.usageFrom(input) }
+    const req = { op: 'usage', sessionId: input.session_id, usage: statuslineMod().usageFrom(input) }
     try {
       await client.request(req, { timeoutMs: 1500 })
     } catch (err) {
@@ -307,26 +316,48 @@ async function statuslineCmd (args) {
   })()
   let line
   if (typeof flags.chain === 'string' && flags.chain.trim()) line = await runChain(flags.chain, raw)
-  else line = statusline.defaultLine(input) + '\n'
+  else line = statuslineMod().defaultLine(input) + '\n'
   await report
   process.stdout.write(line)
   return 0
 }
 
+// The node binary the sh clients use to start the daemon: hooks may run
+// with a PATH that has no node (Claude Code's native build).
+function recordNodePath () {
+  const file = paths.nodePathFile()
+  try {
+    if (fs.readFileSync(file, 'utf8').trim() === process.execPath) return
+  } catch {}
+  fs.writeFileSync(file, process.execPath + '\n', { mode: 0o600 })
+}
+
 function install () {
+  const settings = settingsMod()
+  const statusline = statuslineMod()
   const file = settings.settingsPath()
   let current
   try { current = settings.readSettings(file) } catch (err) { return fail(err.message) }
   const hookBin = hookBinPath()
-  if (!fs.existsSync(hookBin)) return fail(`hook client not found at ${hookBin}`)
+  const slBin = statuslineBinPath()
+  for (const bin of [hookBin, slBin]) if (!fs.existsSync(bin)) return fail(`client not found at ${bin}`)
+  // Replaces every earlier conductore handler (any path, the Node hook of
+  // 0.3 and older) and moves a `conductore-hostd statusline` line to the sh
+  // statusline, keeping the command it wraps.
   const merged = settings.merge(current, hookBin)
-  const sl = statusline.merge(merged, hostdBinPath())
-  try { settings.writeSettings(sl.settings, file) } catch (err) { return fail(`cannot write ${file}: ${err.message}`) }
+  const sl = statusline.merge(merged, slBin)
+  const before = JSON.stringify(current)
+  if (JSON.stringify(sl.settings) !== before) {
+    try { settings.writeSettings(sl.settings, file) } catch (err) { return fail(`cannot write ${file}: ${err.message}`) }
+  }
   paths.ensureDirs()
-  return out({ ok: true, settings: file, hook: hookBin, events: settings.EVENTS, statusLine: sl.action })
+  try { recordNodePath() } catch (err) { return fail(`cannot write ${paths.nodePathFile()}: ${err.message}`) }
+  return out({ ok: true, settings: file, hook: hookBin, statusline: slBin, events: settings.EVENTS, statusLine: sl.action })
 }
 
 async function uninstall () {
+  const settings = settingsMod()
+  const statusline = statuslineMod()
   const file = settings.settingsPath()
   let current
   try { current = settings.readSettings(file) } catch (err) { return fail(err.message) }
@@ -349,13 +380,39 @@ async function stop () {
   }
 }
 
+const median = xs => xs.slice().sort((a, b) => a - b)[Math.floor(xs.length / 2)]
+
+// Wall time of one no-op hook event (no session_id, so the daemon drops it),
+// median of five runs, measured around the spawn.
+function hookLatencyMs (hookBin) {
+  const { spawnSync } = require('child_process')
+  const input = JSON.stringify({ hook_event_name: 'DoctorPing' }) + '\n'
+  const runs = []
+  for (let i = 0; i < 5; i++) {
+    const t0 = process.hrtime.bigint()
+    const r = spawnSync(hookBin, ['DoctorPing'], { input, stdio: ['pipe', 'ignore', 'ignore'], timeout: 5000 })
+    if (r.error || r.status !== 0) return null
+    runs.push(Number(process.hrtime.bigint() - t0) / 1e6)
+  }
+  return median(runs)
+}
+
 async function doctor () {
+  const settings = settingsMod()
+  const statusline = statuslineMod()
   const checks = []
   const add = (name, ok, detail) => checks.push({ name, ok, detail })
   const major = Number(process.versions.node.split('.')[0])
   add('node', major >= 18, `node ${process.versions.node} (need >= 18)`)
+  let recorded = null
+  try { recorded = fs.readFileSync(paths.nodePathFile(), 'utf8').trim() } catch {}
+  add('node for hooks', !!recorded && fs.existsSync(recorded), recorded ? `${recorded} (${paths.nodePathFile()})` : 'not recorded; run install')
   const hookBin = hookBinPath()
+  const slBin = statuslineBinPath()
   add('hook client', fs.existsSync(hookBin), hookBin)
+  add('statusline client', fs.existsSync(slBin), slBin)
+  const mkfifo = await run('sh', ['-c', 'command -v mkfifo'])
+  add('mkfifo', !mkfifo.err, mkfifo.err ? 'not found: permission prompts cannot wait for the phone' : mkfifo.stdout.trim())
   for (const bin of ['conductore-hostd', 'conductore-hook']) {
     const r = await run('sh', ['-c', `command -v ${bin}`])
     add(`${bin} on PATH`, !r.err, r.err ? 'not found in a non-login shell PATH (see README: SSH exec PATH)' : r.stdout.trim())
@@ -370,8 +427,16 @@ async function doctor () {
   try {
     const [res] = await client.request({ op: 'ping' }, { timeoutMs: 2000 })
     add('daemon', !!(res && res.ok), `pid ${res && res.pid}, seq ${res && res.seq}, ${paths.socketPath()}`)
+    if (res && typeof res.rss === 'number') {
+      add('daemon memory', true, `${(res.rss / 1048576).toFixed(1)} MB RSS, ${res.cpuMs} ms CPU in ${res.uptimeS} s, version ${res.version}`)
+    }
   } catch (err) {
     add('daemon', false, `not running (${err.code || err.message}); it starts on the next hook event`)
+  }
+  // After the ping: with no daemon, this starts one.
+  if (fs.existsSync(hookBin)) {
+    const ms = hookLatencyMs(hookBin)
+    add('hook latency', ms !== null, ms === null ? 'the hook client failed' : `${ms.toFixed(1)} ms per event (median of 5, no-op event)`)
   }
   try {
     const st = fs.statSync(paths.socketPath())
@@ -385,14 +450,27 @@ async function doctor () {
   add('herdr', !herdr.err, herdr.err ? 'not found (optional)' : herdr.stdout.trim().split('\n')[0])
   const claude = await run('claude', ['--version'])
   add('claude', !claude.err, claude.err ? 'not found on PATH' : claude.stdout.trim())
-  const ok = checks.filter(c => !c.ok && !['herdr', 'tmux', 'daemon', 'state file', 'claude', 'statusline (usage)'].includes(c.name)).length === 0
+  const optional = ['herdr', 'tmux', 'daemon', 'daemon memory', 'state file', 'claude', 'statusline (usage)', 'hook latency', 'node for hooks']
+  const ok = checks.filter(c => !c.ok && !optional.includes(c.name)).length === 0
   return out({ ok, user: os.userInfo().username, checks })
+}
+
+// `daemon`: runs the daemon in this process. `daemon --detach`: starts it in
+// the background with the memory flags and returns at once (what the sh
+// clients call).
+function daemonCmd (args) {
+  if (args.includes('--detach')) {
+    client.spawnDaemon()
+    return 0
+  }
+  require('./daemon').run()
+  return null
 }
 
 async function main (argv) {
   const [cmd, ...args] = argv
   switch (cmd) {
-    case 'daemon': require('./daemon').run(); return null
+    case 'daemon': return daemonCmd(args)
     case 'status': return status()
     case 'events': return events(args)
     case 'decide': return decide(args)
