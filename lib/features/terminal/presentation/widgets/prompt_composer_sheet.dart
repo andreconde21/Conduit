@@ -359,20 +359,27 @@ class _PromptComposerSheetState extends State<PromptComposerSheet> {
                             onSelected: (origin) =>
                                 unawaited(_attachImage(origin)),
                             itemBuilder: (context) => [
-                              const PopupMenuItem(
+                              PopupMenuItem(
                                 value: PromptImageOrigin.gallery,
                                 child: ListTile(
-                                  leading: Icon(Icons.photo_library_outlined),
-                                  title: Text('Gallery'),
+                                  leading: const Icon(
+                                    Icons.photo_library_outlined,
+                                  ),
+                                  title: Text(
+                                    PlatformFeatures.camera
+                                        ? 'Gallery'
+                                        : 'Image file',
+                                  ),
                                 ),
                               ),
-                              const PopupMenuItem(
-                                value: PromptImageOrigin.camera,
-                                child: ListTile(
-                                  leading: Icon(Icons.photo_camera_outlined),
-                                  title: Text('Camera'),
+                              if (PlatformFeatures.camera)
+                                const PopupMenuItem(
+                                  value: PromptImageOrigin.camera,
+                                  child: ListTile(
+                                    leading: Icon(Icons.photo_camera_outlined),
+                                    title: Text('Camera'),
+                                  ),
                                 ),
-                              ),
                               if (PlatformFeatures.clipboardImage)
                                 const PopupMenuItem(
                                   value: PromptImageOrigin.clipboard,

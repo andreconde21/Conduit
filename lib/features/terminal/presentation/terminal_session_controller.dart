@@ -17,6 +17,7 @@ import 'package:conduit/features/terminal/domain/security_key_interaction.dart';
 import 'package:conduit/features/terminal/domain/ssh_terminal_repository.dart';
 import 'package:conduit/features/terminal/domain/ssh_terminal_session.dart';
 import 'package:conduit/features/terminal/domain/terminal_string_sequence_filter.dart';
+import 'package:conduit/features/terminal/presentation/desktop_keyboard.dart';
 import 'package:conduit/features/terminal/presentation/terminal_keyboard_controller.dart';
 import 'package:conduit_vt/conduit_vt.dart';
 import 'package:flutter/foundation.dart';
@@ -37,8 +38,11 @@ class TerminalSessionController extends ChangeNotifier {
     this.startupCommand,
     bool predictiveEchoEnabled = false,
     TerminalEnterSequence enterSequence = TerminalEnterSequence.cr,
-  }) : keyboard = TerminalKeyboardController(defaultInputHandler),
-       terminal = Terminal(maxLines: 10000) {
+  }) : keyboard = TerminalKeyboardController(terminalInputHandlerForPlatform()),
+       terminal = Terminal(
+         maxLines: 10000,
+         platform: terminalTargetPlatform(),
+       ) {
     _predictiveEchoEnabled = predictiveEchoEnabled;
     _enterSequence = enterSequence;
     _configureTerminal();

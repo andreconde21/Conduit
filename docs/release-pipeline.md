@@ -9,8 +9,8 @@ prerelease with the sideload APKs. Wider audiences are a manual click
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| `ci.yml` | push to `main`, every PR, manual | `flutter analyze`, `flutter test --concurrency=2`, host companion `node --test`, `tools/bundle-companion.sh --check`, a debug APK (play flavor), an unsigned iOS release build on macOS. |
-| `release.yml` | tag `v*`, or manual | Runs the CI checks, then **Android**: signed AAB (play flavor) to Play `internal`; signed split APKs (full flavor) + `SHA256SUMS` on a GitHub prerelease; both checked by `tools/verify-release-build.py` against stale app code. **iOS**: signed IPA uploaded to TestFlight. |
+| `ci.yml` | push to `main`, every PR, manual | `flutter analyze`, `flutter test --concurrency=2`, host companion `node --test`, `tools/bundle-companion.sh --check`, a debug APK (play flavor), an unsigned iOS release build on macOS, and Linux / Windows / macOS desktop bundles (docs/desktop.md). |
+| `release.yml` | tag `v*`, or manual | Runs the CI checks, then **Android**: signed AAB (play flavor) to Play `internal`; signed split APKs (full flavor) + `SHA256SUMS` on a GitHub prerelease; both checked by `tools/verify-release-build.py` against stale app code. **iOS**: signed IPA uploaded to TestFlight. **Desktop**: Linux, Windows and unsigned macOS bundles attached to the same prerelease (docs/desktop.md). |
 | `promote.yml` | manual only | Play: internal → alpha (closed) → beta (open) → production, with staged rollout. iOS: TestFlight external group, or submit for App Store review. |
 
 A platform whose secrets are missing is skipped with a notice (`Android

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The App Sandbox is OFF: Conductore is a terminal. Inside the sandbox the
+  local shell (flutter_pty) would run with a container home and no access to
+  the user's files, ~/.ssh or Homebrew. Direct downloads may be unsandboxed;
+  only a Mac App Store build needs it. To turn it on, set app-sandbox to true:
+  the entitlements below then keep SSH/Mosh (network.client), the file
+  pickers and SFTP downloads (files.user-selected) working.
+
+  Keychain: no keychain-access-groups entitlement. It is restricted and an
+  ad-hoc signed build carrying it is killed at launch. flutter_secure_storage
+  uses the login keychain instead (lib/core/secure_storage.dart), which needs
+  no entitlement. See docs/desktop.md.
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<key>com.apple.security.network.server</key>
+	<true/>
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
+	<key>com.apple.security.files.downloads.read-write</key>
+	<true/>
+</dict>
+</plist>

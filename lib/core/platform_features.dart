@@ -1,14 +1,29 @@
 import 'package:flutter/foundation.dart';
 
-/// Features backed by Conductore's own Android platform channels
-/// (MainActivity and friends). iOS has no native side for them, so the UI
-/// hides them there instead of offering controls that silently do nothing.
+/// What the running platform can do, so the UI hides controls that would
+/// silently do nothing (or throw MissingPluginException) instead of offering
+/// them.
+///
+/// The first group is backed by Conductore's own Android platform channels
+/// (MainActivity and friends): iOS and the desktops have no native side for
+/// them. The second group follows the plugins' platform support
+/// (docs/desktop.md has the audit).
 ///
 /// Every getter reads [defaultTargetPlatform], so widget tests (which run as
 /// Android by default) keep exercising the Android UI, and a test can flip
-/// `debugDefaultTargetPlatformOverride` to check the iOS layout.
+/// `debugDefaultTargetPlatformOverride` to check the iOS or desktop layout.
 abstract final class PlatformFeatures {
   static bool get _android => defaultTargetPlatform == TargetPlatform.android;
+  static bool get _ios => defaultTargetPlatform == TargetPlatform.iOS;
+  static bool get _mobile => _android || _ios;
+
+  /// Linux, Windows or macOS: a mouse and a physical keyboard are assumed.
+  static bool get isDesktop => switch (defaultTargetPlatform) {
+    TargetPlatform.linux ||
+    TargetPlatform.windows ||
+    TargetPlatform.macOS => true,
+    _ => false,
+  };
 
   /// On-device dictation (`conduit/speech`).
   static bool get dictation => _android;
@@ -35,4 +50,32 @@ abstract final class PlatformFeatures {
   /// Foreground service that keeps sessions alive in the background
   /// (`conduit/background_keepalive`).
   static bool get backgroundKeepalive => _android;
+
+  /// The proot Linux environment of the local shell section (bundled
+  /// arm64 Android binaries). A desktop could run the user's own shell
+  /// through flutter_pty instead; that is not wired yet.
+  static bool get prootLocalShell => _android;
+
+  /// FIDO hardware security keys for `sk-` SSH keys: NFC (flutter_nfc_kit,
+  /// Android and iOS) and USB (`conduit/fido_usb`, Android). No desktop
+  /// transport yet, so desktops use regular OpenSSH keys.
+  static bool get hardwareSecurityKeys => _mobile;
+
+  /// Embedded web views (webview_flutter): Android, iOS and macOS
+  /// (WKWebView). Linux and Windows have no official implementation, so the
+  /// live preview and the HTML viewer open the system browser there.
+  static bool get embeddedWebView =>
+      _mobile || defaultTargetPlatform == TargetPlatform.macOS;
+
+  /// Biometric / device-credential app lock (local_auth): no Linux
+  /// implementation, so the lock is unavailable there.
+  static bool get appLock => defaultTargetPlatform != TargetPlatform.linux;
+
+  /// Taking a photo for a prompt (image_picker camera source). The desktop
+  /// image_picker implementations only pick files.
+  static bool get camera => _mobile;
+
+  /// Whether the on-screen pill toolbar and key rows show by default. A
+  /// desktop has a physical keyboard; the rows stay one toggle away.
+  static bool get touchKeyRowsByDefault => !isDesktop;
 }

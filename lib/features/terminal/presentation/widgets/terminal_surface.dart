@@ -4,6 +4,7 @@ import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/features/terminal/domain/terminal_link_detector.dart';
 import 'package:conduit/features/terminal/domain/terminal_path_detector.dart';
 import 'package:conduit/features/terminal/domain/terminal_remote_scroll.dart';
+import 'package:conduit/features/terminal/presentation/desktop_keyboard.dart';
 import 'package:conduit/features/terminal/presentation/terminal_session_controller.dart';
 import 'package:conduit_vt/conduit_vt.dart';
 import 'package:flutter/gestures.dart';
@@ -449,9 +450,11 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
     widget.onExitTmuxScrollMode();
   }
 
-  /// The terminal's shortcuts with paste routed to [_pasteClipboard].
+  /// The terminal's shortcuts (the desktop set on Linux, Windows and
+  /// macOS) with paste routed to [_pasteClipboard].
   static Map<ShortcutActivator, Intent> _imageAwareShortcuts() => {
-    for (final entry in defaultTerminalShortcuts.entries)
+    for (final entry
+        in (desktopTerminalShortcuts() ?? defaultTerminalShortcuts).entries)
       entry.key: entry.value is PasteTextIntent
           ? const _PasteClipboardIntent()
           : entry.value,
@@ -496,7 +499,7 @@ class _TerminalSurfaceState extends State<TerminalSurface> {
                   widget.session.terminal,
                   key: _viewKey,
                   shortcuts: widget.onPasteImage == null
-                      ? null
+                      ? desktopTerminalShortcuts()
                       : _imageAwareShortcuts(),
                   controller: _terminalController,
                   onTapUp: _handleTapUp,

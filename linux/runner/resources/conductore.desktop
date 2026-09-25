@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Conductore
+Comment=Terminal workspace for Claude Code, Herdr and tmux over SSH and Mosh
+# Edit both paths to where the bundle lives, then copy this file to
+# ~/.local/share/applications/ (see docs/desktop.md).
+Exec=/opt/conductore/conductore
+Icon=/opt/conductore/data/conductore.png
+Terminal=false
+Categories=Development;System;TerminalEmulator;Network;
+StartupWMClass=com.outsmartis.conductore

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/features/live_preview/data/preview_screen_capture.dart';
 import 'package:conduit/features/live_preview/domain/preview_screenshot.dart';
@@ -31,11 +32,17 @@ class LivePreviewView extends StatefulWidget {
     required this.onChangePort,
     this.createWebViewController = WebViewController.new,
     this.openExternal = _launchExternal,
+    this.embedded,
     this.onScreenshot,
     this.screenCapture = const PlatformPreviewScreenCapture(),
     this.annotate = showPreviewAnnotatePage,
     super.key,
   });
+
+  /// Whether the page renders inside the app. Null follows
+  /// [PlatformFeatures.embeddedWebView]; without a web view (Linux,
+  /// Windows) the forward still runs and the browser opens it.
+  final bool? embedded;
 
   final LivePreviewController controller;
   final AppPalette palette;
@@ -69,6 +76,7 @@ class LivePreviewView extends StatefulWidget {
 }
 
 class _LivePreviewViewState extends State<LivePreviewView> {
+  bool get _embedded => widget.embedded ?? PlatformFeatures.embeddedWebView;
   WebViewController? _webView;
   int? _loadedLocalPort;
   final _address = TextEditingController();
@@ -132,6 +140,9 @@ class _LivePreviewViewState extends State<LivePreviewView> {
     }
     _loadedLocalPort = url.port;
     _pageError = null;
+    if (!_embedded) {
+      return;
+    }
     final webView = _webView ??= _createWebView();
     if (widget.controller.viewport.userAgent == _userAgent) {
       unawaited(webView.loadRequest(url));
@@ -415,7 +426,8 @@ class _LivePreviewViewState extends State<LivePreviewView> {
                       ),
                   ],
                 ),
-                if (widget.onScreenshot != null)
+                // Without an embedded web view there is no page to capture.
+                if (widget.onScreenshot != null && _embedded)
                   IconButton(
                     tooltip: 'Screenshot to Claude',
                     iconSize: 19,
@@ -555,6 +567,24 @@ class _LivePreviewViewState extends State<LivePreviewView> {
           ],
         );
       case LivePreviewPhase.ready:
+        if (!_embedded) {
+          return _Notice(
+            icon: Icons.open_in_browser_rounded,
+            title: 'Preview ready on ${controller.url}',
+            message:
+                'This platform has no embedded web view. The forwarded '
+                'port works in any browser on this computer.',
+            palette: palette,
+            brightness: brightness,
+            actions: [
+              FilledButton.icon(
+                onPressed: _openInBrowser,
+                icon: const Icon(Icons.open_in_browser_rounded),
+                label: const Text('Open in browser'),
+              ),
+            ],
+          );
+        }
         final webView = _webView;
         if (webView == null) {
           return const SizedBox.shrink();

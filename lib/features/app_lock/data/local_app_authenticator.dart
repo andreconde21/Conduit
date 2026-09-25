@@ -14,6 +14,8 @@ class LocalAppAuthenticator implements AppAuthenticator {
       return await _localAuthentication.isDeviceSupported();
     } on PlatformException {
       return false;
+    } on MissingPluginException {
+      return false;
     }
   }
 

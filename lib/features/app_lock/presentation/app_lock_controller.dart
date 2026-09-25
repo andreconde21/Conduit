@@ -4,11 +4,16 @@ import 'package:flutter/foundation.dart';
 enum AppLockStatus { locked, checking, unlocked, unavailable }
 
 class AppLockController extends ChangeNotifier {
-  AppLockController(this._authenticator);
+  /// [enabled] false (a platform without device authentication, see
+  /// `PlatformFeatures.appLock`) starts unlocked and never locks, instead of
+  /// greeting every launch with "Continue without auth".
+  AppLockController(this._authenticator, {this.enabled = true})
+    : _status = enabled ? AppLockStatus.locked : AppLockStatus.unlocked;
 
   final AppAuthenticator _authenticator;
+  final bool enabled;
 
-  AppLockStatus _status = AppLockStatus.locked;
+  AppLockStatus _status;
   String? _message;
 
   AppLockStatus get status => _status;
@@ -76,6 +81,7 @@ class AppLockController extends ChangeNotifier {
   }
 
   void lock() {
+    if (!enabled) return;
     _status = AppLockStatus.locked;
     _message = null;
     notifyListeners();

@@ -2,7 +2,8 @@ name: Release
 
 # Builds Conductore for both stores and ships to the closed channels only:
 # Google Play internal testing, TestFlight internal testers, and a GitHub
-# prerelease with the sideload APKs. Promotion is manual (promote.yml).
+# prerelease with the sideload APKs and the desktop bundles (Linux, Windows,
+# unsigned macOS; docs/desktop.md). Promotion is manual (promote.yml).
 # Each platform skips itself with a notice while its secrets are missing.
 # Setup and secrets: docs/release-pipeline.md.
 
@@ -22,8 +23,9 @@ on:
       platforms:
         description: Platforms to build
         type: choice
-        options: [both, android, ios]
-        default: both
+        # both = the two phones; all = phones and desktops.
+        options: [all, both, android, ios, desktop]
+        default: all
       publish:
         description: Upload to Play internal / TestFlight (off = build and verify only)
         type: boolean
@@ -53,6 +55,7 @@ jobs:
       prerelease: ${{ steps.version.outputs.prerelease }}
       android: ${{ steps.version.outputs.android }}
       ios: ${{ steps.version.outputs.ios }}
+      desktop: ${{ steps.version.outputs.desktop }}
       publish: ${{ steps.version.outputs.publish }}
     steps:
       - uses: actions/checkout@v4
@@ -63,7 +66,7 @@ jobs:
         env:
           INPUT_VERSION: ${{ inputs.version }}
           INPUT_BUILD_NUMBER: ${{ inputs.build_number }}
-          INPUT_PLATFORMS: ${{ inputs.platforms || 'both' }}
+          INPUT_PLATFORMS: ${{ inputs.platforms || 'all' }}
           INPUT_PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
           BUILD_NUMBER_OFFSET: ${{ vars.BUILD_NUMBER_OFFSET || '100' }}
           RUN_NUMBER: ${{ github.run_number }}
@@ -97,9 +100,14 @@ jobs:
             exit 1
           fi
 
-          android=false; ios=false
-          [[ "${INPUT_PLATFORMS}" == both || "${INPUT_PLATFORMS}" == android ]] && android=true
-          [[ "${INPUT_PLATFORMS}" == both || "${INPUT_PLATFORMS}" == ios ]] && ios=true
+          android=false; ios=false; desktop=false
+          case "${INPUT_PLATFORMS}" in
+            all) android=true; ios=true; desktop=true ;;
+            both) android=true; ios=true ;;
+            android) android=true ;;
+            ios) ios=true ;;
+            desktop) desktop=true ;;
+          esac
           prerelease=false
           [[ "${version}" == *-* ]] && prerelease=true
 
@@ -111,6 +119,7 @@ jobs:
             echo "prerelease=${prerelease}"
             echo "android=${android}"
             echo "ios=${ios}"
+            echo "desktop=${desktop}"
             echo "publish=${INPUT_PUBLISH}"
           } >> "${GITHUB_OUTPUT}"
           {
@@ -121,6 +130,7 @@ jobs:
             echo "| Android versionName | \`${version}\` |"
             echo "| Android versionCode (AAB) | \`${build}\` |"
             echo "| iOS version / build | \`${ios_version}\` / \`${build}\` |"
+            echo "| Desktop bundles | ${desktop} |"
             echo "| Publish | ${INPUT_PUBLISH} |"
           } >> "${GITHUB_STEP_SUMMARY}"
 
@@ -436,3 +446,151 @@ jobs:
       - name: Remove signing material
         if: always()
         run: rm -f build/ios/asc-api-key.p8 build/ios/distribution.p12
+
+  desktop:
+    name: Desktop (${{ matrix.target }})
+    needs: [prepare, checks]
+    if: ${{ needs.prepare.outputs.desktop == 'true' }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux
+            os: ubuntu-latest
+            asset: linux-x64.tar.gz
+          - target: windows
+            os: windows-latest
+            asset: windows-x64.zip
+          - target: macos
+            os: macos-latest
+            asset: macos.zip
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      # Windows file versions and macOS CFBundleShortVersionString are
+      # numeric: the -conductore.N suffix stays in the asset name only.
+      PLAIN_VERSION: ${{ needs.prepare.outputs.ios_version }}
+      BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the Linux desktop toolchain
+        if: matrix.target == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev libsecret-1-dev libstdc++-12-dev
+
+      - name: Select the newest stable Xcode
+        if: matrix.target == 'macos'
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="${VERSION}"
+          [[ "${{ matrix.target }}" == linux ]] || name="${PLAIN_VERSION}"
+          flutter build "${{ matrix.target }}" --release \
+            --build-name "${name}" --build-number "${BUILD_NUMBER}"
+
+      - name: Package (Linux)
+        if: matrix.target == 'linux'
+        run: |
+          mkdir -p dist
+          tar -C build/linux/x64/release --transform 's,^bundle,conductore,' \
+            -czf "dist/conductore-v${VERSION}-${{ matrix.asset }}" bundle
+
+      - name: Package (Windows)
+        if: matrix.target == 'windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist, stage | Out-Null
+          Copy-Item -Recurse build/windows/x64/runner/Release stage/conductore
+          Compress-Archive -Path stage/conductore -DestinationPath "dist/conductore-v${env:VERSION}-${{ matrix.asset }}"
+
+      - name: Package (macOS)
+        if: matrix.target == 'macos'
+        run: |
+          mkdir -p dist
+          app=build/macos/Build/Products/Release/Conductore.app
+          codesign --verify --verbose=2 "${app}"
+          ditto -c -k --sequesterRsrc --keepParent "${app}" "dist/conductore-v${VERSION}-${{ matrix.asset }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.target }}-${{ env.VERSION }}-${{ env.BUILD_NUMBER }}
+          path: dist/
+          retention-days: 30
+
+  desktop-publish:
+    name: Attach desktop bundles to the prerelease
+    # After the Android job, which creates the release when its secrets are
+    # set; without them this job creates it.
+    needs: [prepare, android, desktop]
+    if: >-
+      ${{ !cancelled() && needs.prepare.outputs.desktop == 'true'
+      && needs.prepare.outputs.publish == 'true' && needs.prepare.outputs.tag != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          path: dist
+          merge-multiple: true
+
+      - name: Upload the bundles and note them in the release
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(dist/conductore-*)
+          if (( ${#files[@]} == 0 )); then
+            echo "::warning title=No desktop bundles::Every desktop build failed; nothing to attach."
+            exit 0
+          fi
+          (cd dist && sha256sum conductore-* > "SHA256SUMS-desktop-v${VERSION}.txt")
+          cat "dist/SHA256SUMS-desktop-v${VERSION}.txt"
+          {
+            echo ""
+            echo "### Desktop test builds"
+            echo ""
+            echo "Unsigned, for testing (docs/desktop.md). macOS: right-click Conductore.app > Open the first time (Gatekeeper). Windows: SmartScreen > More info > Run anyway. Linux: needs GTK 3 and libsecret."
+            echo ""
+            echo '```'
+            cat "dist/SHA256SUMS-desktop-v${VERSION}.txt"
+            echo '```'
+          } > desktop-notes.md
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release view "${TAG}" --json body -q .body > notes.md
+            cat desktop-notes.md >> notes.md
+            gh release edit "${TAG}" --notes-file notes.md
+          else
+            flags=()
+            [[ "${PRERELEASE}" == true ]] && flags+=(--prerelease)
+            gh release create "${TAG}" "${flags[@]}" --verify-tag \
+              --title "Conductore ${VERSION}" --notes-file desktop-notes.md
+          fi
+          gh release upload "${TAG}" --clobber "${files[@]}" "dist/SHA256SUMS-desktop-v${VERSION}.txt"

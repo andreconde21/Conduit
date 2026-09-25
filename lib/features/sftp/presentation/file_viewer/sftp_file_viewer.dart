@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:conduit/core/platform_features.dart';
 import 'package:conduit/core/theme/app_palette.dart';
 import 'package:conduit/features/sftp/domain/remote_file_kind.dart';
 import 'package:conduit/features/sftp/presentation/file_viewer/code_file_editor.dart';
@@ -50,7 +51,8 @@ class SftpFileViewerState extends State<SftpFileViewer> {
   String? _error;
   double? _progress;
   bool _binary = false;
-  bool _htmlPreview = true;
+  // No embedded web view on Linux and Windows: HTML opens as source there.
+  bool _htmlPreview = PlatformFeatures.embeddedWebView;
   bool _saving = false;
   bool _dirty = false;
   bool _hasSaved = false;
@@ -210,7 +212,8 @@ class SftpFileViewerState extends State<SftpFileViewer> {
       brightness: widget.brightness,
       htmlPreview: _htmlPreview,
       onToggleHtmlPreview:
-          _kind == RemoteFileKind.html &&
+          PlatformFeatures.embeddedWebView &&
+              _kind == RemoteFileKind.html &&
               _status == _ViewerStatus.ready &&
               !_binary
           ? () => setState(() => _htmlPreview = !_htmlPreview)
