@@ -408,28 +408,31 @@ class MarkdownTableView extends StatelessWidget {
                 child: SizedBox(width: natural, child: tableWidget),
               );
         if (fullScreen) return sized;
-        return GestureDetector(
-          onTap: () => openFullScreen(context),
-          child: Stack(
-            children: [
-              sized,
-              Positioned(
-                top: 2,
-                right: 2,
-                child: IconButton(
-                  key: const ValueKey('markdown-table-expand'),
-                  tooltip: 'Open table',
+        // The expand control sits in a caption bar under the table, never
+        // over a cell (it used to cover the last header's text).
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            GestureDetector(onTap: () => openFullScreen(context), child: sized),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                key: const ValueKey('markdown-table-expand'),
+                onPressed: () => openFullScreen(context),
+                style: TextButton.styleFrom(
                   visualDensity: VisualDensity.compact,
-                  iconSize: 16,
-                  onPressed: () => openFullScreen(context),
-                  icon: Icon(
-                    Icons.open_in_full_rounded,
-                    color: scheme.onSurfaceVariant,
-                  ),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  minimumSize: const Size(0, 28),
+                  foregroundColor: scheme.onSurfaceVariant,
+                  textStyle: theme.textTheme.labelSmall,
                 ),
+                icon: const Icon(Icons.open_in_full_rounded, size: 14),
+                label: const Text('Open table'),
               ),
-            ],
-          ),
+            ),
+          ],
         );
       },
     );

@@ -157,4 +157,22 @@ void main() {
     expect(find.text('Table · 1 row'), findsOneWidget);
     expect(find.byKey(const ValueKey('markdown-table-full')), findsOneWidget);
   });
+
+  testWidgets('the expand control sits below the table, over no cell', (
+    tester,
+  ) async {
+    await pump(
+      tester,
+      '| Name | Kind | Size |\n|---|---|---|\n| a.txt | file | 12 KB |',
+      600,
+    );
+    final table = tester.getRect(find.byKey(const ValueKey('markdown-table')));
+    final expand = tester.getRect(
+      find.byKey(const ValueKey('markdown-table-expand')),
+    );
+    final lastHeader = tester.getRect(find.text('Size', findRichText: true));
+    expect(expand.top, greaterThanOrEqualTo(table.bottom));
+    expect(expand.overlaps(lastHeader), isFalse);
+    expect(expand.right, lessThanOrEqualTo(table.right + 0.5));
+  });
 }
