@@ -910,6 +910,26 @@ class _TerminalPageState extends State<TerminalPage> {
     return herdr.controlFor(session);
   }
 
+  /// Enters copy mode for a one-finger drag on a tmux or Herdr session
+  /// whose screen offers no other way into history (tmux without `mouse
+  /// on`): the two-finger scrollback's keys, then the scroll-mode state.
+  /// Null for plain shells, where such a drag sends arrow keys.
+  VoidCallback? _dragScrollModeEntry(TerminalSessionController session) {
+    final target = _gestureTargetFor(session);
+    if (target == null) {
+      return null;
+    }
+    return () {
+      TerminalGestureCommands(
+        session,
+        target,
+        herdr: _herdrControlFor(session),
+      ).enterScrollback();
+      setState(() => _tmuxScrollMode = true);
+      _focusNode.requestFocus();
+    };
+  }
+
   /// The multiplexer a session's gestures drive: the one it was opened on
   /// (a host that starts tmux on connect is a tmux session too), or null
   /// (the Gestures preference) for plain shells.
@@ -1272,6 +1292,13 @@ class _TerminalPageState extends State<TerminalPage> {
                                           );
                                           _focusNode.requestFocus();
                                         },
+                                        dragScrollsRemote: widget
+                                            .themeController
+                                            .terminalGestures
+                                            .dragScrollsRemote,
+                                        onEnterScrollMode: _dragScrollModeEntry(
+                                          session,
+                                        ),
                                         onPathTap: (path) =>
                                             _handlePathTap(session, path),
                                         onLinkTap: (url) =>
