@@ -7,6 +7,7 @@ import 'package:conduit/features/hosts/presentation/hosts_controller.dart';
 import 'package:conduit/features/sessions/domain/session_snapshot.dart';
 import 'package:conduit/features/snippets/domain/terminal_snippet.dart';
 import 'package:conduit/features/sync/data/app_settings_codec.dart';
+import 'package:conduit/features/sync/domain/local_data_changes.dart';
 import 'package:conduit/features/sync/domain/local_sync_store.dart';
 import 'package:conduit/features/sync/domain/sync_category.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
@@ -68,6 +69,7 @@ class AppLocalSyncStore implements LocalSyncStore {
     required this.sessions,
     this.recentDirectories,
     this.ready,
+    this.changes,
   });
 
   final HostsController hosts;
@@ -84,6 +86,10 @@ class AppLocalSyncStore implements LocalSyncStore {
 
   /// Completes once the app's settings are loaded.
   final Future<void>? ready;
+
+  /// Told after every [apply] that wrote something, so live pages reload
+  /// what they cached (imports and sync pulls).
+  final LocalDataChanges? changes;
 
   static const _hostSecretFields = ['password', 'privateKey', 'passphrase'];
   static const _hubLoginFields = ['authMethod', 'externalAuthOfferKey'];
@@ -221,6 +227,19 @@ class AppLocalSyncStore implements LocalSyncStore {
     bool replace = true,
   }) async {
     await _whenLoaded();
+    try {
+      await _apply(values, changedKeys, options, replace: replace);
+    } finally {
+      if (changedKeys.isNotEmpty) changes?.announce(changedKeys);
+    }
+  }
+
+  Future<void> _apply(
+    Map<String, Object?> values,
+    Set<String> changedKeys,
+    LocalSyncOptions options, {
+    required bool replace,
+  }) async {
     final on = options.categories;
     bool changed(bool Function(String key) test) => changedKeys.any(test);
 

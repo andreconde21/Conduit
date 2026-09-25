@@ -51,6 +51,7 @@ import 'package:conduit/features/share_target/presentation/share_target_scope.da
 import 'package:conduit/features/sync/data/app_local_sync_store.dart';
 import 'package:conduit/features/sync/data/ssh_sync_hub.dart';
 import 'package:conduit/features/sync/data/sync_state_store.dart';
+import 'package:conduit/features/sync/domain/local_data_changes.dart';
 import 'package:conduit/features/sync/presentation/sync_controller.dart';
 import 'package:conduit/features/sync/presentation/sync_scope.dart';
 import 'package:conduit/features/terminal/data/connectivity_plus_network.dart';
@@ -203,6 +204,9 @@ void main() {
   themeController.addListener(
     () => sessionRestore.enabled = themeController.restoreSessionsOnLaunch,
   );
+  // Backup imports and sync pulls announce here; the home page reloads
+  // what it cached (trusted keys, machine filter) and its boards.
+  final localDataChanges = LocalDataChanges();
   // This device's data as sync records: file backups and device sync
   // (Settings › Sync) read and write the app through it.
   final localSyncStore = AppLocalSyncStore(
@@ -220,12 +224,14 @@ void main() {
     recentDirectories: recentDirectories,
     sessions: const SecureSessionSnapshotRepository(secureStorage),
     ready: themeLoaded,
+    changes: localDataChanges,
   );
   final backupService = AppBackupService(
     hostsController: hostsController,
     themeController: themeController,
     hostKeyVerifier: hostKeyVerifier,
     localStore: localSyncStore,
+    changes: localDataChanges,
   );
   // Settings › Sync: this device's data, end-to-end encrypted, through
   // one saved machine (the hub) over the same SSH/SFTP stack.
@@ -285,6 +291,7 @@ void main() {
               connectFlow: connectFlow,
               shareTarget: shareTarget,
               sessionRestore: sessionRestore,
+              localDataChanges: localDataChanges,
             ),
           ),
         ),
@@ -311,6 +318,7 @@ class ConduitApp extends StatefulWidget {
     this.connectFlow,
     this.shareTarget,
     this.sessionRestore,
+    this.localDataChanges,
     super.key,
   });
 
@@ -332,6 +340,9 @@ class ConduitApp extends StatefulWidget {
   /// Share-to-agent flow; null disables the Android share target.
   final ShareTargetController? shareTarget;
   final SessionRestoreController? sessionRestore;
+
+  /// Backup imports and sync pulls, for the pages that cache saved data.
+  final LocalDataChanges? localDataChanges;
 
   @override
   State<ConduitApp> createState() => _ConduitAppState();
@@ -567,6 +578,7 @@ class _ConduitAppState extends State<ConduitApp> with WidgetsBindingObserver {
                 fileExport: widget.fileExport,
                 connectFlow: widget.connectFlow,
                 sessionRestore: widget.sessionRestore,
+                localDataChanges: widget.localDataChanges,
               );
               return _wrapShareTargetHost(
                 AgentStatusLaunchListener(

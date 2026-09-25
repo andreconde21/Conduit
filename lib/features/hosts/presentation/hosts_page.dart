@@ -44,6 +44,7 @@ import 'package:conduit/features/sftp/domain/file_export.dart';
 import 'package:conduit/features/sftp/domain/sftp_bookmarks_repository.dart';
 import 'package:conduit/features/sftp/domain/sftp_repository.dart';
 import 'package:conduit/features/sftp/presentation/sftp_browser_page.dart';
+import 'package:conduit/features/sync/domain/local_data_changes.dart';
 import 'package:conduit/features/sync/presentation/sync_scope.dart';
 import 'package:conduit/features/terminal/domain/host_key_prompt.dart';
 import 'package:conduit/features/terminal/domain/host_key_verifier.dart';
@@ -85,6 +86,7 @@ class HostsPage extends StatefulWidget {
     this.connectFlow,
     this.homeBoards,
     this.sessionRestore,
+    this.localDataChanges,
     this.homePreferences = const SecureHomePreferencesRepository(
       conductoreSecureStorage,
     ),
@@ -122,6 +124,10 @@ class HostsPage extends StatefulWidget {
 
   /// Remembers the machine filter and the view modes.
   final HomePreferencesRepository homePreferences;
+
+  /// Backup imports and sync pulls: the page reloads what it cached
+  /// (trusted keys, machine filter) and rebuilds the home boards.
+  final LocalDataChanges? localDataChanges;
 
   /// How often session previews are re-captured while visible.
   final Duration previewRefreshInterval;
@@ -197,6 +203,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     widget.workspaceController.addListener(_syncBoards);
     flow?.terminalRequests.addListener(_handleTerminalRequest);
     widget.sessionRestore?.addListener(_handleRestoreChanged);
+    widget.localDataChanges?.addListener(_handleLocalDataChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // The page exists only while unlocked: this is the app start (or the
       // unlock after a lock) the saved sessions come back on.
@@ -240,6 +247,7 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
     widget.workspaceController.removeListener(_syncBoards);
     widget.connectFlow?.terminalRequests.removeListener(_handleTerminalRequest);
     widget.sessionRestore?.removeListener(_handleRestoreChanged);
+    widget.localDataChanges?.removeListener(_handleLocalDataChanged);
     widget.sessionRestore?.setHomeVisible(false);
     widget.promptCoordinator.removeListener(_handlePromptChanged);
     widget.promptCoordinator.rejectAll();
@@ -270,6 +278,31 @@ class _HostsPageState extends State<HostsPage> with WidgetsBindingObserver {
 
   void _handleRestoreChanged() {
     if (mounted) setState(() {});
+  }
+
+  /// A backup import or a sync pull replaced saved data behind the page:
+  /// the machines are already live (HostsController), but the trusted host
+  /// keys and the machine filter were read at start. Imported machines have
+  /// no last-connected time, so without their trusted keys their boards
+  /// waited for a tap until the app restarted.
+  void _handleLocalDataChanged() {
+    if (mounted) unawaited(_reloadAfterDataChange());
+  }
+
+  Future<void> _reloadAfterDataChange() async {
+    await _loadPreferences();
+    if (!mounted) return;
+    // A selection naming only machines that are gone falls back to "All";
+    // store that, so the next import does not bring the old one back.
+    final stored = _preferences.machineFilter;
+    final valid = MachineFilter(stored).validFor(widget.hostsController.hosts);
+    if (valid.keys.length != stored.length) {
+      _savePreferences(_preferences.copyWith(machineFilter: valid.keys));
+    }
+    await _loadTrustedEndpoints();
+    if (!mounted) return;
+    _syncBoards();
+    unawaited(_boards?.refresh());
   }
 
   void _syncVisibility() {
