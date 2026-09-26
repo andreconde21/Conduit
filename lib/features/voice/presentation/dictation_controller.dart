@@ -133,6 +133,11 @@ class DictationController extends ChangeNotifier {
   /// How long a stop waits for the recognizer's final result.
   static const _finishTimeout = Duration(seconds: 3);
 
+  /// The controller that last started a session. Every controller shares
+  /// the one platform recognizer and its event stream, so a chat's own
+  /// dictation and the terminal's under it must never listen at once.
+  static DictationController? _current;
+
   DictationStatus _status = DictationStatus.idle;
   bool _available = true;
   bool _permissionDenied = false;
@@ -207,6 +212,13 @@ class DictationController extends ChangeNotifier {
   Future<void> start(DictationSink sink, {DictationOptions? options}) async {
     if (_status != DictationStatus.idle) {
       return;
+    }
+    final other = _current;
+    _current = this;
+    if (other != null && !identical(other, this) && other.isActive) {
+      // Keeps what the other session heard, in its own field.
+      await other.cancel();
+      if (_disposed || _status != DictationStatus.idle) return;
     }
     Telemetry.instance.track(
       TelemetryEvent.voiceUsed(TelemetryVoice.dictation),
@@ -524,6 +536,7 @@ class DictationController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    if (identical(_current, this)) _current = null;
     _ticker?.cancel();
     _finishTimer?.cancel();
     unawaited(_subscription?.cancel());
