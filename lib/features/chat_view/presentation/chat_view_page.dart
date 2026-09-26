@@ -20,7 +20,9 @@ import 'package:conduit/features/terminal/data/platform_prompt_image_source.dart
 import 'package:conduit/features/terminal/domain/clipboard_image_paste.dart';
 import 'package:conduit/features/terminal/domain/prompt_image.dart';
 import 'package:conduit/features/terminal/presentation/widgets/prompt_composer_sheet.dart';
+import 'package:conduit/features/voice/data/platform_speech_recognizer.dart';
 import 'package:conduit/features/voice/data/platform_text_to_speech.dart';
+import 'package:conduit/features/voice/domain/speech_recognizer.dart';
 import 'package:conduit/features/voice/domain/text_to_speech.dart';
 import 'package:conduit/features/voice/domain/voice_preferences.dart';
 import 'package:conduit/features/voice/presentation/dictation_controller.dart';
@@ -38,6 +40,7 @@ class ChatViewPage extends StatefulWidget {
     required this.onOpenTerminal,
     this.hostName,
     this.dictation,
+    this.speechRecognizer,
     this.ownsController = true,
     this.onSetUpCompanion,
     this.onEnableMonitoring,
@@ -55,7 +58,15 @@ class ChatViewPage extends StatefulWidget {
   /// Leaves the chat for the full TUI of the same session.
   final VoidCallback onOpenTerminal;
   final String? hostName;
+
+  /// The opener's dictation (the terminal's), so one recognizer serves
+  /// both. Null: the page makes its own from [speechRecognizer], so the mic
+  /// and Talk are there however the chat was opened.
   final DictationController? dictation;
+
+  /// Backs the page's own dictation when [dictation] is null; defaults to
+  /// the on-device recognizer where there is one (tests inject one).
+  final SpeechRecognizer? speechRecognizer;
 
   /// Disposes [controller] with the page.
   final bool ownsController;
@@ -115,6 +126,11 @@ class _ChatViewPageState extends State<ChatViewPage>
   Timer? _clock;
   ReadAloudController? _readAloud;
 
+  /// Made and disposed here when the opener passed no dictation.
+  DictationController? _ownDictation;
+
+  DictationController? get _dictation => widget.dictation ?? _ownDictation;
+
   /// The hands-free Talk loop; null without dictation or speech.
   TalkController? _talk;
   String? _talkMessageShown;
@@ -140,6 +156,18 @@ class _ChatViewPageState extends State<ChatViewPage>
       ..track(const TelemetryEvent.chatModeOpened());
     _chat.setVisible(true);
     _chat.addListener(_stickToBottom);
+    if (widget.dictation == null) {
+      final recognizer =
+          widget.speechRecognizer ??
+          (PlatformFeatures.dictation ? PlatformSpeechRecognizer() : null);
+      if (recognizer != null) {
+        _ownDictation = DictationController(
+          recognizer,
+          language: () => _settings?.speechLanguage ?? '',
+        );
+        unawaited(_ownDictation!.checkAvailability());
+      }
+    }
     final tts =
         widget.textToSpeech ??
         (PlatformFeatures.textToSpeech ? PlatformTextToSpeech() : null);
@@ -156,8 +184,8 @@ class _ChatViewPageState extends State<ChatViewPage>
       )..addListener(_onSpeakerChanged);
       unawaited(_readAloud!.checkAvailability());
       _chat.addListener(_feedReadAloud);
-      widget.dictation?.addListener(_syncDictation);
-      final dictation = widget.dictation;
+      _dictation?.addListener(_syncDictation);
+      final dictation = _dictation;
       if (dictation != null) {
         _talk = TalkController(
           dictation: dictation,
@@ -258,7 +286,7 @@ class _ChatViewPageState extends State<ChatViewPage>
   }
 
   void _syncDictation() {
-    _readAloud?.suppressed = widget.dictation?.isActive ?? false;
+    _readAloud?.suppressed = _dictation?.isActive ?? false;
   }
 
   void _toggleReadAloud() {
@@ -372,10 +400,11 @@ class _ChatViewPageState extends State<ChatViewPage>
     WidgetsBinding.instance.removeObserver(this);
     _chat.removeListener(_feedReadAloud);
     _chat.removeListener(_stickToBottom);
-    widget.dictation?.removeListener(_syncDictation);
+    _dictation?.removeListener(_syncDictation);
     _talk
       ?..removeListener(_onTalkChanged)
       ..dispose();
+    _ownDictation?.dispose();
     _readAloud
       ?..removeListener(_onSpeakerChanged)
       ..dispose();
@@ -497,7 +526,7 @@ class _ChatViewPageState extends State<ChatViewPage>
       isConnected: () => _chat.canSend,
       // `send` pastes multiline text as one bracketed paste on the host.
       bracketedPasteSupported: () => true,
-      dictation: widget.dictation,
+      dictation: _dictation,
       imageAttacher: widget.imageAttacher,
       pasteImages: widget.pasteImages,
     ).whenComplete(() => setDraft(draft));
@@ -731,7 +760,7 @@ class _ChatViewPageState extends State<ChatViewPage>
     onSend: _send,
     onInterrupt: _chat.interrupt,
     onExpand: _openComposer,
-    dictation: widget.dictation,
+    dictation: _dictation,
     onPasteImage: widget.imageAttacher != null && widget.pasteImages
         ? () => unawaited(_pasteImage())
         : null,
